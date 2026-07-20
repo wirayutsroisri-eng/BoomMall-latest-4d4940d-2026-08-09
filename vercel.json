@@ -1,7 +1,4 @@
 {
-    "cleanUrls": true,
-    "rewrites": [
-      { "source": "/(.*)", "destination": "/client/dist/$1" }
-    ]
+    "framework": "vite"
   }
   
