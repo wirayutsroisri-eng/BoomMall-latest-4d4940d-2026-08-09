@@ -1,0 +1,167 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1780831673309,
+      "tag": "0000_illegal_luminals",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1781577478667,
+      "tag": "0001_white_lord_tyger",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1782632083285,
+      "tag": "0002_military_black_queen",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1782633476884,
+      "tag": "0003_useful_manta",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1782633844195,
+      "tag": "0004_lively_grandmaster",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1782637491435,
+      "tag": "0005_famous_franklin_richards",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1783128508820,
+      "tag": "0006_gray_tomas",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1783134717984,
+      "tag": "0007_slim_titania",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1783143315563,
+      "tag": "0008_productive_jack_murdock",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1783147844052,
+      "tag": "0009_quick_mister_fear",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1783149589315,
+      "tag": "0010_amusing_daimon_hellstrom",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1783153146828,
+      "tag": "0011_famous_proteus",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1783160426614,
+      "tag": "0012_sweet_lifeguard",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1783166548055,
+      "tag": "0013_daffy_betty_brant",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1783243576009,
+      "tag": "0014_last_colleen_wing",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "5",
+      "when": 1783251684935,
+      "tag": "0015_chilly_vivisector",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "5",
+      "when": 1783260846372,
+      "tag": "0016_nebulous_jack_flag",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "5",
+      "when": 1783260896984,
+      "tag": "0017_gifted_zeigeist",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "5",
+      "when": 1783260955549,
+      "tag": "0018_tired_proemial_gods",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1783302849198,
+      "tag": "0019_aberrant_jazinda",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1784080958181,
+      "tag": "0020_useful_arachne",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "5",
+      "when": 1784169105185,
+      "tag": "0021_nervous_dark_beast",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "5",
+      "when": 1784344106815,
+      "tag": "0022_bored_violations",
+      "breakpoints": true
+    }
+  ]
+}

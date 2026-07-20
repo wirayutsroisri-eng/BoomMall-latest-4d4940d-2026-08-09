@@ -1,0 +1,1 @@
+ALTER TABLE `products` ADD `deliveryDays` int DEFAULT 3 NOT NULL;

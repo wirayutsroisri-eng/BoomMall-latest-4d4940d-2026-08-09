@@ -1,0 +1,1 @@
+ALTER TABLE `products` ADD `promptpayNumber` varchar(20);
