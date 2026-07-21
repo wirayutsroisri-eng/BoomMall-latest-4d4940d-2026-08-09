@@ -24,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { prepareImageForUpload, type PreparedImageUpload, ImageUploadError } from "@/lib/imageUpload";
+import { MAX_IMAGE_UPLOAD_BYTES, formatUploadLimit } from "@shared/upload-limits";
 import { Link } from "wouter";
 import { toast } from "sonner";
 import { useRef, useState } from "react";
@@ -500,7 +501,7 @@ export default function SellerDashboardPage() {
               >
                 <Upload className="w-8 h-8" />
                 <span className="text-sm">กดเพื่อเลือกรูปสลิป</span>
-                <span className="text-xs">JPG, PNG ไม่เกิน 10MB</span>
+                <span className="text-xs">JPG, PNG ไม่เกิน {formatUploadLimit(MAX_IMAGE_UPLOAD_BYTES)}</span>
               </button>
             )}
           </div>

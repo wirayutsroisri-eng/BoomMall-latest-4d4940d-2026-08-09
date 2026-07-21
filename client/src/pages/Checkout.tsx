@@ -24,6 +24,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { prepareImageForUpload, type PreparedImageUpload, ImageUploadError } from "@/lib/imageUpload";
+import { MAX_IMAGE_UPLOAD_BYTES, formatUploadLimit } from "@shared/upload-limits";
 import { Link, useLocation, useParams } from "wouter";
 import { getLoginUrl } from "@/const";
 import { cn } from "@/lib/utils";
@@ -754,7 +755,7 @@ export default function CheckoutPage() {
               >
                 <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground/30" />
                 <p className="text-sm text-muted-foreground">กดเพื่อเลือกรูปสลิป</p>
-                <p className="text-xs text-muted-foreground/60 mt-1">JPG, PNG ไม่เกิน 10MB</p>
+                <p className="text-xs text-muted-foreground/60 mt-1">JPG, PNG ไม่เกิน {formatUploadLimit(MAX_IMAGE_UPLOAD_BYTES)}</p>
               </button>
             )}
           </div>

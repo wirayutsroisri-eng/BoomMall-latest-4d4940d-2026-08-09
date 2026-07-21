@@ -13,7 +13,7 @@ import { toast } from "sonner";
 import { Link, useSearch } from "wouter";
 import { LISTING_TYPE_LABELS } from "@shared/types";
 import { normalizeWholesalePriceTiers, WholesalePriceTierError } from "@shared/wholesale-pricing";
-import { MAX_VIDEO_UPLOAD_BYTES, formatUploadLimit } from "@shared/upload-limits";
+import { MAX_IMAGE_UPLOAD_BYTES, MAX_VIDEO_UPLOAD_BYTES, formatUploadLimit } from "@shared/upload-limits";
 import { fileToBase64Raw, prepareImageForUpload } from "@/lib/imageUpload";
 import { getUploadErrorMessage } from "@/lib/uploadErrors";
 
@@ -460,7 +460,7 @@ export default function SellPage() {
                 className="hidden"
                 onChange={(e) => e.target.files && handleImageUpload(e.target.files)}
               />
-              <p className="text-xs text-muted-foreground">อัปโหลดได้สูงสุด 10 รูป, ขนาดไม่เกิน 10MB ต่อรูป (บีบอัดอัตโนมัติ)</p>
+              <p className="text-xs text-muted-foreground">อัปโหลดได้สูงสุด 10 รูป, ขนาดไม่เกิน {formatUploadLimit(MAX_IMAGE_UPLOAD_BYTES)} ต่อรูป (บีบอัดอัตโนมัติ)</p>
             </CardContent>
           </Card>
 

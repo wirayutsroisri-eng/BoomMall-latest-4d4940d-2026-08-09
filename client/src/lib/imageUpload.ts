@@ -94,7 +94,7 @@ function updateFilenameExtension(filename: string, contentType: string): string 
   return `${base}.jpg`;
 }
 
-/** Compress large photos client-side, then validate against maxBytes (default 10MB). */
+/** Compress large photos client-side, then validate against maxBytes (default 25MB). */
 export async function prepareImageForUpload(
   file: File,
   options?: { maxBytes?: number; skipCompression?: boolean }
