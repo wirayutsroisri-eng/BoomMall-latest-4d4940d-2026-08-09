@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useImageEditorModal } from "@/components/ImageEditorModal";
 import { toast } from "sonner";
 import { Link } from "wouter";
 import { ArrowLeft, CreditCard, QrCode, Save } from "lucide-react";
@@ -30,6 +31,7 @@ const THAI_BANKS = [
 
 export default function PaymentSettingsPage() {
   const { isAuthenticated } = useAuth();
+  const { openImageEditor, imageEditorModal } = useImageEditorModal();
   const { data, isLoading } = trpc.kyc.getPaymentDefaults.useQuery(undefined, {
     enabled: isAuthenticated,
   });
@@ -68,7 +70,15 @@ export default function PaymentSettingsPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const prepared = await prepareImageForUpload(file);
+      const editedFile = await openImageEditor(file, {
+        title: "แต่งรูป QR Code",
+        description: "ครอป ปรับมุม และจัดอัตราส่วนก่อนบันทึก QR Code",
+        aspectOptions: ["1:1", "9:16"],
+        initialAspect: "1:1",
+      });
+      if (!editedFile) return;
+
+      const prepared = await prepareImageForUpload(editedFile);
       setQrPreview(prepared.dataUrl);
       updateMutation.mutate({
         bankName: bankName || undefined,
@@ -216,6 +226,7 @@ export default function PaymentSettingsPage() {
           ข้อมูลนี้จะแสดงให้ผู้ซื้อเห็นเมื่อทำการสั่งซื้อสินค้าของคุณ
         </p>
       </div>
+      {imageEditorModal}
     </div>
   );
 }

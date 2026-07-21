@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useImageEditorModal } from "@/components/ImageEditorModal";
 import { toast } from "sonner";
 import { Link, useSearch } from "wouter";
 import { LISTING_TYPE_LABELS } from "@shared/types";
@@ -21,6 +22,7 @@ export default function SellPage() {
   const params = new URLSearchParams(search);
   const editId = params.get("edit") ? parseInt(params.get("edit")!) : undefined;
   const isEditMode = !!editId;
+  const { openImageEditor, imageEditorModal } = useImageEditorModal();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -217,7 +219,15 @@ export default function SellPage() {
     try {
       for (const file of Array.from(files)) {
         try {
-          const prepared = await prepareImageForUpload(file);
+          const editedFile = await openImageEditor(file, {
+            title: "แต่งรูปสินค้า",
+            description: "ครอป หมุน และเลือกอัตราส่วน 1:1 หรือ 9:16 ก่อนอัปโหลด",
+            aspectOptions: ["1:1", "9:16"],
+            initialAspect: "1:1",
+          });
+          if (!editedFile) continue;
+
+          const prepared = await prepareImageForUpload(editedFile);
           const result = await uploadImage.mutateAsync({
             filename: prepared.filename,
             contentType: prepared.contentType,
@@ -833,7 +843,15 @@ export default function SellPage() {
                           if (!file) return;
                           setUploadingQr(true);
                           try {
-                            const prepared = await prepareImageForUpload(file);
+                            const editedFile = await openImageEditor(file, {
+                              title: "แต่งรูป QR Code",
+                              description: "ครอป หมุน และเลือกอัตราส่วนที่เหมาะกับ QR Code ก่อนอัปโหลด",
+                              aspectOptions: ["1:1", "9:16"],
+                              initialAspect: "1:1",
+                            });
+                            if (!editedFile) return;
+
+                            const prepared = await prepareImageForUpload(editedFile);
                             const result = await uploadQrCode.mutateAsync({
                               filename: prepared.filename,
                               contentType: prepared.contentType,
@@ -1011,6 +1029,7 @@ export default function SellPage() {
             {isPending ? "กำลังบันทึก..." : isEditMode ? "บันทึกการแก้ไข" : "ลงขายสินค้า"}
           </Button>
         </div>
+        {imageEditorModal}
       </div>
     </div>
   );

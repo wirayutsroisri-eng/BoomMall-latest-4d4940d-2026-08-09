@@ -11,6 +11,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useImageEditorModal } from "@/components/ImageEditorModal";
 import { toast } from "sonner";
 import { Link } from "wouter";
 import { getLoginUrl } from "@/const";
@@ -20,6 +21,7 @@ export default function ProfilePage() {
   const { user, isAuthenticated, refresh } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { isSubscribed, isLoading: pushLoading, subscribe, unsubscribe, isSupported: pushSupported } = usePushNotification();
+  const { openImageEditor, imageEditorModal } = useImageEditorModal();
 
   const { data: myProducts } = trpc.products.getMySelling.useQuery(
     { limit: 1 },
@@ -43,7 +45,15 @@ export default function ProfilePage() {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const prepared = await prepareImageForUpload(file);
+      const editedFile = await openImageEditor(file, {
+        title: "แต่งรูปโปรไฟล์",
+        description: "ครอปและหมุนรูปโปรไฟล์ก่อนอัปโหลด",
+        aspectOptions: ["1:1"],
+        initialAspect: "1:1",
+      });
+      if (!editedFile) return;
+
+      const prepared = await prepareImageForUpload(editedFile);
       uploadAvatar.mutate({
         base64: prepared.dataUrl,
         mimeType: prepared.contentType as "image/jpeg" | "image/png" | "image/webp" | "image/gif",
@@ -349,6 +359,7 @@ export default function ProfilePage() {
       </section>
 
       <div className="h-4" />
+      {imageEditorModal}
     </div>
   );
 }
