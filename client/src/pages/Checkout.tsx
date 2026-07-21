@@ -743,7 +743,7 @@ export default function CheckoutPage() {
             {slipPreview ? (
               <div className="space-y-2">
                 <img src={slipPreview} alt="slip" className="w-full max-h-64 object-contain rounded-xl border border-border/30" />
-                <Button variant="outline" size="sm" className="w-full" onClick={() => { setSlipFile(null); setSlipPreview(null); if (slipInputRef.current) slipInputRef.current.value = ""; }}>
+                <Button variant="outline" size="sm" className="w-full" onClick={() => { setSlipPrepared(null); setSlipPreview(null); if (slipInputRef.current) slipInputRef.current.value = ""; }}>
                   เปลี่ยนรูปสลิป
                 </Button>
               </div>

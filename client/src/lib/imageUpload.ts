@@ -124,7 +124,8 @@ export async function prepareImageForUpload(
   if (shouldCompress) {
     for (const pass of compressionPasses) {
       blob = await compressImage(file, pass);
-      contentType = blob.type || pass.mimeType || "image/jpeg";
+      contentType =
+        blob.type || ("mimeType" in pass ? pass.mimeType : undefined) || "image/jpeg";
       filename = updateFilenameExtension(filename, contentType);
       if (blob.size <= maxBytes) break;
     }

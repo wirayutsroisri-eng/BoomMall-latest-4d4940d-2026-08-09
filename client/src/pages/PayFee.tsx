@@ -17,6 +17,7 @@ export default function PayFeePage({ params }: PayFeeProps) {
   const productId = parseInt(params.productId);
   const { isAuthenticated } = useAuth();
   const [, navigate] = useLocation();
+  const productsApi = trpc.products as any;
   const [slipPrepared, setSlipPrepared] = useState<PreparedImageUpload | null>(null);
   const [slipPreview, setSlipPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -28,9 +29,9 @@ export default function PayFeePage({ params }: PayFeeProps) {
     { enabled: isAuthenticated && !isNaN(productId) }
   );
 
-  const { data: paymentInfo } = trpc.products.publicPaymentInfo.useQuery();
+  const { data: paymentInfo } = productsApi.publicPaymentInfo.useQuery();
 
-  const uploadFeeSlip = trpc.products.uploadFeeSlip.useMutation({
+  const uploadFeeSlip = productsApi.uploadFeeSlip.useMutation({
     onSuccess: () => {
       setDone(true);
       toast.success("อัปโหลดสลิปสำเร็จ! รอ Admin ตรวจสอบ");
@@ -203,7 +204,7 @@ export default function PayFeePage({ params }: PayFeeProps) {
                   variant="outline"
                   size="sm"
                   className="w-full"
-                  onClick={() => { setSlipFile(null); setSlipPreview(null); }}
+                  onClick={() => { setSlipPrepared(null); setSlipPreview(null); }}
                 >
                   เปลี่ยนรูป
                 </Button>

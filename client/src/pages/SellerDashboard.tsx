@@ -456,7 +456,7 @@ export default function SellerDashboardPage() {
       </div>
 
       {/* Dialog อัปโหลดสลิปยืนยันการขาย */}
-      <Dialog open={!!soldDialog} onOpenChange={(open) => { if (!open) { setSoldDialog(null); setSaleSlipFile(null); setSaleSlipPreview(null); } }}>
+      <Dialog open={!!soldDialog} onOpenChange={(open) => { if (!open) { setSoldDialog(null); setSaleSlipPrepared(null); setSaleSlipPreview(null); } }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>ยืนยันการขายสินค้า</DialogTitle>
@@ -505,7 +505,7 @@ export default function SellerDashboardPage() {
             )}
           </div>
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => { setSoldDialog(null); setSaleSlipFile(null); setSaleSlipPreview(null); }}>
+            <Button variant="outline" onClick={() => { setSoldDialog(null); setSaleSlipPrepared(null); setSaleSlipPreview(null); }}>
               ยกเลิก
             </Button>
             <Button

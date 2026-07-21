@@ -55,7 +55,7 @@ export function useImageEditorModal() {
   );
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const resolverRef = useRef<(value: File | null) => void>();
+  const resolverRef = useRef<((value: File | null) => void) | null>(null);
   const imageUrlRef = useRef<string | null>(null);
 
   const closeModal = useCallback((result: File | null) => {
@@ -73,7 +73,7 @@ export function useImageEditorModal() {
     setIsSaving(false);
 
     const resolve = resolverRef.current;
-    resolverRef.current = undefined;
+    resolverRef.current = null;
     resolve?.(result);
   }, []);
 
