@@ -1,13 +1,7 @@
 export { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
-import { isDevBypassEnabled } from "./devBypass";
 
 // Generate login URL at runtime so redirect URI reflects the current origin.
 export const getLoginUrl = () => {
-  if (isDevBypassEnabled()) {
-    // ไม่ redirect ไป OAuth จริง — อยู่ในแอปเพื่อทด UI
-    return "/profile";
-  }
-
   const oauthPortalUrl = import.meta.env.VITE_OAUTH_PORTAL_URL;
   const appId = import.meta.env.VITE_APP_ID;
 

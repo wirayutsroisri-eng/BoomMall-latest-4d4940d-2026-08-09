@@ -10,7 +10,7 @@ import { isDevBypassEnabled } from "./devBypass";
 import "./index.css";
 
 if (isDevBypassEnabled()) {
-  console.info("[DevBypass] Auth & feed mock enabled — set VITE_DEV_BYPASS_AUTH=false to disable");
+  console.info("[DevBypass] Mock auth/feed enabled — set VITE_DEV_BYPASS_AUTH=false to use real API");
 }
 
 const queryClient = new QueryClient({

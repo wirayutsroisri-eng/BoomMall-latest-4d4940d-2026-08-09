@@ -1,6 +1,6 @@
 /**
- * Dev bypass — ใช้เมื่อยังไม่ได้ต่อ backend/DB จริง
- * เปิดด้วย VITE_DEV_BYPASS_AUTH=true หรือ auto-detect เมื่อไม่มี OAuth env
+ * Dev bypass — mock auth + feed สำหรับทด UI โดยไม่ต่อ backend
+ * เปิดเฉพาะเมื่อตั้ง VITE_DEV_BYPASS_AUTH=true ใน .env (opt-in เท่านั้น)
  */
 
 export type MockUser = {
@@ -32,14 +32,9 @@ export type MockFeedProduct = {
   priceTiers?: { minQty: number; pricePerUnit: number }[];
 };
 
-/** เปิด bypass เมื่อตั้ง env หรือ OAuth ยังไม่ได้ config */
+/** เปิด bypass เฉพาะเมื่อ VITE_DEV_BYPASS_AUTH=true (default: ปิด) */
 export function isDevBypassEnabled(): boolean {
-  if (import.meta.env.VITE_DEV_BYPASS_AUTH === "true") return true;
-  if (import.meta.env.VITE_DEV_BYPASS_AUTH === "false") return false;
-  // auto: ไม่มี OAuth config → bypass
-  const portal = import.meta.env.VITE_OAUTH_PORTAL_URL;
-  const appId = import.meta.env.VITE_APP_ID;
-  return !portal || !appId;
+  return import.meta.env.VITE_DEV_BYPASS_AUTH === "true";
 }
 
 export const MOCK_USER: MockUser = {
