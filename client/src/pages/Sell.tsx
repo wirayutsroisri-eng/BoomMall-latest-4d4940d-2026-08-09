@@ -14,7 +14,8 @@ import { Link, useSearch } from "wouter";
 import { LISTING_TYPE_LABELS } from "@shared/types";
 import { normalizeWholesalePriceTiers, WholesalePriceTierError } from "@shared/wholesale-pricing";
 import { MAX_VIDEO_UPLOAD_BYTES, formatUploadLimit } from "@shared/upload-limits";
-import { fileToBase64Raw, prepareImageForUpload, ImageUploadError } from "@/lib/imageUpload";
+import { fileToBase64Raw, prepareImageForUpload } from "@/lib/imageUpload";
+import { getUploadErrorMessage } from "@/lib/uploadErrors";
 
 export default function SellPage() {
   const { user, isAuthenticated } = useAuth();
@@ -235,10 +236,7 @@ export default function SellPage() {
           });
           setImages((prev) => [...prev, result.url]);
         } catch (err) {
-          const message =
-            err instanceof ImageUploadError
-              ? err.message
-              : `${file.name} อัปโหลดไม่สำเร็จ`;
+          const message = getUploadErrorMessage(err, `${file.name} อัปโหลดไม่สำเร็จ`);
           toast.error(message);
         }
       }
@@ -860,11 +858,7 @@ export default function SellPage() {
                             setPromptpayQrUrl(result.url);
                             toast.success("อัปโหลด QR Code สำเร็จ");
                           } catch (err) {
-                            toast.error(
-                              err instanceof ImageUploadError
-                                ? err.message
-                                : "อัปโหลด QR Code ล้มเหลว"
-                            );
+                            toast.error(getUploadErrorMessage(err, "อัปโหลด QR Code ล้มเหลว"));
                           } finally {
                             setUploadingQr(false);
                           }

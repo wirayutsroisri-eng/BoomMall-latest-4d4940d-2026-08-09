@@ -9,7 +9,8 @@ import { toast } from "sonner";
 import { Link } from "wouter";
 import { ArrowLeft, CreditCard, QrCode, Save } from "lucide-react";
 import { getLoginUrl } from "@/const";
-import { prepareImageForUpload, ImageUploadError } from "@/lib/imageUpload";
+import { prepareImageForUpload } from "@/lib/imageUpload";
+import { getUploadErrorMessage } from "@/lib/uploadErrors";
 
 const THAI_BANKS = [
   "กสิกรไทย (KBank)",
@@ -89,7 +90,7 @@ export default function PaymentSettingsPage() {
         defaultPromptpayQrKey: `qr-${Date.now()}`,
       });
     } catch (err) {
-      toast.error(err instanceof ImageUploadError ? err.message : "อัปโหลด QR ไม่สำเร็จ");
+      toast.error(getUploadErrorMessage(err, "อัปโหลด QR ไม่สำเร็จ"));
     }
   };
 

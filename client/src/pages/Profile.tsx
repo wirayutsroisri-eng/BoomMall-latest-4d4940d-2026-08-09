@@ -15,7 +15,8 @@ import { useImageEditorModal } from "@/components/ImageEditorModal";
 import { toast } from "sonner";
 import { Link } from "wouter";
 import { getLoginUrl } from "@/const";
-import { prepareImageForUpload, ImageUploadError } from "@/lib/imageUpload";
+import { prepareImageForUpload } from "@/lib/imageUpload";
+import { getUploadErrorMessage } from "@/lib/uploadErrors";
 
 export default function ProfilePage() {
   const { user, isAuthenticated, refresh } = useAuth();
@@ -38,7 +39,7 @@ export default function ProfilePage() {
 
   const uploadAvatar = trpc.kyc.uploadAvatar.useMutation({
     onSuccess: () => { toast.success("เปลี่ยนรูปโปรไฟล์สำเร็จ"); refresh(); },
-    onError: (err: any) => toast.error(err.message),
+    onError: (err: any) => toast.error(getUploadErrorMessage(err)),
   });
 
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -59,7 +60,9 @@ export default function ProfilePage() {
         mimeType: prepared.contentType as "image/jpeg" | "image/png" | "image/webp" | "image/gif",
       });
     } catch (err) {
-      toast.error(err instanceof ImageUploadError ? err.message : "อัปโหลดรูปไม่สำเร็จ");
+      toast.error(getUploadErrorMessage(err));
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
