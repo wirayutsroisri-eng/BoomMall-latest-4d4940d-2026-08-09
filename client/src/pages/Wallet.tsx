@@ -18,6 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Link } from "wouter";
+import { prepareImageForUpload, type PreparedImageUpload, ImageUploadError } from "@/lib/imageUpload";
 
 const TX_TYPE_LABELS: Record<string, string> = {
   topup: "เติมเงิน",
@@ -41,7 +42,7 @@ export default function WalletPage() {
   const { isAuthenticated } = useAuth();
   const [showTopup, setShowTopup] = useState(false);
   const [topupAmount, setTopupAmount] = useState("");
-  const [slipFile, setSlipFile] = useState<File | null>(null);
+  const [slipPrepared, setSlipPrepared] = useState<PreparedImageUpload | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const { data: walletData, refetch: refetchWallet } = trpc.wallet.getBalance.useQuery(undefined, {
@@ -57,30 +58,29 @@ export default function WalletPage() {
       toast.success("อัปโหลดสลิปแล้ว รอ Admin ยืนยัน");
       setShowTopup(false);
       setTopupAmount("");
-      setSlipFile(null);
+      setSlipPrepared(null);
       refetchWallet();
     },
     onError: (err) => toast.error(err.message),
   });
 
   async function handleTopup() {
-    if (!slipFile || !topupAmount) return;
-    const base64 = await fileToBase64(slipFile);
+    if (!slipPrepared || !topupAmount) return;
     topupRequest.mutate({
       amount: parseFloat(topupAmount),
-      slipBase64: base64,
-      slipFilename: slipFile.name,
-      slipContentType: slipFile.type,
+      slipBase64: slipPrepared.base64,
+      slipFilename: slipPrepared.filename,
+      slipContentType: slipPrepared.contentType,
     });
   }
 
-  function fileToBase64(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve((reader.result as string).split(",")[1]);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
+  async function handleSlipSelect(file: File) {
+    try {
+      const prepared = await prepareImageForUpload(file);
+      setSlipPrepared(prepared);
+    } catch (err) {
+      toast.error(err instanceof ImageUploadError ? err.message : "อัปโหลดสลิปไม่สำเร็จ");
+    }
   }
 
   if (!isAuthenticated) {
@@ -211,8 +211,8 @@ export default function WalletPage() {
                 className="mt-1 border-2 border-dashed border-border rounded-lg p-4 text-center cursor-pointer hover:border-primary transition-colors"
                 onClick={() => fileRef.current?.click()}
               >
-                {slipFile ? (
-                  <p className="text-sm text-foreground">{slipFile.name}</p>
+                {slipPrepared ? (
+                  <p className="text-sm text-foreground">{slipPrepared.filename}</p>
                 ) : (
                   <p className="text-sm text-muted-foreground">คลิกเพื่อเลือกรูปสลิป</p>
                 )}
@@ -222,7 +222,10 @@ export default function WalletPage() {
                 type="file"
                 accept="image/*"
                 className="hidden"
-                onChange={(e) => setSlipFile(e.target.files?.[0] ?? null)}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void handleSlipSelect(file);
+                }}
               />
             </div>
           </div>
@@ -230,7 +233,7 @@ export default function WalletPage() {
             <Button variant="outline" onClick={() => setShowTopup(false)}>ยกเลิก</Button>
             <Button
               onClick={handleTopup}
-              disabled={!topupAmount || !slipFile || topupRequest.isPending}
+              disabled={!topupAmount || !slipPrepared || topupRequest.isPending}
             >
               {topupRequest.isPending ? "กำลังส่ง..." : "ส่งสลิป"}
             </Button>

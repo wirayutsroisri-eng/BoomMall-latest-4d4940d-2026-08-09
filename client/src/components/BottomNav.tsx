@@ -13,6 +13,7 @@ import {
 import { Link, useLocation, useRouter } from "wouter";
 import { useRef, useCallback } from "react";
 import { toast } from "sonner";
+import { prepareImageForUpload, ImageUploadError } from "@/lib/imageUpload";
 
 export default function BottomNav() {
   const { isAuthenticated, user } = useAuth();
@@ -34,31 +35,20 @@ export default function BottomNav() {
     },
   });
 
-  const handleImageSelect = useCallback((file: File) => {
-    if (!file.type.startsWith("image/")) {
-      toast.error("กรุณาเลือกไฟล์รูปภาพเท่านั้น");
-      return;
-    }
-    if (file.size > 10 * 1024 * 1024) {
-      toast.error("รูปภาพต้องมีขนาดไม่เกิน 10MB");
-      return;
-    }
-
+  const handleImageSelect = useCallback(async (file: File) => {
     toast.loading("AI กำลังวิเคราะห์รูปภาพ...", { id: "image-search-toast" });
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const dataUrl = e.target?.result as string;
-      const base64 = dataUrl.split(",")[1];
-      // เก็บ preview ไว้ด้วย
-      sessionStorage.setItem("imageSearchPreview", dataUrl);
+    try {
+      const prepared = await prepareImageForUpload(file);
+      sessionStorage.setItem("imageSearchPreview", prepared.dataUrl);
       searchByImageMutation.mutate({
-        imageData: base64,
-        mimeType: file.type,
+        imageData: prepared.base64,
+        mimeType: prepared.contentType,
         limit: 24,
       });
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      toast.dismiss("image-search-toast");
+      toast.error(err instanceof ImageUploadError ? err.message : "อัปโหลดรูปไม่สำเร็จ");
+    }
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, [searchByImageMutation]);
 

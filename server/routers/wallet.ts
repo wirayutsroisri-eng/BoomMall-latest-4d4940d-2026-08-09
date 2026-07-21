@@ -8,6 +8,7 @@ import {
 } from "../db";
 import { protectedProcedure, router } from "../_core/trpc";
 import { storagePut } from "../storage";
+import { assertImageUploadSize } from "../uploadValidation";
 
 export const walletRouter = router({
   getBalance: protectedProcedure.query(async ({ ctx }) => {
@@ -36,6 +37,7 @@ export const walletRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const buffer = Buffer.from(input.slipBase64, "base64");
+      assertImageUploadSize(buffer, "สลิป");
       const key = `topup-slips/${ctx.user.id}/${Date.now()}-${input.slipFilename}`;
       const { url } = await storagePut(key, buffer, input.slipContentType);
 

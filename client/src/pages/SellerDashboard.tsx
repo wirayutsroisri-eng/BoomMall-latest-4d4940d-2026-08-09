@@ -23,6 +23,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { prepareImageForUpload, type PreparedImageUpload, ImageUploadError } from "@/lib/imageUpload";
 import { Link } from "wouter";
 import { toast } from "sonner";
 import { useRef, useState } from "react";
@@ -59,7 +60,7 @@ function getDaysLeft(expiresAt: Date | null | undefined): number | null {
 export default function SellerDashboardPage() {
   const { user, isAuthenticated } = useAuth();
   const [soldDialog, setSoldDialog] = useState<{ productId: number; productTitle: string } | null>(null);
-  const [saleSlipFile, setSaleSlipFile] = useState<File | null>(null);
+  const [saleSlipPrepared, setSaleSlipPrepared] = useState<PreparedImageUpload | null>(null);
   const [saleSlipPreview, setSaleSlipPreview] = useState<string | null>(null);
   const slipInputRef = useRef<HTMLInputElement>(null);
 
@@ -81,7 +82,7 @@ export default function SellerDashboardPage() {
       const msg = `ปิดประกาศ "ขายแล้ว" เรียบร้อย (ความมั่นใจสลิป ${data.confidence}%)`;
       toast.success(msg);
       setSoldDialog(null);
-      setSaleSlipFile(null);
+      setSaleSlipPrepared(null);
       setSaleSlipPreview(null);
       refetchProducts();
     },
@@ -89,21 +90,15 @@ export default function SellerDashboardPage() {
   });
 
   const handleSoldSubmit = async () => {
-    if (!soldDialog || !saleSlipFile) {
+    if (!soldDialog || !saleSlipPrepared) {
       toast.error("กรุณาเลือกรูปสลิปก่อน");
       return;
     }
-    const base64 = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve((reader.result as string).split(",")[1]);
-      reader.onerror = reject;
-      reader.readAsDataURL(saleSlipFile);
-    });
     markAsSold.mutate({
       productId: soldDialog.productId,
-      saleSlipBase64: base64,
-      saleSlipFilename: saleSlipFile.name,
-      saleSlipContentType: saleSlipFile.type,
+      saleSlipBase64: saleSlipPrepared.base64,
+      saleSlipFilename: saleSlipPrepared.filename,
+      saleSlipContentType: saleSlipPrepared.contentType,
     });
   };
 
@@ -478,12 +473,16 @@ export default function SellerDashboardPage() {
               type="file"
               accept="image/*"
               className="hidden"
-              onChange={(e) => {
+              onChange={async (e) => {
                 const file = e.target.files?.[0];
                 if (!file) return;
-                setSaleSlipFile(file);
-                const url = URL.createObjectURL(file);
-                setSaleSlipPreview(url);
+                try {
+                  const prepared = await prepareImageForUpload(file);
+                  setSaleSlipPrepared(prepared);
+                  setSaleSlipPreview(prepared.dataUrl);
+                } catch (err) {
+                  toast.error(err instanceof ImageUploadError ? err.message : "อัปโหลดสลิปไม่สำเร็จ");
+                }
               }}
             />
             {saleSlipPreview ? (
@@ -491,7 +490,7 @@ export default function SellerDashboardPage() {
                 <img src={saleSlipPreview} alt="สลิป" className="w-full max-h-48 object-contain rounded-lg border" />
                 <button
                   className="absolute top-1 right-1 bg-black/50 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs"
-                  onClick={() => { setSaleSlipFile(null); setSaleSlipPreview(null); }}
+                  onClick={() => { setSaleSlipPrepared(null); setSaleSlipPreview(null); }}
                 >×</button>
               </div>
             ) : (
@@ -501,7 +500,7 @@ export default function SellerDashboardPage() {
               >
                 <Upload className="w-8 h-8" />
                 <span className="text-sm">กดเพื่อเลือกรูปสลิป</span>
-                <span className="text-xs">JPG, PNG ไม่เกิน 5MB</span>
+                <span className="text-xs">JPG, PNG ไม่เกิน 10MB</span>
               </button>
             )}
           </div>
@@ -511,7 +510,7 @@ export default function SellerDashboardPage() {
             </Button>
             <Button
               onClick={handleSoldSubmit}
-              disabled={!saleSlipFile || markAsSold.isPending}
+              disabled={!saleSlipPrepared || markAsSold.isPending}
               className="bg-green-600 hover:bg-green-700 text-white"
             >
               {markAsSold.isPending ? (

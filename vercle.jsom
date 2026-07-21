@@ -1,0 +1,8 @@
+{
+  "buildCommand": "cd client && pnpm build",
+  "outputDirectory": "client/dist/public",
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/server/index.ts" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

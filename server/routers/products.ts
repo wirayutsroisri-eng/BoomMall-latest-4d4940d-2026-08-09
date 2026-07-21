@@ -15,6 +15,7 @@ import {
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { WholesalePriceTierError, normalizeWholesalePriceTiers } from "../../shared/wholesale-pricing";
 import { storagePut } from "../storage";
+import { assertImageUploadSize, assertVideoUploadSize } from "../uploadValidation";
 import { invokeLLM } from "../_core/llm";
 import { enhancedImageAnalysis, cosineSimilarity } from "../imageAnalysis";
 import type { Product } from "../../drizzle/schema";
@@ -310,6 +311,7 @@ export const productsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const buffer = Buffer.from(input.base64, "base64");
+      assertImageUploadSize(buffer);
       const key = `products/${ctx.user.id}/${Date.now()}-${input.filename}`;
       const { url } = await storagePut(key, buffer, input.contentType);
       return { url };
@@ -325,6 +327,7 @@ export const productsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const buffer = Buffer.from(input.base64, "base64");
+      assertVideoUploadSize(buffer);
       const key = `products/videos/${ctx.user.id}/${Date.now()}-${input.filename}`;
       const { url } = await storagePut(key, buffer, input.contentType);
       return { url };
@@ -436,6 +439,7 @@ export const productsRouter = router({
 
       // อัปโหลดสลิปไปยัง storage
       const buffer = Buffer.from(input.saleSlipBase64, "base64");
+      assertImageUploadSize(buffer, "สลิป");
       const key = `sale-slips/${ctx.user.id}/${Date.now()}-${input.saleSlipFilename}`;
       const { url: saleSlipUrl } = await storagePut(key, buffer, input.saleSlipContentType);
 

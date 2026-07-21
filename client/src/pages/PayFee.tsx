@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Link, useLocation } from "wouter";
 import { toast } from "sonner";
+import { prepareImageForUpload, type PreparedImageUpload, ImageUploadError } from "@/lib/imageUpload";
 
 interface PayFeeProps {
   params: { productId: string };
@@ -16,7 +17,7 @@ export default function PayFeePage({ params }: PayFeeProps) {
   const productId = parseInt(params.productId);
   const { isAuthenticated } = useAuth();
   const [, navigate] = useLocation();
-  const [slipFile, setSlipFile] = useState<File | null>(null);
+  const [slipPrepared, setSlipPrepared] = useState<PreparedImageUpload | null>(null);
   const [slipPreview, setSlipPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [done, setDone] = useState(false);
@@ -40,33 +41,27 @@ export default function PayFeePage({ params }: PayFeeProps) {
     },
   });
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error("ไฟล์ใหญ่เกินไป (สูงสุด 5MB)");
-      return;
+    try {
+      const prepared = await prepareImageForUpload(file);
+      setSlipPrepared(prepared);
+      setSlipPreview(prepared.dataUrl);
+    } catch (err) {
+      toast.error(err instanceof ImageUploadError ? err.message : "อัปโหลดสลิปไม่สำเร็จ");
     }
-    setSlipFile(file);
-    const reader = new FileReader();
-    reader.onload = (ev) => setSlipPreview(ev.target?.result as string);
-    reader.readAsDataURL(file);
   };
 
   const handleSubmit = async () => {
-    if (!slipFile) return;
+    if (!slipPrepared) return;
     setUploading(true);
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const base64 = (ev.target?.result as string).split(",")[1];
-      uploadFeeSlip.mutate({
-        productId,
-        filename: slipFile.name,
-        contentType: slipFile.type,
-        base64,
-      });
-    };
-    reader.readAsDataURL(slipFile);
+    uploadFeeSlip.mutate({
+      productId,
+      filename: slipPrepared.filename,
+      contentType: slipPrepared.contentType,
+      base64: slipPrepared.base64,
+    });
   };
 
   if (!isAuthenticated) {
@@ -221,7 +216,7 @@ export default function PayFeePage({ params }: PayFeeProps) {
               >
                 <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">คลิกเพื่ออัปโหลดสลิป</p>
-                <p className="text-xs text-muted-foreground mt-1">PNG, JPG ขนาดไม่เกิน 5MB</p>
+                <p className="text-xs text-muted-foreground mt-1">PNG, JPG ขนาดไม่เกิน 10MB</p>
               </button>
             )}
           </CardContent>
@@ -230,7 +225,7 @@ export default function PayFeePage({ params }: PayFeeProps) {
         <Button
           className="w-full"
           size="lg"
-          disabled={!slipFile || uploading}
+          disabled={!slipPrepared || uploading}
           onClick={handleSubmit}
         >
           {uploading ? "กำลังอัปโหลด..." : "ส่งสลิปเพื่อรออนุมัติ"}

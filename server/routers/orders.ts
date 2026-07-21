@@ -20,6 +20,7 @@ import {
 } from "../db";
 import { protectedProcedure, router } from "../_core/trpc";
 import { storagePut } from "../storage";
+import { assertImageUploadSize } from "../uploadValidation";
 import { verifySlip } from "../slipVerifier";
 import { notifyOrderStatusChange, notifyProductSold } from "../_core/pushNotification";
 import { getDb } from "../db";
@@ -229,6 +230,7 @@ export const ordersRouter = router({
       }
 
       const buffer = Buffer.from(input.slipBase64, "base64");
+      assertImageUploadSize(buffer, "สลิป");
       const key = `payment-slips/${ctx.user.id}/${Date.now()}-${input.slipFilename}`;
       const { url } = await storagePut(key, buffer, input.slipContentType);
 

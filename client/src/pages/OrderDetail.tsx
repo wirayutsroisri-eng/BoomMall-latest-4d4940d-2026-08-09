@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { openBankApp } from "@/lib/bankDeepLink";
+import { prepareImageForUpload, type PreparedImageUpload, ImageUploadError } from "@/lib/imageUpload";
 
 export default function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -17,7 +18,7 @@ export default function OrderDetailPage() {
   const { user } = useAuth();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [slipFile, setSlipFile] = useState<File | null>(null);
+  const [slipPrepared, setSlipPrepared] = useState<PreparedImageUpload | null>(null);
   const [trackingNumber, setTrackingNumber] = useState("");
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState("");
@@ -32,7 +33,7 @@ export default function OrderDetailPage() {
   const uploadSlip = trpc.orders.uploadSlip.useMutation({
     onSuccess: () => {
       toast.success("อัปโหลดสลิปแล้ว รอผู้ขายยืนยัน");
-      setSlipFile(null);
+      setSlipPrepared(null);
       refetch();
     },
     onError: (err) => toast.error(err.message),
@@ -84,23 +85,22 @@ export default function OrderDetailPage() {
   });
 
   async function handleUploadSlip() {
-    if (!slipFile) return;
-    const base64 = await fileToBase64(slipFile);
+    if (!slipPrepared) return;
     uploadSlip.mutate({
       orderId,
-      slipBase64: base64,
-      slipFilename: slipFile.name,
-      slipContentType: slipFile.type,
+      slipBase64: slipPrepared.base64,
+      slipFilename: slipPrepared.filename,
+      slipContentType: slipPrepared.contentType,
     });
   }
 
-  function fileToBase64(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve((reader.result as string).split(",")[1]);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
+  async function handleSlipSelect(file: File) {
+    try {
+      const prepared = await prepareImageForUpload(file);
+      setSlipPrepared(prepared);
+    } catch (err) {
+      toast.error(err instanceof ImageUploadError ? err.message : "อัปโหลดสลิปไม่สำเร็จ");
+    }
   }
 
   if (!order) {
@@ -283,8 +283,8 @@ export default function OrderDetailPage() {
                   className="border-2 border-dashed border-border rounded-lg p-4 text-center cursor-pointer hover:border-primary transition-colors"
                   onClick={() => fileRef.current?.click()}
                 >
-                  {slipFile ? (
-                    <p className="text-sm">{slipFile.name}</p>
+                  {slipPrepared ? (
+                    <p className="text-sm">{slipPrepared.filename}</p>
                   ) : (
                     <div className="flex flex-col items-center gap-2 text-muted-foreground">
                       <Upload className="w-6 h-6" />
@@ -292,10 +292,19 @@ export default function OrderDetailPage() {
                     </div>
                   )}
                 </div>
-                <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => setSlipFile(e.target.files?.[0] ?? null)} />
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void handleSlipSelect(file);
+                  }}
+                />
                 <Button
                   className="w-full"
-                  disabled={!slipFile || uploadSlip.isPending}
+                  disabled={!slipPrepared || uploadSlip.isPending}
                   onClick={handleUploadSlip}
                 >
                   {uploadSlip.isPending ? "กำลังอัปโหลด..." : "ส่งสลิป"}

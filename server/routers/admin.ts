@@ -17,6 +17,7 @@ import {
 } from "../db";
 import { protectedProcedure, router } from "../_core/trpc";
 import { storagePut } from "../storage";
+import { assertImageUploadSize } from "../uploadValidation";
 
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
   if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN", message: "Admin เท่านั้น" });
@@ -80,6 +81,7 @@ export const adminRouter = router({
 
       if (input.transferSlipBase64 && input.transferSlipFilename) {
         const buffer = Buffer.from(input.transferSlipBase64, "base64");
+        assertImageUploadSize(buffer, "สลิป");
         const key = `payout-slips/${Date.now()}-${input.transferSlipFilename}`;
         const { url } = await storagePut(key, buffer, input.transferSlipContentType ?? "image/jpeg");
         transferSlipUrl = url;

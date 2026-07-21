@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getUserById, getPendingKycUsers, updateUser } from "../db";
 import { protectedProcedure, router } from "../_core/trpc";
 import { storagePut } from "../storage";
+import { assertImageUploadSize } from "../uploadValidation";
 
 export const kycRouter = router({
   getStatus: protectedProcedure.query(async ({ ctx }) => {
@@ -99,10 +100,7 @@ export const kycRouter = router({
       const buffer = Buffer.from(base64Data, "base64");
       console.log(`[uploadAvatar] buffer size=${buffer.length} bytes`);
 
-      // Limit 2MB
-      if (buffer.length > 2 * 1024 * 1024) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "รูปใหญ่เกินไป กรุณาใช้รูปที่เล็กกว่า 2MB" });
-      }
+      assertImageUploadSize(buffer, "รูปโปรไฟล์");
 
       const ext = input.mimeType.split("/")[1];
       const fileKey = `avatars/user-${ctx.user.id}-${Date.now()}.${ext}`;

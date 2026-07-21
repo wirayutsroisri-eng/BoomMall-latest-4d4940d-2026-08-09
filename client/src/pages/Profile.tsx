@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { Link } from "wouter";
 import { getLoginUrl } from "@/const";
+import { prepareImageForUpload, ImageUploadError } from "@/lib/imageUpload";
 
 export default function ProfilePage() {
   const { user, isAuthenticated, refresh } = useAuth();
@@ -38,17 +39,18 @@ export default function ProfilePage() {
     onError: (err: any) => toast.error(err.message),
   });
 
-  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) { toast.error("รูปใหญ่เกินไป (สูงสุด 2MB)"); return; }
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const base64 = ev.target?.result as string;
-      if (!base64) return;
-      uploadAvatar.mutate({ base64, mimeType: file.type as any });
-    };
-    reader.readAsDataURL(file);
+    try {
+      const prepared = await prepareImageForUpload(file);
+      uploadAvatar.mutate({
+        base64: prepared.dataUrl,
+        mimeType: prepared.contentType as "image/jpeg" | "image/png" | "image/webp" | "image/gif",
+      });
+    } catch (err) {
+      toast.error(err instanceof ImageUploadError ? err.message : "อัปโหลดรูปไม่สำเร็จ");
+    }
   };
 
   const logout = trpc.auth.logout.useMutation({

@@ -111,9 +111,8 @@ describe("kyc.uploadAvatar", () => {
     ).rejects.toThrow();
   });
 
-  it("should reject oversized images (>2MB)", async () => {
-    // Create a large base64 string (simulate >2MB)
-    const largeBase64 = "A".repeat(3 * 1024 * 1024); // 3MB of 'A' characters
+  it("should reject oversized images (>10MB)", async () => {
+    const largeBase64 = Buffer.alloc(11 * 1024 * 1024, "x").toString("base64");
 
     const procedure = kycRouter.createCaller(mockCtx).uploadAvatar;
 
@@ -122,7 +121,7 @@ describe("kyc.uploadAvatar", () => {
         base64: largeBase64,
         mimeType: "image/png",
       })
-    ).rejects.toThrow("รูปใหญ่เกินไป");
+    ).rejects.toThrow("รูปโปรไฟล์ใหญ่เกินไป");
   });
 
   it("should require authenticated user", async () => {

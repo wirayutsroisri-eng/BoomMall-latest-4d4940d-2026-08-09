@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Link } from "wouter";
 import { ArrowLeft, CreditCard, QrCode, Save } from "lucide-react";
 import { getLoginUrl } from "@/const";
+import { prepareImageForUpload, ImageUploadError } from "@/lib/imageUpload";
 
 const THAI_BANKS = [
   "กสิกรไทย (KBank)",
@@ -63,28 +64,23 @@ export default function PaymentSettingsPage() {
     });
   };
 
-  const handleQrUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleQrUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) {
-      toast.error("รูปใหญ่เกินไป (สูงสุด 2MB)");
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const base64 = ev.target?.result as string;
-      setQrPreview(base64);
-      // Upload QR code
+    try {
+      const prepared = await prepareImageForUpload(file);
+      setQrPreview(prepared.dataUrl);
       updateMutation.mutate({
         bankName: bankName || undefined,
         bankAccountNumber: bankAccountNumber || undefined,
         bankAccountName: bankAccountName || undefined,
         promptpayNumber: promptpayNumber || undefined,
-        defaultPromptpayQrUrl: base64,
+        defaultPromptpayQrUrl: prepared.dataUrl,
         defaultPromptpayQrKey: `qr-${Date.now()}`,
       });
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      toast.error(err instanceof ImageUploadError ? err.message : "อัปโหลด QR ไม่สำเร็จ");
+    }
   };
 
   if (!isAuthenticated) {

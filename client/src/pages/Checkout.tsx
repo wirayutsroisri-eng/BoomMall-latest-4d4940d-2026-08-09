@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
+import { prepareImageForUpload, type PreparedImageUpload, ImageUploadError } from "@/lib/imageUpload";
 import { Link, useLocation, useParams } from "wouter";
 import { getLoginUrl } from "@/const";
 import { cn } from "@/lib/utils";
@@ -255,7 +256,7 @@ export default function CheckoutPage() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("promptpay");
 
   const slipInputRef = useRef<HTMLInputElement>(null);
-  const [slipFile, setSlipFile] = useState<File | null>(null);
+  const [slipPrepared, setSlipPrepared] = useState<PreparedImageUpload | null>(null);
   const [slipPreview, setSlipPreview] = useState<string | null>(null);
 
   const { data: product, isLoading: productLoading } = trpc.products.getById.useQuery(
@@ -381,29 +382,26 @@ export default function CheckoutPage() {
     });
   }
 
-  function handleSlipChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleSlipChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { toast.error("ไฟล์ใหญ่เกิน 5MB"); return; }
-    setSlipFile(file);
-    const reader = new FileReader();
-    reader.onload = (ev) => setSlipPreview(ev.target?.result as string);
-    reader.readAsDataURL(file);
+    try {
+      const prepared = await prepareImageForUpload(file);
+      setSlipPrepared(prepared);
+      setSlipPreview(prepared.dataUrl);
+    } catch (err) {
+      toast.error(err instanceof ImageUploadError ? err.message : "อัปโหลดสลิปไม่สำเร็จ");
+    }
   }
 
-  function handleUploadSlip() {
-    if (!slipFile || !orderId) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      uploadSlip.mutate({
-        orderId,
-        slipBase64: dataUrl.split(",")[1],
-        slipFilename: slipFile.name,
-        slipContentType: slipFile.type,
-      });
-    };
-    reader.readAsDataURL(slipFile);
+  async function handleUploadSlip() {
+    if (!slipPrepared || !orderId) return;
+    uploadSlip.mutate({
+      orderId,
+      slipBase64: slipPrepared.base64,
+      slipFilename: slipPrepared.filename,
+      slipContentType: slipPrepared.contentType,
+    });
   }
 
   // ดึงข้อมูลการชำระเงินจาก product fields (Phase 28) ก่อน แล้ว fallback ไป seller/order
@@ -756,7 +754,7 @@ export default function CheckoutPage() {
               >
                 <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground/30" />
                 <p className="text-sm text-muted-foreground">กดเพื่อเลือกรูปสลิป</p>
-                <p className="text-xs text-muted-foreground/60 mt-1">JPG, PNG ไม่เกิน 5MB</p>
+                <p className="text-xs text-muted-foreground/60 mt-1">JPG, PNG ไม่เกิน 10MB</p>
               </button>
             )}
           </div>
@@ -768,7 +766,7 @@ export default function CheckoutPage() {
           <div className="container max-w-lg py-3">
             <Button
               className="w-full h-12 text-base font-semibold rounded-full"
-              disabled={!slipFile || uploadSlip.isPending}
+              disabled={!slipPrepared || uploadSlip.isPending}
               onClick={handleUploadSlip}
             >
               {uploadSlip.isPending ? "กำลังส่งสลิป..." : "ยืนยันการชำระเงิน"}

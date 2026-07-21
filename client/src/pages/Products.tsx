@@ -9,6 +9,7 @@ import { SlidersHorizontal, X, Camera, Sparkles, ImageOff } from "lucide-react";
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useSearch } from "wouter";
 import { toast } from "sonner";
+import { prepareImageForUpload, ImageUploadError } from "@/lib/imageUpload";
 
 type SortBy = "smart" | "popular" | "newest" | "price_asc" | "price_desc";
 
@@ -134,32 +135,19 @@ export default function ProductsPage() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  const handleImageSelect = useCallback((file: File) => {
-    if (!file.type.startsWith("image/")) {
-      toast.error("กรุณาเลือกไฟล์รูปภาพเท่านั้น");
-      return;
-    }
-    if (file.size > 10 * 1024 * 1024) {
-      toast.error("รูปภาพต้องมีขนาดไม่เกิน 10MB");
-      return;
-    }
-
-    // อ่านไฟล์ครั้งเดียว ใช้ data URL ทั้ง preview และ base64
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const dataUrl = e.target?.result as string;
-      setPreviewImage(dataUrl);
-      // ตัด prefix "data:image/xxx;base64," ออก
-      const base64 = dataUrl.split(",")[1];
+  const handleImageSelect = useCallback(async (file: File) => {
+    try {
+      const prepared = await prepareImageForUpload(file);
+      setPreviewImage(prepared.dataUrl);
       setImageSearchMode(true);
       searchByImageMutation.mutate({
-        imageData: base64,
-        mimeType: file.type,
+        imageData: prepared.base64,
+        mimeType: prepared.contentType,
         limit,
       });
-    };
-    reader.readAsDataURL(file);
-    // reset input เพื่อเลือกไฟล์เดิมซ้ำได้
+    } catch (err) {
+      toast.error(err instanceof ImageUploadError ? err.message : "อัปโหลดรูปไม่สำเร็จ");
+    }
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, [searchByImageMutation, limit]);
 
