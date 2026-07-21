@@ -4,6 +4,12 @@ import { getUserById, getPendingKycUsers, updateUser } from "../db";
 import { protectedProcedure, router } from "../_core/trpc";
 import { storagePut } from "../storage";
 import { assertImageUploadSize } from "../uploadValidation";
+import {
+  isValidThaiPhone,
+  normalizeThaiPhone,
+  shippingAddressInputSchema,
+  submitKycInputSchema,
+} from "@shared/profile-validation";
 
 export const kycRouter = router({
   getStatus: protectedProcedure.query(async ({ ctx }) => {
@@ -21,12 +27,7 @@ export const kycRouter = router({
 
   // Submit KYC - simple form: full name + phone
   submitKyc: protectedProcedure
-    .input(
-      z.object({
-        fullName: z.string().optional().default("-"),
-        phone: z.string().min(9, "กรุณากรอกเบอร์โทรศัพท์ที่ถูกต้อง").max(15),
-      })
-    )
+    .input(submitKycInputSchema)
     .mutation(async ({ ctx, input }) => {
       if (ctx.user.kycStatus === "approved") {
         throw new TRPCError({ code: "BAD_REQUEST", message: "ยืนยันตัวตนแล้ว" });
@@ -37,6 +38,7 @@ export const kycRouter = router({
         kycStatus: "approved",
         kycFullName: input.fullName ?? "-",
         kycPhone: input.phone,
+        phone: input.phone,
         kycSubmittedAt: new Date(),
         kycReviewedAt: new Date(),
         isSeller: true,
@@ -116,17 +118,29 @@ export const kycRouter = router({
   // Update profile (contact info)
   updateProfile: protectedProcedure
     .input(
-      z.object({
-        phone: z.string().optional(),
-        lineId: z.string().max(64).optional(),
-        facebookUrl: z.string().max(255).optional(),
-        province: z.string().max(100).optional(),
-        address: z.string().max(500).optional(),
-      })
+      z
+        .object({
+          phone: z.string().optional(),
+          lineId: z.string().max(64).optional(),
+          facebookUrl: z.string().max(255).optional(),
+          province: z.string().max(100).optional(),
+          address: z.string().max(500).optional(),
+        })
+        .superRefine((input, ctx) => {
+          if (input.phone?.trim() && !isValidThaiPhone(input.phone)) {
+            ctx.addIssue({
+              code: "custom",
+              message: "กรุณากรอกเบอร์โทรศัพท์ 10 หลัก (เช่น 0812345678)",
+              path: ["phone"],
+            });
+          }
+        })
     )
     .mutation(async ({ ctx, input }) => {
+      const phone =
+        input.phone?.trim() ? normalizeThaiPhone(input.phone) : null;
       await updateUser(ctx.user.id, {
-        phone: input.phone || null,
+        phone,
         lineId: input.lineId || null,
         facebookUrl: input.facebookUrl || null,
         province: input.province || null,
@@ -137,17 +151,7 @@ export const kycRouter = router({
 
   // Update shipping address
   updateShippingAddress: protectedProcedure
-    .input(
-      z.object({
-        shippingName: z.string().min(1, "กรุณากรอกชื่อผู้รับ"),
-        shippingPhone: z.string().min(9, "กรุณากรอกเบอร์โทรที่ถูกต้อง").max(15),
-        shippingAddress: z.string().min(1, "กรุณากรอกที่อยู่"),
-        shippingSubdistrict: z.string().min(1, "กรุณากรอกตำบล/แขวง"),
-        shippingDistrict: z.string().min(1, "กรุณากรอกอำเภอ/เขต"),
-        shippingProvince: z.string().min(1, "กรุณากรอกจังหวัด"),
-        shippingZipCode: z.string().min(5, "กรุณากรอกรหัสไปรษณีย์").max(10),
-      })
-    )
+    .input(shippingAddressInputSchema)
     .mutation(async ({ ctx, input }) => {
       console.log(`[updateShippingAddress] userId=${ctx.user.id}, input=`, JSON.stringify(input));
       try {

@@ -1,6 +1,12 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { formatDate } from "@shared/types";
+import {
+  isValidThaiPhone,
+  isValidThaiZipCode,
+  shippingAddressInputSchema,
+  submitKycInputSchema,
+} from "@shared/profile-validation";
 import { CheckCircle2, Clock, Home, MapPin, Phone, ShieldCheck, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -10,6 +16,15 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { Link } from "wouter";
+
+function firstZodIssueMessage(error: { issues: { message: string }[] }): string {
+  return error.issues[0]?.message ?? "ข้อมูลไม่ถูกต้อง";
+}
+
+/** Allow digits, spaces and dashes while typing Thai phone numbers. */
+function sanitizePhoneInput(value: string): string {
+  return value.replace(/[^\d+\-\s]/g, "");
+}
 
 export default function KYCPage() {
   const { isAuthenticated } = useAuth();
@@ -64,15 +79,24 @@ export default function KYCPage() {
       <div className="container py-16 text-center">
         <ShieldCheck className="w-16 h-16 mx-auto mb-4 text-muted-foreground/30" />
         <h2 className="text-xl font-semibold mb-2">กรุณาเข้าสู่ระบบ</h2>
-        <Link href="/"><Button>กลับหน้าหลัก</Button></Link>
+        <Link href="/"><Button type="button">กลับหน้าหลัก</Button></Link>
       </div>
     );
   }
 
   const status = kycData?.kycStatus ?? "none";
 
+  const handleSubmitKyc = () => {
+    const parsed = submitKycInputSchema.safeParse({ fullName: "-", phone });
+    if (!parsed.success) {
+      toast.error(firstZodIssueMessage(parsed.error));
+      return;
+    }
+    submitKyc.mutate(parsed.data);
+  };
+
   const handleSaveShipping = () => {
-    updateShipping.mutate({
+    const parsed = shippingAddressInputSchema.safeParse({
       shippingName,
       shippingPhone,
       shippingAddress,
@@ -81,7 +105,22 @@ export default function KYCPage() {
       shippingProvince,
       shippingZipCode,
     });
+    if (!parsed.success) {
+      toast.error(firstZodIssueMessage(parsed.error));
+      return;
+    }
+    updateShipping.mutate(parsed.data);
   };
+
+  const canSubmitKyc = isValidThaiPhone(phone);
+  const canSaveShipping =
+    shippingName.trim() &&
+    isValidThaiPhone(shippingPhone) &&
+    shippingAddress.trim() &&
+    shippingSubdistrict.trim() &&
+    shippingDistrict.trim() &&
+    shippingProvince.trim() &&
+    isValidThaiZipCode(shippingZipCode);
 
   return (
     <div className="min-h-screen bg-background">
@@ -138,7 +177,7 @@ export default function KYCPage() {
         {/* Approved — CTA */}
         {status === "approved" && (
           <Link href="/sell">
-            <Button className="w-full" size="lg">เริ่มลงขายสินค้าเลย</Button>
+            <Button type="button" className="w-full" size="lg">เริ่มลงขายสินค้าเลย</Button>
           </Link>
         )}
 
@@ -161,20 +200,25 @@ export default function KYCPage() {
                   เบอร์โทรศัพท์ <span className="text-red-500">*</span>
                 </Label>
                 <Input
-                  type="tel"
-                  placeholder="เช่น 0812345678"
+                  type="text"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  placeholder="เช่น 0999266218 หรือ 08x-xxx-xxxx"
                   value={phone}
-                  onChange={(e) => setPhone(e.target.value.replace(/[^0-9+]/g, ""))}
-                  maxLength={15}
+                  onChange={(e) => setPhone(sanitizePhoneInput(e.target.value))}
+                  maxLength={16}
                   autoFocus
                 />
-                <p className="text-xs text-muted-foreground mt-1">กรอกเบอร์โทรเพื่อยืนยันตัวตนและเริ่มลงขายสินค้าได้ทันที</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  รองรับเบอร์มือถือไทย 10 หลัก (ใส่ขีดหรือเว้นวรรคได้)
+                </p>
               </div>
               <Button
+                type="button"
                 className="w-full"
                 size="lg"
-                disabled={phone.length < 9 || submitKyc.isPending}
-                onClick={() => submitKyc.mutate({ fullName: "-", phone })}
+                disabled={!canSubmitKyc || submitKyc.isPending}
+                onClick={handleSubmitKyc}
               >
                 {submitKyc.isPending ? "กำลังยืนยัน..." : "ยืนยันตัวตนด้วยเบอร์โทร"}
               </Button>
@@ -205,6 +249,7 @@ export default function KYCPage() {
                 <div className="col-span-2">
                   <Label className="mb-1.5 block">ชื่อผู้รับ <span className="text-red-500">*</span></Label>
                   <Input
+                    type="text"
                     placeholder="ชื่อ-นามสกุลผู้รับสินค้า"
                     value={shippingName}
                     onChange={(e) => setShippingName(e.target.value)}
@@ -213,11 +258,13 @@ export default function KYCPage() {
                 <div className="col-span-2">
                   <Label className="mb-1.5 block">เบอร์โทรผู้รับ <span className="text-red-500">*</span></Label>
                   <Input
-                    type="tel"
-                    placeholder="เช่น 0812345678"
+                    type="text"
+                    inputMode="tel"
+                    autoComplete="tel"
+                    placeholder="เช่น 0999266218 หรือ 08x-xxx-xxxx"
                     value={shippingPhone}
-                    onChange={(e) => setShippingPhone(e.target.value.replace(/[^0-9+]/g, ""))}
-                    maxLength={15}
+                    onChange={(e) => setShippingPhone(sanitizePhoneInput(e.target.value))}
+                    maxLength={16}
                   />
                 </div>
                 <div className="col-span-2">
@@ -226,6 +273,7 @@ export default function KYCPage() {
                     บ้านเลขที่ / ถนน / ซอย <span className="text-red-500">*</span>
                   </Label>
                   <Input
+                    type="text"
                     placeholder="เช่น 123/4 ถ.สุขุมวิท ซ.10"
                     value={shippingAddress}
                     onChange={(e) => setShippingAddress(e.target.value)}
@@ -234,6 +282,7 @@ export default function KYCPage() {
                 <div>
                   <Label className="mb-1.5 block">ตำบล/แขวง <span className="text-red-500">*</span></Label>
                   <Input
+                    type="text"
                     placeholder="ตำบล/แขวง"
                     value={shippingSubdistrict}
                     onChange={(e) => setShippingSubdistrict(e.target.value)}
@@ -242,6 +291,7 @@ export default function KYCPage() {
                 <div>
                   <Label className="mb-1.5 block">อำเภอ/เขต <span className="text-red-500">*</span></Label>
                   <Input
+                    type="text"
                     placeholder="อำเภอ/เขต"
                     value={shippingDistrict}
                     onChange={(e) => setShippingDistrict(e.target.value)}
@@ -250,6 +300,7 @@ export default function KYCPage() {
                 <div>
                   <Label className="mb-1.5 block">จังหวัด <span className="text-red-500">*</span></Label>
                   <Input
+                    type="text"
                     placeholder="จังหวัด"
                     value={shippingProvince}
                     onChange={(e) => setShippingProvince(e.target.value)}
@@ -258,22 +309,21 @@ export default function KYCPage() {
                 <div>
                   <Label className="mb-1.5 block">รหัสไปรษณีย์ <span className="text-red-500">*</span></Label>
                   <Input
+                    type="text"
+                    inputMode="numeric"
                     placeholder="เช่น 10110"
                     value={shippingZipCode}
-                    onChange={(e) => setShippingZipCode(e.target.value.replace(/[^0-9]/g, ""))}
+                    onChange={(e) => setShippingZipCode(e.target.value.replace(/\D/g, "").slice(0, 5))}
                     maxLength={5}
                   />
                 </div>
               </div>
 
               <Button
+                type="button"
                 className="w-full"
                 variant={hasShippingAddress ? "outline" : "default"}
-                disabled={
-                  !shippingName || !shippingPhone || !shippingAddress ||
-                  !shippingSubdistrict || !shippingDistrict || !shippingProvince ||
-                  shippingZipCode.length < 5 || updateShipping.isPending
-                }
+                disabled={!canSaveShipping || updateShipping.isPending}
                 onClick={handleSaveShipping}
               >
                 {updateShipping.isPending ? "กำลังบันทึก..." : hasShippingAddress ? "อัปเดตที่อยู่จัดส่ง" : "บันทึกที่อยู่จัดส่ง"}
