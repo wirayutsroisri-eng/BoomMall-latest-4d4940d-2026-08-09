@@ -15,6 +15,7 @@ import {
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { WholesalePriceTierError, normalizeWholesalePriceTiers } from "../../shared/wholesale-pricing";
 import { storagePut } from "../storage";
+import { toStorageTrpcError } from "../storageErrors";
 import { assertImageUploadSize, assertVideoUploadSize } from "../uploadValidation";
 import { invokeLLM } from "../_core/llm";
 import { enhancedImageAnalysis, cosineSimilarity } from "../imageAnalysis";
@@ -310,11 +311,15 @@ export const productsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const buffer = Buffer.from(input.base64, "base64");
-      assertImageUploadSize(buffer);
-      const key = `products/${ctx.user.id}/${Date.now()}-${input.filename}`;
-      const { url } = await storagePut(key, buffer, input.contentType);
-      return { url };
+      try {
+        const buffer = Buffer.from(input.base64, "base64");
+        assertImageUploadSize(buffer);
+        const key = `products/${ctx.user.id}/${Date.now()}-${input.filename}`;
+        const { url } = await storagePut(key, buffer, input.contentType);
+        return { url };
+      } catch (error) {
+        throw toStorageTrpcError(error);
+      }
     }),
 
   uploadVideo: protectedProcedure
@@ -326,11 +331,15 @@ export const productsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const buffer = Buffer.from(input.base64, "base64");
-      assertVideoUploadSize(buffer);
-      const key = `products/videos/${ctx.user.id}/${Date.now()}-${input.filename}`;
-      const { url } = await storagePut(key, buffer, input.contentType);
-      return { url };
+      try {
+        const buffer = Buffer.from(input.base64, "base64");
+        assertVideoUploadSize(buffer);
+        const key = `products/videos/${ctx.user.id}/${Date.now()}-${input.filename}`;
+        const { url } = await storagePut(key, buffer, input.contentType);
+        return { url };
+      } catch (error) {
+        throw toStorageTrpcError(error);
+      }
     }),
 
   categories: publicProcedure.query(async () => {

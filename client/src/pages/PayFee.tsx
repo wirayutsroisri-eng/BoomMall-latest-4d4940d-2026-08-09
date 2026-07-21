@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Link, useLocation } from "wouter";
 import { toast } from "sonner";
 import { prepareImageForUpload, type PreparedImageUpload, ImageUploadError } from "@/lib/imageUpload";
+import { MAX_IMAGE_UPLOAD_BYTES, formatUploadLimit } from "@shared/upload-limits";
 
 interface PayFeeProps {
   params: { productId: string };
@@ -17,6 +18,7 @@ export default function PayFeePage({ params }: PayFeeProps) {
   const productId = parseInt(params.productId);
   const { isAuthenticated } = useAuth();
   const [, navigate] = useLocation();
+  const productsApi = trpc.products as any;
   const [slipPrepared, setSlipPrepared] = useState<PreparedImageUpload | null>(null);
   const [slipPreview, setSlipPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -28,9 +30,9 @@ export default function PayFeePage({ params }: PayFeeProps) {
     { enabled: isAuthenticated && !isNaN(productId) }
   );
 
-  const { data: paymentInfo } = trpc.products.publicPaymentInfo.useQuery();
+  const { data: paymentInfo } = productsApi.publicPaymentInfo.useQuery();
 
-  const uploadFeeSlip = trpc.products.uploadFeeSlip.useMutation({
+  const uploadFeeSlip = productsApi.uploadFeeSlip.useMutation({
     onSuccess: () => {
       setDone(true);
       toast.success("อัปโหลดสลิปสำเร็จ! รอ Admin ตรวจสอบ");
@@ -203,7 +205,7 @@ export default function PayFeePage({ params }: PayFeeProps) {
                   variant="outline"
                   size="sm"
                   className="w-full"
-                  onClick={() => { setSlipFile(null); setSlipPreview(null); }}
+                  onClick={() => { setSlipPrepared(null); setSlipPreview(null); }}
                 >
                   เปลี่ยนรูป
                 </Button>
@@ -216,7 +218,7 @@ export default function PayFeePage({ params }: PayFeeProps) {
               >
                 <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">คลิกเพื่ออัปโหลดสลิป</p>
-                <p className="text-xs text-muted-foreground mt-1">PNG, JPG ขนาดไม่เกิน 10MB</p>
+                <p className="text-xs text-muted-foreground mt-1">PNG, JPG ขนาดไม่เกิน {formatUploadLimit(MAX_IMAGE_UPLOAD_BYTES)}</p>
               </button>
             )}
           </CardContent>

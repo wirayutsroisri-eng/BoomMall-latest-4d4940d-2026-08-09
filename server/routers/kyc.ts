@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getUserById, getPendingKycUsers, updateUser } from "../db";
 import { protectedProcedure, router } from "../_core/trpc";
 import { storagePut } from "../storage";
+import { toStorageTrpcError } from "../storageErrors";
 import { assertImageUploadSize } from "../uploadValidation";
 import {
   isValidThaiPhone,
@@ -96,23 +97,27 @@ export const kycRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      console.log(`[uploadAvatar] userId=${ctx.user.id}, mimeType=${input.mimeType}, base64Length=${input.base64.length}`);
-      // Decode base64 to buffer
-      const base64Data = input.base64.replace(/^data:image\/[\w+]+;base64,/, "");
-      const buffer = Buffer.from(base64Data, "base64");
-      console.log(`[uploadAvatar] buffer size=${buffer.length} bytes`);
+      try {
+        console.log(`[uploadAvatar] userId=${ctx.user.id}, mimeType=${input.mimeType}, base64Length=${input.base64.length}`);
+        // Decode base64 to buffer
+        const base64Data = input.base64.replace(/^data:image\/[\w+]+;base64,/, "");
+        const buffer = Buffer.from(base64Data, "base64");
+        console.log(`[uploadAvatar] buffer size=${buffer.length} bytes`);
 
-      assertImageUploadSize(buffer, "รูปโปรไฟล์");
+        assertImageUploadSize(buffer, "รูปโปรไฟล์");
 
-      const ext = input.mimeType.split("/")[1];
-      const fileKey = `avatars/user-${ctx.user.id}-${Date.now()}.${ext}`;
-      console.log(`[uploadAvatar] uploading to key=${fileKey}`);
-      const { url } = await storagePut(fileKey, buffer, input.mimeType);
-      console.log(`[uploadAvatar] uploaded, url=${url}`);
+        const ext = input.mimeType.split("/")[1];
+        const fileKey = `avatars/user-${ctx.user.id}-${Date.now()}.${ext}`;
+        console.log(`[uploadAvatar] uploading to key=${fileKey}`);
+        const { url } = await storagePut(fileKey, buffer, input.mimeType);
+        console.log(`[uploadAvatar] uploaded, url=${url}`);
 
-      await updateUser(ctx.user.id, { avatar: url });
-      console.log(`[uploadAvatar] updateUser done for userId=${ctx.user.id}`);
-      return { success: true, avatarUrl: url };
+        await updateUser(ctx.user.id, { avatar: url });
+        console.log(`[uploadAvatar] updateUser done for userId=${ctx.user.id}`);
+        return { success: true, avatarUrl: url };
+      } catch (error) {
+        throw toStorageTrpcError(error);
+      }
     }),
 
   // Update profile (contact info)

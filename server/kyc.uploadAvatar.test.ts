@@ -111,8 +111,8 @@ describe("kyc.uploadAvatar", () => {
     ).rejects.toThrow();
   });
 
-  it("should reject oversized images (>10MB)", async () => {
-    const largeBase64 = Buffer.alloc(11 * 1024 * 1024, "x").toString("base64");
+  it("should reject oversized images (>25MB)", async () => {
+    const largeBase64 = Buffer.alloc(26 * 1024 * 1024, "x").toString("base64");
 
     const procedure = kycRouter.createCaller(mockCtx).uploadAvatar;
 
