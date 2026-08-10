@@ -1,0 +1,83 @@
+import React, { useEffect } from 'react';
+import { StyleSheet, View } from 'react-native';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
+import { colors } from '@/shared/theme/colors';
+
+export function SpinningDisc() {
+  const rotation = useSharedValue(0);
+
+  useEffect(() => {
+    rotation.value = withRepeat(
+      withTiming(360, { duration: 3200, easing: Easing.linear }),
+      -1,
+      false,
+    );
+  }, [rotation]);
+
+  const style = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${rotation.value}deg` }],
+  }));
+
+  return (
+    <View style={styles.wrap}>
+      <Animated.View style={[styles.disc, style]}>
+        <View style={styles.groove} />
+        <View style={styles.label}>
+          <View style={styles.hole} />
+        </View>
+      </Animated.View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  wrap: {
+    marginTop: 0,
+    width: 38,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  disc: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#2A2A2A',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.4)',
+    shadowColor: '#000',
+    shadowOpacity: 0.5,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  groove: {
+    position: 'absolute',
+    width: 25,
+    height: 25,
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  label: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: colors.brand.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  hole: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#2A2A2A',
+  },
+});

@@ -1,0 +1,61 @@
+{
+  "expo": {
+    "name": "BoomMall",
+    "slug": "boommall-super-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "boommall",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.boommall.superapp",
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "BoomMall ใช้ Face ID เพื่อปลดล็อก Boom Vault อย่างปลอดภัย",
+        "NSCameraUsageDescription": "BoomMall ใช้กล้องสำหรับวิดีโอคอลและสร้างโพสต์",
+        "NSMicrophoneUsageDescription": "BoomMall ใช้ไมโครโฟนสำหรับวอยซ์คอลและไลฟ์",
+        "NSPhotoLibraryUsageDescription": "BoomMall ใช้คลังภาพเพื่อแนบรูปในแชตและโพสต์คอนเทนต์",
+        "UIBackgroundModes": [
+          "audio",
+          "voip"
+        ]
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0B1F17",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "package": "com.boommall.superapp",
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "BoomMall ใช้ Face ID เพื่อปลดล็อก Boom Vault อย่างปลอดภัย"
+        }
+      ],
+      "expo-sqlite",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "BoomMall ใช้คลังภาพเพื่อแนบรูปในแชตและโพสต์คอนเทนต์"
+        }
+      ],
+      "expo-audio"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
