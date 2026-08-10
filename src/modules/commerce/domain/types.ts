@@ -37,6 +37,10 @@ export type MasterSku = {
   tags: string[];
   customFields: CustomFieldValue[];
   variantIds: string[];
+  /** Shop that owns this product. Undefined = legacy data = my shop. */
+  ownerShopId?: string;
+  /** Explicit shop category key (falls back to tag/title inference when absent) */
+  categoryKey?: string;
   /** Cover photo for shop-dashboard column cards (first of imageUris) */
   imageUri?: string;
   /** All product photos (permanent local URIs) */
@@ -61,6 +65,11 @@ export type SkuVariant = {
     capacityAh?: number;
   };
   price: number;
+  /** Unit cost for margin insight (optional) */
+  cost?: number;
+  /** Per-SKU low stock threshold (falls back to DEFAULT_LOW_STOCK_THRESHOLD) */
+  lowStockThreshold?: number;
+  status?: 'active' | 'hidden';
   moq?: number;
   wholesaleTiers?: Array<{ minQty: number; unitPrice: number }>;
 };
@@ -84,4 +93,37 @@ export type CartLine = {
 
 export type StockMutationResult =
   | { ok: true; revision: number; available: number }
-  | { ok: false; reason: 'INSUFFICIENT' | 'STALE_REVISION' | 'NOT_FOUND' };
+  | { ok: false; reason: 'INSUFFICIENT' | 'STALE_REVISION' | 'NOT_FOUND' | 'INVALID' };
+
+/** Every stock change is journaled — no mutation without an audit trail */
+export type StockLedgerType =
+  | 'RESTOCK'
+  | 'SALE'
+  | 'ORDER_RESERVE'
+  | 'ORDER_CANCEL'
+  | 'RETURN'
+  | 'MANUAL_ADJUSTMENT'
+  | 'TRANSFER';
+
+export type StockLedgerEntry = {
+  id: string;
+  type: StockLedgerType;
+  variantId: string;
+  sku: string;
+  warehouseId: WarehouseId;
+  /** Available stock (onHand - reserved) before the mutation */
+  availableBefore: number;
+  /** Signed change applied to available stock */
+  qtyChange: number;
+  /** Available stock after the mutation */
+  availableAfter: number;
+  /** Snapshot for full audit */
+  onHandAfter: number;
+  reservedAfter: number;
+  reason?: string;
+  orderRef?: string;
+  actor: string;
+  at: string;
+};
+
+export type StockStatus = 'ready' | 'low' | 'out';

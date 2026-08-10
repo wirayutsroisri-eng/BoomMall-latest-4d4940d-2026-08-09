@@ -16,43 +16,110 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import { useInventoryStore } from '@/modules/commerce/state/inventory-store';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
-import type { CommerceChannel, CustomFieldValue, WarehouseId } from '@/modules/commerce/domain/types';
+import { useWarehouseStore } from '@/modules/warehouse/state/warehouse-store';
+import type { ClonePrefill } from '@/modules/commerce/domain/stock-core';
+import type {
+  CommerceChannel,
+  CustomFieldValue,
+  WarehouseId,
+} from '@/modules/commerce/domain/types';
 import { colors } from '@/shared/theme/colors';
 
 const MAX_PRODUCT_IMAGES = 6;
+const MY_WAREHOUSE_ID = 'wh-boom-ev';
+
+type VariantRow = {
+  key: string;
+  label: string;
+  sku: string;
+  price: string;
+  onHand: string;
+};
+
+let rowSeq = 0;
+function newRow(partial?: Partial<VariantRow>): VariantRow {
+  rowSeq += 1;
+  return {
+    key: `row-${Date.now()}-${rowSeq}`,
+    label: 'Default',
+    sku: `BEV-CUSTOM-${`${Date.now()}`.slice(-5)}`,
+    price: '',
+    onHand: '0',
+    ...partial,
+  };
+}
 
 export function CreatePostScreen() {
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ category?: string; categoryLabel?: string }>();
+  const params = useLocalSearchParams<{
+    category?: string;
+    categoryLabel?: string;
+    clone?: string;
+  }>();
+
+  /** Clone Product → NEW PRODUCT MODE with prefilled data (never update-in-place) */
+  const prefill = useMemo<ClonePrefill | null>(() => {
+    if (typeof params.clone !== 'string' || !params.clone) return null;
+    try {
+      return JSON.parse(params.clone) as ClonePrefill;
+    } catch {
+      return null;
+    }
+  }, [params.clone]);
+
+  const categoryKey =
+    typeof params.category === 'string' && params.category !== 'all'
+      ? params.category
+      : prefill?.categoryKey;
   const categoryLabel =
     typeof params.categoryLabel === 'string' && params.category !== 'all'
       ? params.categoryLabel
       : undefined;
+
   const [mode, setMode] = useState<'post' | 'sell'>('sell');
   const [caption, setCaption] = useState('');
   const [postPrice, setPostPrice] = useState('');
   const [postChannel, setPostChannel] = useState<CommerceChannel>('B2C');
   const [mediaUri, setMediaUri] = useState<string | null>(null);
   const [mediaType, setMediaType] = useState<'image' | 'video' | null>(null);
-  const [sellImages, setSellImages] = useState<string[]>([]);
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [masterSku, setMasterSku] = useState('BEV-CUSTOM-');
-  const [channel, setChannel] = useState<CommerceChannel>('B2C');
-  const [basePrice, setBasePrice] = useState('1990');
-  const [variantLabel, setVariantLabel] = useState('Default');
-  const [variantSku, setVariantSku] = useState('BEV-CUSTOM-001');
-  const [onHand, setOnHand] = useState('10');
+
+  const [sellImages, setSellImages] = useState<string[]>(() => prefill?.imageUris ?? []);
+  const [title, setTitle] = useState(() => prefill?.title ?? '');
+  const [description, setDescription] = useState(() => prefill?.description ?? '');
+  const [masterSku, setMasterSku] = useState(() =>
+    prefill ? `BEV-CLONE-${`${Date.now()}`.slice(-5)}` : 'BEV-CUSTOM-',
+  );
+  const [channel, setChannel] = useState<CommerceChannel>(() => prefill?.channel ?? 'B2C');
+  const [basePrice, setBasePrice] = useState(() =>
+    prefill ? String(prefill.basePrice) : '1990',
+  );
+  const [variantRows, setVariantRows] = useState<VariantRow[]>(() =>
+    prefill?.variants.length
+      ? prefill.variants.map((v) =>
+          newRow({
+            label: v.label,
+            sku: v.suggestedSku,
+            price: String(v.price),
+            onHand: '0', // Clone never carries stock — user sets it fresh
+          }),
+        )
+      : [newRow({ price: '1990', onHand: '10' })],
+  );
   const [warehouseId, setWarehouseId] = useState<WarehouseId>('WH-CTI-MAIN');
   const [newFieldKey, setNewFieldKey] = useState('');
   const [newFieldLabel, setNewFieldLabel] = useState('');
-  const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
+  const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
+    prefill
+      ? Object.fromEntries(prefill.customFields.map((f) => [f.key, String(f.value)]))
+      : {},
+  );
 
   const warehouses = useInventoryStore((s) => s.warehouses);
   const customFieldDefs = useInventoryStore((s) => s.customFieldDefs);
   const createMasterWithVariants = useInventoryStore((s) => s.createMasterWithVariants);
   const addCustomFieldDef = useInventoryStore((s) => s.addCustomFieldDef);
   const addPost = useFeedStore((s) => s.addPost);
+  const onNewProductCreated = useWarehouseStore((s) => s.onNewProductCreated);
 
   const ensureLibraryPermission = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -102,6 +169,9 @@ export function CreatePostScreen() {
     setSellImages((prev) => prev.filter((u) => u !== uri));
   };
 
+  const patchRow = (key: string, patch: Partial<VariantRow>) =>
+    setVariantRows((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+
   const channelWarehouses = useMemo(
     () => warehouses.filter((w) => w.channelFocus.includes(channel)),
     [warehouses, channel],
@@ -140,9 +210,25 @@ export function CreatePostScreen() {
       Alert.alert('ราคาไม่ถูกต้อง', 'กรุณากรอกราคาฐานเป็นตัวเลขมากกว่า 0');
       return;
     }
-    const stock = Number(onHand);
-    if (!Number.isFinite(stock) || stock < 0) {
-      Alert.alert('สต็อกไม่ถูกต้อง', 'กรุณากรอกจำนวนสต็อกเริ่มต้นเป็นตัวเลข 0 ขึ้นไป');
+    for (const row of variantRows) {
+      if (!row.label.trim() || !row.sku.trim()) {
+        Alert.alert('Variant ไม่ครบ', 'ทุก Variant ต้องมีชื่อและ SKU Code');
+        return;
+      }
+      const vPrice = Number(row.price || basePrice);
+      if (!Number.isFinite(vPrice) || vPrice <= 0) {
+        Alert.alert('ราคา Variant ไม่ถูกต้อง', `กรุณาตรวจราคาของ "${row.label}"`);
+        return;
+      }
+      const vStock = Number(row.onHand);
+      if (!Number.isFinite(vStock) || vStock < 0) {
+        Alert.alert('สต็อกไม่ถูกต้อง', `กรุณาตรวจสต็อกของ "${row.label}"`);
+        return;
+      }
+    }
+    const skuCodes = variantRows.map((r) => r.sku.trim().toUpperCase());
+    if (new Set(skuCodes).size !== skuCodes.length) {
+      Alert.alert('SKU ซ้ำ', 'SKU Code ของแต่ละ Variant ต้องไม่ซ้ำกัน');
       return;
     }
 
@@ -157,7 +243,7 @@ export function CreatePostScreen() {
       })
       .filter(Boolean) as CustomFieldValue[];
 
-    createMasterWithVariants({
+    const masterId = createMasterWithVariants({
       title: title.trim(),
       masterSku: masterSku.trim(),
       channel,
@@ -165,25 +251,37 @@ export function CreatePostScreen() {
       tags: [channel, 'Custom', ...(categoryLabel ? [categoryLabel] : [])],
       customFields,
       description: description.trim() || undefined,
+      categoryKey,
       imageUris: sellImages.length ? sellImages : undefined,
-      variants: [
-        {
-          label: variantLabel.trim() || 'Default',
-          sku: variantSku.trim(),
-          price,
-          attrs: {
-            voltage: fieldValues.voltage,
-            capacityAh: fieldValues.capacityAh ? Number(fieldValues.capacityAh) : undefined,
-            color: fieldValues.material,
-          },
-          warehouseId,
-          onHand: stock,
+      variants: variantRows.map((row) => ({
+        label: row.label.trim(),
+        sku: row.sku.trim(),
+        price: Number(row.price || basePrice),
+        attrs: {
+          voltage: fieldValues.voltage,
+          capacityAh: fieldValues.capacityAh ? Number(fieldValues.capacityAh) : undefined,
+          color: fieldValues.material,
         },
-      ],
+        warehouseId,
+        onHand: Number(row.onHand) || 0,
+      })),
     });
 
+    // Auto-sync: shops subscribed to my warehouse get a listing (per policy)
+    const syncedShops = onNewProductCreated(MY_WAREHOUSE_ID, masterId, categoryKey);
+
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    Alert.alert('ลงขายสำเร็จ', 'สร้าง Master SKU + Variant + Warehouse Stock แล้ว');
+    Alert.alert(
+      prefill ? 'โคลนสำเร็จ — สร้างเป็นสินค้าใหม่' : 'ลงขายสำเร็จ',
+      [
+        prefill
+          ? 'ได้ Product ID / SKU / Inventory ชุดใหม่ทั้งหมด (ไม่แตะสินค้าต้นฉบับ)'
+          : `สร้าง Master SKU + ${variantRows.length} Variant + Warehouse Stock แล้ว`,
+        syncedShops > 0 ? `ซิงก์ให้ร้านที่ Subscribe อัตโนมัติ ${syncedShops} ร้าน` : null,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    );
     closeAll();
   };
 
@@ -197,28 +295,40 @@ export function CreatePostScreen() {
         <Pressable onPress={closeAll}>
           <Text style={styles.cancel}>ปิด</Text>
         </Pressable>
-        <Text style={styles.title}>สร้าง</Text>
+        <Text style={styles.title}>{prefill ? 'โคลนสินค้า → สินค้าใหม่' : 'สร้าง'}</Text>
         <Pressable onPress={publish}>
-          <Text style={styles.publish}>{mode === 'sell' ? 'ลงขาย' : 'โพสต์'}</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.modes}>
-        <Pressable
-          style={[styles.mode, mode === 'post' && styles.modeActive]}
-          onPress={() => setMode('post')}
-        >
-          <Text style={[styles.modeText, mode === 'post' && styles.modeTextActive]}>โพสต์คลิป</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.mode, mode === 'sell' && styles.modeActive]}
-          onPress={() => setMode('sell')}
-        >
-          <Text style={[styles.modeText, mode === 'sell' && styles.modeTextActive]}>
-            ลงขายสินค้า
+          <Text style={styles.publish}>
+            {mode === 'sell' ? (prefill ? 'สร้างสินค้าใหม่' : 'ลงขาย') : 'โพสต์'}
           </Text>
         </Pressable>
       </View>
+
+      {prefill ? (
+        <View style={styles.cloneBanner}>
+          <Ionicons name="copy" size={14} color={colors.accent.info} />
+          <Text style={styles.cloneBannerText}>
+            โหมดโคลน: ข้อมูลถูก Prefill จากสินค้าต้นฉบับ — ระบบจะสร้าง Product ID, SKU และ
+            Inventory ใหม่ทั้งหมด สต็อกเริ่มที่ 0 ให้กำหนดเอง
+          </Text>
+        </View>
+      ) : (
+        <View style={styles.modes}>
+          <Pressable
+            style={[styles.mode, mode === 'post' && styles.modeActive]}
+            onPress={() => setMode('post')}
+          >
+            <Text style={[styles.modeText, mode === 'post' && styles.modeTextActive]}>โพสต์คลิป</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.mode, mode === 'sell' && styles.modeActive]}
+            onPress={() => setMode('sell')}
+          >
+            <Text style={[styles.modeText, mode === 'sell' && styles.modeTextActive]}>
+              ลงขายสินค้า
+            </Text>
+          </Pressable>
+        </View>
+      )}
 
       {mode === 'post' ? (
         <Pressable onPress={pickMedia}>
@@ -360,14 +470,73 @@ export function CreatePostScreen() {
             onChange={setBasePrice}
             keyboardType="numeric"
           />
-          <Field label="Variant Label" value={variantLabel} onChange={setVariantLabel} />
-          <Field label="Variant SKU" value={variantSku} onChange={setVariantSku} />
-          <Field
-            label="สต็อกเริ่มต้น"
-            value={onHand}
-            onChange={setOnHand}
-            keyboardType="numeric"
-          />
+
+          <View style={styles.variantHeader}>
+            <Text style={[styles.label, { marginBottom: 0 }]}>
+              Variant / SKU ({variantRows.length})
+            </Text>
+            <Pressable
+              style={styles.addVariantBtn}
+              onPress={() => setVariantRows((rows) => [...rows, newRow({ price: basePrice })])}
+            >
+              <Ionicons name="add" size={13} color={colors.brand.primaryDark} />
+              <Text style={styles.addVariantText}>เพิ่ม Variant</Text>
+            </Pressable>
+          </View>
+
+          {variantRows.map((row, index) => (
+            <View key={row.key} style={styles.variantCard}>
+              <View style={styles.variantCardHeader}>
+                <Text style={styles.variantIndex}>#{index + 1}</Text>
+                {variantRows.length > 1 ? (
+                  <Pressable
+                    hitSlop={8}
+                    onPress={() =>
+                      setVariantRows((rows) => rows.filter((r) => r.key !== row.key))
+                    }
+                  >
+                    <Ionicons name="trash-outline" size={16} color={colors.accent.live} />
+                  </Pressable>
+                ) : null}
+              </View>
+              <View style={styles.variantGrid}>
+                <View style={{ flex: 1 }}>
+                  <Field
+                    label="ชื่อ Variant"
+                    value={row.label}
+                    onChange={(v) => patchRow(row.key, { label: v })}
+                    placeholder="เช่น 48V"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Field
+                    label="SKU Code"
+                    value={row.sku}
+                    onChange={(v) => patchRow(row.key, { sku: v })}
+                  />
+                </View>
+              </View>
+              <View style={styles.variantGrid}>
+                <View style={{ flex: 1 }}>
+                  <Field
+                    label="ราคา (THB)"
+                    value={row.price}
+                    onChange={(v) => patchRow(row.key, { price: v })}
+                    keyboardType="numeric"
+                    placeholder={basePrice}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Field
+                    label="สต็อกเริ่มต้น"
+                    value={row.onHand}
+                    onChange={(v) => patchRow(row.key, { onHand: v })}
+                    keyboardType="numeric"
+                  />
+                </View>
+              </View>
+            </View>
+          ))}
 
           <Text style={styles.label}>คลังสินค้า (Multi-Warehouse)</Text>
           <View style={styles.row}>
@@ -468,6 +637,23 @@ const styles = StyleSheet.create({
   cancel: { color: colors.text.secondary, fontWeight: '600', fontSize: 16 },
   title: { fontWeight: '900', fontSize: 18, color: colors.text.primary },
   publish: { color: colors.brand.primaryDark, fontWeight: '800', fontSize: 16 },
+  cloneBanner: {
+    flexDirection: 'row',
+    gap: 8,
+    backgroundColor: '#EAF3FF',
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(46,140,255,0.25)',
+  },
+  cloneBannerText: {
+    flex: 1,
+    color: '#1D5FAE',
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 17,
+  },
   modes: { flexDirection: 'row', gap: 8, marginBottom: 14 },
   mode: {
     flex: 1,
@@ -630,4 +816,36 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   categoryHintText: { color: colors.brand.primaryDark, fontSize: 12, fontWeight: '800' },
+  variantHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  addVariantBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: colors.brand.mist,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  addVariantText: { color: colors.brand.primaryDark, fontSize: 12, fontWeight: '800' },
+  variantCard: {
+    backgroundColor: colors.surface.card,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border.soft,
+    padding: 12,
+    marginBottom: 10,
+  },
+  variantCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  variantIndex: { fontSize: 11, fontWeight: '800', color: colors.text.muted },
+  variantGrid: { flexDirection: 'row', gap: 8 },
 });
