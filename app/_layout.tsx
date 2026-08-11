@@ -3,6 +3,8 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { AppProviders } from '@/shared/providers/AppProviders';
 import { CallOverlay } from '@/modules/chat/ui/CallOverlay';
+import { MusicMiniPlayer } from '@/modules/music/ui/MusicMiniPlayer';
+import { dismissibleModalOptions } from '@/shared/components/DragDownDismiss';
 import { colors } from '@/shared/theme/colors';
 
 export default function RootLayout() {
@@ -12,45 +14,121 @@ export default function RootLayout() {
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.surface.canvas } }}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen
+          name="listen"
+          options={{
+            presentation: 'fullScreenModal',
+            ...dismissibleModalOptions,
+          }}
+        />
+        <Stack.Screen
+          name="create-hub"
+          options={{
+            presentation: 'modal',
+            ...dismissibleModalOptions,
+          }}
+        />
+        <Stack.Screen
           name="create-modal"
           options={{
             presentation: 'fullScreenModal',
+            ...dismissibleModalOptions,
             animation: 'fade',
+          }}
+        />
+        <Stack.Screen
+          name="board-create"
+          options={{
+            presentation: 'modal',
+            ...dismissibleModalOptions,
+          }}
+        />
+        <Stack.Screen
+          name="create-preview"
+          options={{
+            presentation: 'fullScreenModal',
+            ...dismissibleModalOptions,
+            animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
+          name="create-editor"
+          options={{
+            presentation: 'fullScreenModal',
+            ...dismissibleModalOptions,
+          }}
+        />
+        <Stack.Screen
+          name="create-crop"
+          options={{
+            presentation: 'fullScreenModal',
+            ...dismissibleModalOptions,
+          }}
+        />
+        <Stack.Screen
+          name="create-publish"
+          options={{
+            presentation: 'fullScreenModal',
+            ...dismissibleModalOptions,
+            animation: 'slide_from_right',
           }}
         />
         <Stack.Screen
           name="create-details"
           options={{
             presentation: 'modal',
-            animation: 'slide_from_bottom',
+            ...dismissibleModalOptions,
           }}
         />
         <Stack.Screen
           name="creator/[handle]"
           options={{
-            presentation: 'transparentModal',
-            animation: 'none',
+            presentation: 'card',
+            animation: 'slide_from_right',
+            gestureEnabled: true,
+            fullScreenGestureEnabled: true,
+          }}
+        />
+        <Stack.Screen
+          name="profile-feed"
+          options={{
+            presentation: 'fullScreenModal',
+            ...dismissibleModalOptions,
           }}
         />
         <Stack.Screen
           name="search"
           options={{
             presentation: 'modal',
-            animation: 'slide_from_bottom',
+            ...dismissibleModalOptions,
           }}
         />
         <Stack.Screen
           name="qr-scan"
           options={{
             presentation: 'fullScreenModal',
-            animation: 'slide_from_bottom',
+            ...dismissibleModalOptions,
           }}
         />
         <Stack.Screen
           name="vault/index"
           options={{
             presentation: 'fullScreenModal',
+            ...dismissibleModalOptions,
             animation: 'fade',
+          }}
+        />
+        <Stack.Screen
+          name="wallet/index"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
+          name="wallet/security"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
           }}
         />
         <Stack.Screen
@@ -58,6 +136,41 @@ export default function RootLayout() {
           options={{
             presentation: 'card',
             animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
+          name="orders"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
+          name="shop/image-search"
+          options={{
+            presentation: 'fullScreenModal',
+            ...dismissibleModalOptions,
+          }}
+        />
+        <Stack.Screen
+          name="shop/cart"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
+          name="shop/checkout"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
+          name="shop/payment"
+          options={{
+            presentation: 'modal',
+            ...dismissibleModalOptions,
           }}
         />
         <Stack.Screen
@@ -72,6 +185,14 @@ export default function RootLayout() {
           options={{
             presentation: 'card',
             animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
+          name="products/[id]/edit"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
+            gestureEnabled: true,
           }}
         />
         <Stack.Screen
@@ -92,11 +213,26 @@ export default function RootLayout() {
           name="store/install/[warehouseId]"
           options={{
             presentation: 'modal',
-            animation: 'slide_from_bottom',
+            ...dismissibleModalOptions,
+          }}
+        />
+        <Stack.Screen
+          name="settings/moderation"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
+          name="legal/[doc]"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
           }}
         />
         <Stack.Screen name="+not-found" />
       </Stack>
+      <MusicMiniPlayer />
       <CallOverlay />
     </AppProviders>
   );

@@ -14,6 +14,8 @@ import { useFeedStore } from '@/modules/feed/state/feed-store';
 import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
 import type { FeedComment } from '@/modules/feed/domain/types';
 import { Avatar } from '@/shared/components/Avatar';
+import { useAuthStore } from '@/modules/auth/state/auth-store';
+import { useModerationStore } from '@/modules/safety/state/moderation-store';
 
 type Props = {
   feedId: string | null;
@@ -27,10 +29,16 @@ export const CommentsBottomSheet = forwardRef<BottomSheetModal, Props>(
     const addComment = useFeedStore((s) => s.addComment);
     const toggleCommentLike = useFeedStore((s) => s.toggleCommentLike);
     const profile = useLoyaltyStore((s) => s.profile);
+    const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+    const blockedUserIds = useModerationStore((s) => s.blockedUserIds);
     const [draft, setDraft] = useState('');
 
     const snapPoints = useMemo(() => ['62%', '90%'], []);
-    const comments = feedId ? commentsByFeedId[feedId] ?? [] : [];
+    const comments = useMemo(() => {
+      const list = feedId ? commentsByFeedId[feedId] ?? [] : [];
+      const blocked = new Set(blockedUserIds.map((id) => id.toLowerCase()));
+      return list.filter((c) => !blocked.has(c.author.toLowerCase()));
+    }, [commentsByFeedId, feedId, blockedUserIds]);
     const myInitial = profile.displayName.slice(0, 1) || 'B';
 
     const renderBackdrop = useCallback(
@@ -43,10 +51,11 @@ export const CommentsBottomSheet = forwardRef<BottomSheetModal, Props>(
     const onSend = useCallback(() => {
       const text = draft.trim();
       if (!text || !feedId) return;
+      if (!isAuthenticated()) return;
       addComment(feedId, text, profile.displayName, myInitial);
       setDraft('');
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }, [addComment, draft, feedId, myInitial, profile.displayName]);
+    }, [addComment, draft, feedId, isAuthenticated, myInitial, profile.displayName]);
 
     const renderItem = useCallback(
       ({ item }: { item: FeedComment }) => (

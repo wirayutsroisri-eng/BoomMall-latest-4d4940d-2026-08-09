@@ -31,6 +31,7 @@ import { useCategoriesStore } from '@/modules/store/state/categories-store';
 import { useStockAlertsStore } from '@/modules/store/state/stock-alerts-store';
 import { useWarehouseStore, MY_SHOP_ID } from '@/modules/warehouse/state/warehouse-store';
 import type { Listing } from '@/modules/warehouse/domain/types';
+import { ProductQuickPreviewSheet } from '@/modules/store/ui/warehouse/ProductQuickPreviewSheet';
 import { colors } from '@/shared/theme/colors';
 
 const SCREEN_W = Dimensions.get('window').width;
@@ -38,10 +39,11 @@ const H_PAD = 14;
 const GRID_GAP = 10;
 const COLS = 2;
 const CARD_W = (SCREEN_W - H_PAD * 2 - GRID_GAP * (COLS - 1)) / COLS;
-/** รูปสินค้าขนาดมาตรฐาน 1:1 */
-const IMAGE_SIZE = Math.round(CARD_W);
+/** รูปสินค้าแสดงอัตราส่วน 4:5 */
+const IMAGE_W = Math.round(CARD_W);
+const IMAGE_H = Math.round((CARD_W * 5) / 4);
 const INFO_H = 88;
-const CARD_H = IMAGE_SIZE + INFO_H;
+const CARD_H = IMAGE_H + INFO_H;
 const PAGE_SIZE = 30;
 
 type ToneFilter = 'all' | StockStatus;
@@ -119,6 +121,7 @@ export function StoreDashboardScreen() {
   const [toneFilter, setToneFilter] = useState<ToneFilter>('all');
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [pageKey, setPageKey] = useState('');
+  const [previewProductId, setPreviewProductId] = useState<string | null>(null);
 
   const masters = useInventoryStore((s) => s.masters);
   const variants = useInventoryStore((s) => s.variants);
@@ -353,7 +356,11 @@ export function StoreDashboardScreen() {
     const label = categories.find((c) => c.key === category)?.label ?? 'ทั้งหมด';
     router.push({
       pathname: '/create-details',
-      params: { category, categoryLabel: category === 'all' ? '' : label },
+      params: {
+        mode: 'sell',
+        category,
+        categoryLabel: category === 'all' ? '' : label,
+      },
     });
   };
 
@@ -381,52 +388,28 @@ export function StoreDashboardScreen() {
     );
   };
 
-  const openProductMenu = (item: GridItem & { kind: 'product' }) => {
-    const { product, listing } = item;
+  const openQuickPreview = (item: GridItem & { kind: 'product' }) => {
     void Haptics.selectionAsync();
-    const activity = activityBySku.get(product.id);
-    const isShared = !!listing;
-
-    const buttons: Array<{ text: string; onPress?: () => void; style?: 'cancel' | 'destructive' }> = [];
-    buttons.push({
-      text: 'จัดการสต็อก & SKU',
-      onPress: () => router.push({ pathname: '/store/product/[id]', params: { id: product.id } }),
-    });
-    if (!isShared) {
-      buttons.push({ text: 'โคลนสินค้า (สร้างเป็นสินค้าใหม่)', onPress: () => cloneProduct(product) });
-    }
-    if (activity && activity.total > 0) {
-      buttons.push({
-        text: `การแจ้งเตือน (${activity.total})`,
-        onPress: () => openAlerts(product, activity),
-      });
-    }
-    if (isShared && listing) {
-      buttons.push({
-        text: listing.status === 'active' ? 'ปิดการขายชั่วคราว' : 'เปิดการขาย',
-        onPress: () =>
-          useWarehouseStore
-            .getState()
-            .setListingStatus(listing.id, listing.status === 'active' ? 'disabled' : 'active'),
-      });
-    }
-    buttons.push({ text: 'ปิด', style: 'cancel' });
-
-    const sourceWarehouse = listing
-      ? warehousesShared.find((w) => w.id === listing.warehouseId)?.name
-      : undefined;
-    Alert.alert(
-      product.title,
-      [
-        product.masterSku,
-        sourceWarehouse ? `ที่มา: ${sourceWarehouse} (Shared Listing — สต็อกกลาง)` : null,
-        product.description ? product.description : null,
-      ]
-        .filter(Boolean)
-        .join('\n'),
-      buttons,
-    );
+    setPreviewProductId(item.product.id);
   };
+
+  /** Tap product card → real product detail (inventory data), not empty edit */
+  const openProductDetail = (item: GridItem & { kind: 'product' }) => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setPreviewProductId(null);
+    router.push({ pathname: '/store/product/[id]', params: { id: item.product.id } });
+  };
+
+  const previewProduct = previewProductId ? mastersById.get(previewProductId) ?? null : null;
+  const previewListing = useMemo(
+    () =>
+      previewProductId
+        ? myListings.find((l) => l.masterSkuId === previewProductId)
+        : undefined,
+    [previewProductId, myListings],
+  );
+  const sheetVariants = (masterId?: string | null) =>
+    masterId ? variantsByMaster.get(masterId) ?? [] : [];
 
   const shareStore = async () => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -525,7 +508,7 @@ export function StoreDashboardScreen() {
     if (item.kind === 'add') {
       return (
         <Pressable style={styles.addTile} onPress={openAddProduct}>
-          <View style={[styles.addTileFrame, { height: IMAGE_SIZE }]}>
+          <View style={[styles.addTileFrame, { height: IMAGE_H }]}>
             <View style={styles.addTilePlus}>
               <Ionicons name="add" size={28} color={colors.brand.primaryDark} />
             </View>
@@ -554,7 +537,12 @@ export function StoreDashboardScreen() {
     const disabled = listing?.status === 'disabled';
 
     return (
-      <Pressable style={[styles.card, disabled && { opacity: 0.55 }]} onPress={() => openProductMenu(item)}>
+      <Pressable
+        style={[styles.card, disabled && { opacity: 0.55 }]}
+        onPress={() => openProductDetail(item)}
+        onLongPress={() => openQuickPreview(item)}
+        delayLongPress={380}
+      >
         <View style={styles.visual}>
           <LinearGradient colors={gradient} style={StyleSheet.absoluteFill} />
           <Image source={{ uri: imageUri }} style={styles.visualImage} resizeMode="cover" />
@@ -609,7 +597,7 @@ export function StoreDashboardScreen() {
             {product.title}
           </Text>
           <Text style={styles.metaLine} numberOfLines={1}>
-            {itemVariants.length} SKU · เหลือ {stock} ชิ้น
+            {itemVariants.length} รุ่น · ขายได้ {stock} ชิ้น
           </Text>
           <Text style={styles.price} numberOfLines={1}>
             {priceLabel}
@@ -839,6 +827,40 @@ export function StoreDashboardScreen() {
           )
         }
       />
+
+      <ProductQuickPreviewSheet
+        visible={!!previewProduct}
+        product={previewProduct}
+        variants={sheetVariants(previewProduct?.id)}
+        availableTotal={previewProduct ? stockOfMaster(previewProduct) : 0}
+        sellStatusLabel={
+          previewListing?.status === 'disabled'
+            ? '🔴 ปิดการขาย'
+            : undefined
+        }
+        sourceWarehouse={
+          previewListing
+            ? warehousesShared.find((w) => w.id === previewListing.warehouseId)?.name
+            : undefined
+        }
+        onClose={() => setPreviewProductId(null)}
+        onOpenFull={() => {
+          if (!previewProduct) return;
+          const id = previewProduct.id;
+          setPreviewProductId(null);
+          router.push({ pathname: '/store/product/[id]', params: { id } });
+        }}
+        onClone={
+          previewProduct && !previewListing
+            ? () => {
+                const master = previewProduct;
+                setPreviewProductId(null);
+                cloneProduct(master);
+              }
+            : undefined
+        }
+      />
+
     </View>
   );
 }
@@ -1160,15 +1182,15 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface.card,
   },
   visual: {
-    width: IMAGE_SIZE,
-    height: IMAGE_SIZE,
+    width: IMAGE_W,
+    height: IMAGE_H,
     position: 'relative',
     overflow: 'hidden',
     backgroundColor: '#0B1F17',
   },
   visualImage: {
-    width: IMAGE_SIZE,
-    height: IMAGE_SIZE,
+    width: IMAGE_W,
+    height: IMAGE_H,
     opacity: 0.88,
   },
   hashTag: {
@@ -1185,7 +1207,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 3,
     backgroundColor: 'rgba(46,140,255,0.85)',
-    maxWidth: IMAGE_SIZE - 40,
+    maxWidth: IMAGE_W - 40,
   },
   hashTagText: {
     color: '#fff',

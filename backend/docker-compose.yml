@@ -1,0 +1,130 @@
+# BoomMall Boom Coin — On-Premise / Private Server stack
+#
+# Security defaults:
+#   - PostgreSQL is NOT published on 0.0.0.0 (no public DB port)
+#   - Ledger DB traffic stays on Docker network `boom_internal`
+#   - Optional loopback-only DB port + PgAdmin via profile `host-tools`
+#   - Optional API container via profile `api` (same internal network + TLS)
+#
+# Usage:
+#   ./scripts/generate-db-certs.sh
+#   cp .env.example .env
+#   docker compose up -d --build
+#   docker compose --profile host-tools up -d          # 127.0.0.1:5432 + PgAdmin
+#   docker compose --profile api --profile host-tools up -d --build
+
+name: boommall-boom-coin
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+networks:
+  boom_internal:
+    driver: bridge
+    # Containers resolve each other by service name (`postgres`, `api`).
+    # Database port is not exposed publicly unless profile `host-tools` is enabled
+    # (and even then only on 127.0.0.1).
+
+volumes:
+  pgdata:
+  pgadmin_data:
+
+services:
+  postgres:
+    build:
+      context: ./deploy/postgres
+    container_name: boommall-coin-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-boom}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-boommall_coin}
+      PG_TLS_CERT_DIR: /tls-ro
+      TZ: Asia/Bangkok
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./deploy/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./deploy/postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./deploy/certs:/tls-ro:ro
+    networks:
+      - boom_internal
+    # Intentionally NO `ports:` — DB is internal-only by default.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    logging: *default-logging
+    shm_size: 256mb
+
+  # Loopback-only TCP proxy → postgres (for host-side prisma / tooling)
+  # Binds 127.0.0.1 only — never the public NIC.
+  db-loopback:
+    profiles: ["host-tools"]
+    image: alpine/socat:1.8.0.0
+    container_name: boommall-coin-pg-loopback
+    restart: unless-stopped
+    command: "TCP-LISTEN:5432,bind=0.0.0.0,fork,reuseaddr TCP:postgres:5432"
+    networks:
+      - boom_internal
+    ports:
+      - "127.0.0.1:${POSTGRES_LOOPBACK_PORT:-5432}:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *default-logging
+
+  pgadmin:
+    profiles: ["host-tools"]
+    image: dpage/pgadmin4:8
+    container_name: boommall-coin-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@boommall.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:?set PGADMIN_DEFAULT_PASSWORD in .env}
+      PGADMIN_CONFIG_SERVER_MODE: "True"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "True"
+      TZ: Asia/Bangkok
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./deploy/pgadmin/servers.json:/pgadmin4/servers.json:ro
+    networks:
+      - boom_internal
+    ports:
+      - "${PGADMIN_HOST_BIND:-127.0.0.1}:${PGADMIN_PORT:-5050}:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *default-logging
+
+  # API shares boom_internal — connects to host `postgres` with TLS (no public DB).
+  api:
+    profiles: ["api"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: boommall-coin-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_PORT: "5432"
+      DATABASE_SSL_MODE: ${DATABASE_SSL_MODE:-require}
+      DATABASE_SSL_ROOT_CERT: /app/deploy/certs/ca.crt
+      NODE_EXTRA_CA_CERTS: /app/deploy/certs/ca.crt
+      TZ: Asia/Bangkok
+    volumes:
+      - ./deploy/certs:/app/deploy/certs:ro
+    networks:
+      - boom_internal
+    ports:
+      - "${API_HOST_BIND:-0.0.0.0}:${PORT:-4000}:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *default-logging

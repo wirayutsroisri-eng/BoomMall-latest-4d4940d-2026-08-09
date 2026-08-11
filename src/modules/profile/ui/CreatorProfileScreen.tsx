@@ -1,5 +1,5 @@
 import React, { forwardRef, useCallback, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,9 +14,26 @@ import {
 } from '@gorhom/bottom-sheet';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
 import { useChatStore } from '@/modules/chat/state/chat-store';
+import { useFollowStore } from '@/modules/social/state/follow-store';
+import { normalizeAuthorHandle } from '@/modules/feed/domain/selectFeedByAuthor';
+import { buildCreatorPortfolio } from '@/modules/profile/data/mockCreatorPortfolio';
+import type { FeedItem } from '@/modules/feed/domain/types';
 import { Avatar } from '@/shared/components/Avatar';
+import { BoomCoinAmountView } from '@/modules/wallet/ui/BoomCoinAmountView';
+import { ReportBlockSheet } from '@/modules/safety/ui/ReportBlockSheet';
+import { useModerationStore } from '@/modules/safety/state/moderation-store';
 import { colors } from '@/shared/theme/colors';
 import { ContentGrid } from './ContentGrid';
+
+function openOwnerFeed(handle: string, item: FeedItem) {
+  router.push({
+    pathname: '/profile-feed',
+    params: {
+      handle: normalizeAuthorHandle(handle),
+      startId: item.id,
+    },
+  });
+}
 
 type Props = {
   /** null while no Visitor Profile is being shown — sheet content simply renders empty. */
@@ -32,7 +49,7 @@ type Props = {
  * clips/portfolio, `vault` shows public verification info (never private data), and
  * `liked` stays private to the account owner.
  */
-type VisitorTab = 'orders' | 'store' | 'vault' | 'liked';
+type VisitorTab = 'store' | 'orders' | 'vault' | 'liked';
 
 function formatCompact(n: number) {
   if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
@@ -48,8 +65,8 @@ function hashString(s: string) {
 }
 
 const TABS: Array<{ key: VisitorTab; icon: keyof typeof Ionicons.glyphMap }> = [
+  { key: 'store', icon: 'grid-outline' },
   { key: 'orders', icon: 'bag-handle-outline' },
-  { key: 'store', icon: 'storefront-outline' },
   { key: 'vault', icon: 'lock-closed-outline' },
   { key: 'liked', icon: 'heart-outline' },
 ];
@@ -61,9 +78,8 @@ const TABS: Array<{ key: VisitorTab; icon: keyof typeof Ionicons.glyphMap }> = [
  *   • 66% (Preview)  — drag up  → expands to 100% (Full Screen)
  *   • 100% (Full)    — drag down → collapses back to 66% Preview
  *   • 66% (Preview)  — drag down again → dismiss entirely, back to Home Feed
- * Uses the exact same layout/scale/styling as the owner's ProfileScreen (squircle avatar,
- * 3-stat row, TikTok-grid tabs). The only structural difference is the action row: prominent
- * [+ติดตาม] and [💬 ส่งข้อความ] buttons instead of Edit/Share.
+ * TikTok visitor-profile action row: [Follow|#FE2C55] [Message|gray] [▼] — shared follow
+ * graph with the feed avatar “+” badge.
  */
 export const CreatorProfileSheet = forwardRef<BottomSheetModal, Props>(
   function CreatorProfileSheet({ handle, feedId, onDismiss }, ref) {
@@ -90,27 +106,67 @@ export const CreatorProfileSheet = forwardRef<BottomSheetModal, Props>(
         handleIndicatorStyle={styles.handleIndicator}
         onDismiss={onDismiss}
       >
-        {handle ? (
-          <CreatorProfileContent handle={handle} feedId={feedId ?? undefined} />
-        ) : (
-          <View />
-        )}
+        {handle ? <CreatorProfileSheetBody handle={handle} feedId={feedId ?? undefined} /> : <View />}
       </BottomSheetModal>
     );
   },
 );
 
-function CreatorProfileContent({ handle, feedId }: { handle: string; feedId?: string }) {
+function CreatorProfileSheetBody({ handle, feedId }: { handle: string; feedId?: string }) {
   const { dismiss } = useBottomSheetModal();
-  const close = useCallback(() => dismiss(), [dismiss]);
+  return (
+    <CreatorProfileBody
+      handle={handle}
+      feedId={feedId}
+      onClose={() => dismiss()}
+      mode="sheet"
+    />
+  );
+}
+
+/** โปรไฟล์เต็มจอ — ใช้กับปัดซ้าย/ขวาแบบ TikTok จากฟีด */
+export function CreatorProfilePage({
+  handle,
+  feedId,
+  onClose,
+}: {
+  handle: string;
+  feedId?: string;
+  onClose: () => void;
+}) {
+  return (
+    <View style={styles.pageRoot}>
+      <CreatorProfileBody handle={handle} feedId={feedId} onClose={onClose} mode="page" />
+    </View>
+  );
+}
+
+function CreatorProfileBody({
+  handle,
+  feedId,
+  onClose,
+  mode,
+}: {
+  handle: string;
+  feedId?: string;
+  onClose: () => void;
+  mode: 'sheet' | 'page';
+}) {
+  const close = onClose;
   const items = useFeedStore((s) => s.items);
   const startConversationWithCreator = useChatStore((s) => s.startConversationWithCreator);
-  const [tab, setTab] = useState<VisitorTab>('orders');
-  const [following, setFollowing] = useState(false);
+  const followKey = handle.replace(/^@/, '').toLowerCase();
+  const following = useFollowStore((s) => Boolean(s.following[followKey]));
+  const follow = useFollowStore((s) => s.follow);
+  const unfollow = useFollowStore((s) => s.unfollow);
+  const blockUser = useModerationStore((s) => s.blockUser);
+  const [tab, setTab] = useState<VisitorTab>('store');
+  const [reportOpen, setReportOpen] = useState(false);
 
-  const creatorItems = useMemo(
-    () => items.filter((i) => i.authorHandle.replace(/^@/, '') === handle),
-    [items, handle],
+  const ownerKey = normalizeAuthorHandle(handle ?? '');
+  const realCreatorItems = useMemo(
+    () => items.filter((i) => normalizeAuthorHandle(i.authorHandle) === ownerKey),
+    [items, ownerKey],
   );
 
   /** Prefer the exact clip the user swiped/tapped from; fall back to first creator post */
@@ -119,10 +175,10 @@ function CreatorProfileContent({ handle, feedId }: { handle: string; feedId?: st
       const match = items.find((i) => i.id === feedId);
       if (match) return match;
     }
-    return creatorItems[0];
-  }, [creatorItems, feedId, items]);
+    return realCreatorItems[0];
+  }, [realCreatorItems, feedId, items]);
 
-  const first = creatorItems[0];
+  const first = realCreatorItems[0];
   const displayName = contextItem?.author ?? first?.author ?? handle;
   const displayHandle = `@${handle}`;
   const shopName = contextItem?.product.shopName ?? first?.product.shopName ?? displayName;
@@ -131,9 +187,32 @@ function CreatorProfileContent({ handle, feedId }: { handle: string; feedId?: st
   const categoryText = categoryTags.length > 0 ? categoryTags.join(' · ') : `${tier} · ${shopName}`;
   const accent = contextItem?.gradient?.[0] ?? first?.gradient?.[0] ?? colors.brand.primary;
 
+  /** กริดคลิป/โชว์รูม — โพสต์จริง + คอนเทนต์จำลองเติมให้ครบแบบโปรไฟล์ TikTok */
+  const creatorItems = useMemo(
+    () => buildCreatorPortfolio(handle, displayName, shopName, realCreatorItems),
+    [handle, displayName, shopName, realCreatorItems],
+  );
+
   const seed = useMemo(() => hashString(handle), [handle]);
   const followingCount = 20 + (seed % 300);
-  const followersCount = 800 + (seed % 68000);
+  const baseFollowers = 800 + (seed % 68000);
+  /** TikTok: เลขผู้ติดตามขยับทันทีเมื่อกด Follow */
+  const followersCount = baseFollowers + (following ? 1 : 0);
+  /** ได้รับ Coin = ยอดทิปจริงจากคลิปของครีเอเตอร์ (ขึ้นเมื่อมีคนกดเหรียญ) */
+  const coinsReceived = useMemo(
+    () => realCreatorItems.reduce((sum, item) => sum + (item.tips ?? 0), 0),
+    [realCreatorItems],
+  );
+  const productsCount = useMemo(
+    () =>
+      Math.max(
+        12,
+        creatorItems.filter((i) => (i.product?.basePrice ?? 0) > 0).length ||
+          Math.floor(coinsReceived / 10_000) ||
+          12,
+      ),
+    [creatorItems, coinsReceived],
+  );
   const bioText =
     contextItem?.caption?.trim() ||
     `ร้าน/ช่างจาก ${shopName} พร้อมให้บริการลูกค้าทั่วจันทบุรีผ่าน BoomMall`;
@@ -180,23 +259,32 @@ function CreatorProfileContent({ handle, feedId }: { handle: string; feedId?: st
     });
   };
 
-  const toggleFollow = () => {
-    void Haptics.selectionAsync();
-    setFollowing((f) => {
-      const next = !f;
-      // Facebook-style: following a creator here also adds them as a chat contact in the
-      // background, so [💬 ส่งข้อความ] is instantly ready without a separate friend-request step.
-      if (next) startConversationWithCreator(displayName, displayHandle, accent);
-      return next;
-    });
+  /** TikTok: ติดตามทันที / กำลังติดตาม → ยืนยันก่อนเลิกติดตาม */
+  const onFollowPress = () => {
+    if (!following) {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      follow(handle);
+      return;
+    }
+    Alert.alert(
+      `เลิกติดตาม ${displayName}?`,
+      'โพสต์ของบัญชีนี้จะไม่โชว์ในแท็บกำลังติดตามอีก',
+      [
+        { text: 'ยกเลิก', style: 'cancel' },
+        {
+          text: 'เลิกติดตาม',
+          style: 'destructive',
+          onPress: () => {
+            void Haptics.selectionAsync();
+            unfollow(handle);
+          },
+        },
+      ],
+    );
   };
 
-  return (
-    <BottomSheetScrollView
-      style={styles.root}
-      contentContainerStyle={styles.scrollContent}
-      showsVerticalScrollIndicator={false}
-    >
+  const body = (
+    <>
       <View style={styles.coverBanner}>
         <LinearGradient
           colors={contextItem?.gradient ?? first?.gradient ?? [accent, colors.brand.ink]}
@@ -208,62 +296,115 @@ function CreatorProfileContent({ handle, feedId }: { handle: string; feedId?: st
           <Pressable hitSlop={10} onPress={() => close()} style={styles.coverIconBtn}>
             <Ionicons name="chevron-back" size={20} color="#fff" />
           </Pressable>
-          <Pressable hitSlop={10} onPress={() => close()} style={styles.coverIconBtn}>
-            <Ionicons name="chevron-down" size={20} color="#fff" />
-          </Pressable>
+          {mode === 'sheet' ? (
+            <Pressable hitSlop={10} onPress={() => close()} style={styles.coverIconBtn}>
+              <Ionicons name="chevron-down" size={20} color="#fff" />
+            </Pressable>
+          ) : (
+            <View style={{ width: 32 }} />
+          )}
         </View>
       </View>
 
-      <View style={styles.pageInfoRow}>
-        <View style={styles.avatarWrap}>
-          <Avatar
-            initial={displayName.slice(0, 1)}
-            backgroundColor={accent}
-            size={84}
-            radius={20}
-            borderWidth={3}
-            borderColor={colors.surface.canvas}
-            textStyle={styles.avatarText}
+      <View style={styles.identityBlock}>
+        <Avatar
+          initial={displayName.slice(0, 1)}
+          backgroundColor={accent}
+          size={88}
+          radius={44}
+          borderWidth={3}
+          borderColor={colors.surface.canvas}
+          textStyle={styles.avatarText}
+        />
+        <Text style={styles.displayName} numberOfLines={1}>
+          {displayName}
+        </Text>
+        <Text style={styles.handleCentered} numberOfLines={1}>
+          {displayHandle}
+        </Text>
+      </View>
+
+      <View style={styles.statsRow}>
+        <View style={styles.statCell}>
+          <Text style={styles.statValue}>{formatCompact(followingCount)}</Text>
+          <Text style={styles.statLabel}>กำลังติดตาม</Text>
+        </View>
+        <View style={styles.statCell}>
+          <Text style={styles.statValue}>{formatCompact(followersCount)}</Text>
+          <Text style={styles.statLabel}>ผู้ติดตาม</Text>
+        </View>
+        <View style={styles.statCell}>
+          <BoomCoinAmountView
+            amount={coinsReceived}
+            variant="compact"
+            label="ได้รับ Coin"
+            iconSize={22}
+            valueSize={17}
+            animate
+            onPress={() =>
+              Alert.alert(
+                'ได้รับ Coin',
+                'ยอดสะสมจากผู้สนับสนุนในคลิป — ขึ้นเมื่อมีคนกดเหรียญ (แทนหัวใจ) · ไม่ใช่ยอด Wallet ส่วนตัว',
+              )
+            }
+            valueStyle={styles.statValue}
+            labelStyle={styles.statLabel}
           />
         </View>
-        <View style={styles.pageInfoBody}>
-          <Text style={styles.shopName} numberOfLines={1}>{displayName}</Text>
-          <Text style={styles.statsLine} numberOfLines={1}>
-            <Text style={styles.statsLineStrong}>{formatCompact(followersCount)}</Text> ผู้ติดตาม
-            {'  •  '}
-            <Text style={styles.statsLineStrong}>{formatCompact(followingCount)}</Text> กำลังติดตาม
-          </Text>
+        <View style={styles.statCell}>
+          <Text style={styles.statValue}>{formatCompact(productsCount)}</Text>
+          <Text style={styles.statLabel}>สินค้า</Text>
         </View>
       </View>
 
-      <View style={styles.handleRow}>
-        <Text style={styles.handleText} numberOfLines={1}>{displayHandle}</Text>
-        <View style={styles.vipPill}>
-          <Text style={styles.vipText}>{tier} · ผู้สร้างคอนเทนต์</Text>
-        </View>
-      </View>
-      <Text style={styles.categoryText} numberOfLines={1}>{categoryText}</Text>
-      <Text style={styles.bio}>{bioText}</Text>
-
+      {/* TikTok: Follow (pink) | Message (gray) | ▼ — ความกว้างเท่ากัน + ปุ่มเหลี่ยม */}
       <View style={styles.actionRow}>
         <Pressable
-          style={[styles.followBtnOutline, following && styles.followBtnOutlineActive]}
-          onPress={toggleFollow}
+          style={[styles.followBtn, following && styles.followBtnFollowing]}
+          onPress={onFollowPress}
         >
-          <Ionicons
-            name={following ? 'notifications' : 'add'}
-            size={16}
-            color={colors.text.primary}
-          />
-          <Text style={styles.followBtnOutlineText}>
+          <Text style={[styles.followBtnText, following && styles.followBtnTextFollowing]}>
             {following ? 'กำลังติดตาม' : 'ติดตาม'}
           </Text>
         </Pressable>
-        <Pressable style={styles.messageBtnPrimary} onPress={messageCreator}>
-          <Ionicons name="chatbubble-ellipses" size={17} color={colors.brand.ink} />
-          <Text style={styles.messageBtnPrimaryText}>ส่งข้อความ / ทักแชต</Text>
+        <Pressable style={styles.messageBtn} onPress={messageCreator}>
+          <Text style={styles.messageBtnText}>ข้อความ</Text>
+        </Pressable>
+        <Pressable
+          style={styles.moreBtn}
+          onPress={() =>
+            Alert.alert(displayName, undefined, [
+              {
+                text: following ? 'เลิกติดตาม' : 'ติดตาม',
+                style: following ? 'destructive' : 'default',
+                onPress: onFollowPress,
+              },
+              { text: 'แชร์โปรไฟล์', onPress: () => Alert.alert('แชร์แล้ว', displayHandle) },
+              {
+                text: 'รายงาน',
+                style: 'destructive',
+                onPress: () => setReportOpen(true),
+              },
+              {
+                text: 'บล็อก',
+                style: 'destructive',
+                onPress: () => {
+                  blockUser(followKey);
+                  Alert.alert('บล็อกแล้ว', `จะไม่แสดงคอนเทนต์จาก ${displayName}`);
+                },
+              },
+              { text: 'ปิด', style: 'cancel' },
+            ])
+          }
+        >
+          <Ionicons name="chevron-down" size={16} color={colors.text.primary} />
         </Pressable>
       </View>
+
+      <Text style={styles.categoryText} numberOfLines={1}>
+        {categoryText} · {tier}
+      </Text>
+      <Text style={styles.bio}>{bioText}</Text>
 
       <View style={styles.tabBar}>
         {TABS.map((t) => {
@@ -281,27 +422,28 @@ function CreatorProfileContent({ handle, feedId }: { handle: string; feedId?: st
         })}
       </View>
 
+      {tab === 'store' ? (
+        <ContentGrid
+          mode="content"
+          items={creatorItems}
+          pinnedCount={3}
+          emptyText="ยังไม่มีคลิปจากผู้สร้างรายนี้"
+          onPressItem={(item) => {
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            openOwnerFeed(ownerKey, item);
+          }}
+        />
+      ) : null}
+
       {tab === 'orders' ? (
         <ContentGrid
           mode="showroom"
           items={creatorItems}
           emptyIcon="pricetags-outline"
           emptyText="ยังไม่มีสินค้าในโชวรูม"
-          onPressItem={() => {
+          onPressItem={(item) => {
             void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            close();
-          }}
-        />
-      ) : null}
-
-      {tab === 'store' ? (
-        <ContentGrid
-          mode="content"
-          items={creatorItems}
-          emptyText="ยังไม่มีคลิปจากผู้สร้างรายนี้"
-          onPressItem={() => {
-            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            close();
+            openOwnerFeed(ownerKey, item);
           }}
         />
       ) : null}
@@ -326,11 +468,58 @@ function CreatorProfileContent({ handle, feedId }: { handle: string; feedId?: st
           <Text style={styles.gridEmptyText}>รายการถูกใจของผู้ใช้นี้ถูกตั้งเป็นส่วนตัว</Text>
         </View>
       ) : null}
-    </BottomSheetScrollView>
+    </>
+  );
+
+  if (mode === 'sheet') {
+    return (
+      <>
+        <BottomSheetScrollView
+          style={styles.root}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {body}
+        </BottomSheetScrollView>
+        <ReportBlockSheet
+          visible={reportOpen}
+          onClose={() => setReportOpen(false)}
+          kind="user"
+          targetId={followKey}
+          targetLabel={displayName}
+          blockUserId={followKey}
+        />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <ScrollView
+        style={styles.root}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        bounces
+      >
+        {body}
+      </ScrollView>
+      <ReportBlockSheet
+        visible={reportOpen}
+        onClose={() => setReportOpen(false)}
+        kind="user"
+        targetId={followKey}
+        targetLabel={displayName}
+        blockUserId={followKey}
+      />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
+  pageRoot: {
+    flex: 1,
+    backgroundColor: colors.surface.canvas,
+  },
   sheetBg: {
     backgroundColor: colors.surface.canvas,
     borderTopLeftRadius: 20,
@@ -371,115 +560,108 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  pageInfoRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
+  identityBlock: {
+    alignItems: 'center',
+    marginTop: -44,
     paddingHorizontal: 16,
-  },
-  avatarWrap: {
-    marginTop: -36,
+    gap: 4,
   },
   avatarText: {
     fontSize: 34,
   },
-  pageInfoBody: {
-    flex: 1,
-    marginLeft: 12,
-    paddingBottom: 6,
-  },
-  shopName: {
-    fontSize: 19,
+  displayName: {
+    marginTop: 8,
+    fontSize: 20,
     fontWeight: '900',
     color: colors.text.primary,
   },
-  statsLine: {
-    fontSize: 12.5,
-    color: colors.text.secondary,
-    marginTop: 4,
-  },
-  statsLineStrong: {
-    fontWeight: '800',
-    color: colors.text.primary,
-  },
-  handleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
-    marginTop: 12,
-  },
-  handleText: {
+  handleCentered: {
     fontSize: 13,
     color: colors.text.secondary,
     fontWeight: '600',
+  },
+  statsRow: {
+    flexDirection: 'row',
+    marginTop: 14,
+    paddingHorizontal: 8,
+  },
+  statCell: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 2,
+  },
+  statValue: {
+    fontSize: 17,
+    fontWeight: '900',
+    color: colors.text.primary,
+  },
+  statLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.text.secondary,
   },
   categoryText: {
     fontSize: 12,
     color: colors.text.secondary,
     fontWeight: '600',
     paddingHorizontal: 16,
-    marginTop: 4,
+    marginTop: 12,
   },
   bio: {
     textAlign: 'left',
     color: colors.text.primary,
     fontSize: 13,
-    marginTop: 8,
+    marginTop: 6,
     paddingHorizontal: 16,
     lineHeight: 18,
   },
-  vipPill: {
-    backgroundColor: colors.brand.ink,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 8,
-  },
-  vipText: {
-    color: colors.brand.primary,
-    fontWeight: '900',
-    fontSize: 11,
-  },
   actionRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
     paddingHorizontal: 16,
-    marginTop: 14,
+    marginTop: 16,
   },
-  followBtnOutline: {
+  followBtn: {
     flex: 1,
-    flexDirection: 'row',
+    height: 36,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    backgroundColor: colors.surface.card,
-    borderRadius: 10,
-    paddingVertical: 9,
-    borderWidth: 1,
-    borderColor: colors.border.strong,
+    backgroundColor: colors.brand.pink,
+    borderRadius: 4,
   },
-  followBtnOutlineActive: {
-    backgroundColor: colors.brand.mist,
-    borderColor: colors.brand.primaryDark,
+  followBtnFollowing: {
+    backgroundColor: '#F1F1F2',
   },
-  followBtnOutlineText: {
-    fontWeight: '800',
+  followBtnText: {
+    fontWeight: '700',
+    color: '#fff',
+    fontSize: 15,
+  },
+  followBtnTextFollowing: {
     color: colors.text.primary,
-    fontSize: 13,
+    fontSize: 14,
   },
-  messageBtnPrimary: {
-    flex: 1.6,
-    flexDirection: 'row',
+  messageBtn: {
+    flex: 1,
+    height: 36,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    backgroundColor: colors.brand.primary,
-    borderRadius: 10,
-    paddingVertical: 9,
+    backgroundColor: '#F1F1F2',
+    borderRadius: 4,
   },
-  messageBtnPrimaryText: {
-    fontWeight: '800',
-    color: colors.brand.ink,
-    fontSize: 13,
+  messageBtnText: {
+    fontWeight: '700',
+    color: colors.text.primary,
+    fontSize: 15,
+  },
+  moreBtn: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F1F1F2',
+    borderRadius: 4,
   },
   publicInfoCard: {
     flexDirection: 'row',

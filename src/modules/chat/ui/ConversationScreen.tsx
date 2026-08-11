@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -13,7 +13,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useIsFocused } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
@@ -26,11 +26,19 @@ import {
 } from 'expo-audio';
 import { useChatStore } from '@/modules/chat/state/chat-store';
 import { useCallStore } from '@/modules/chat/state/call-store';
-import { useFeedStore } from '@/modules/feed/state/feed-store';
+import { usePresenceSession } from '@/modules/chat/ui/usePresenceSession';
+import { selectChatImages } from '@/modules/chat/domain/selectChatImages';
+import {
+  MediaGalleryPicker,
+  type PickedGalleryItem,
+} from '@/shared/media/MediaGalleryPicker';
 import { ChatBubble } from './ChatBubble';
+import { ChatMediaViewer } from './ChatMediaViewer';
 import { AttachmentSheet, type AttachmentAction } from './AttachmentSheet';
 import { QUOTATION_TEMPLATES } from '@/modules/chat/data/mockQuotationTemplates';
 import { colors } from '@/shared/theme/colors';
+import { ENABLE_CALLS } from '@/shared/compliance/appStoreGates';
+import { ReportBlockSheet } from '@/modules/safety/ui/ReportBlockSheet';
 
 type BackContext = {
   from?: string;
@@ -48,12 +56,40 @@ type Props = {
 
 export function ConversationScreen({ conversationId, backContext, noteId }: Props) {
   const insets = useSafeAreaInsets();
+  const chatFocused = useIsFocused();
   const [text, setText] = useState('');
   const [noteDismissed, setNoteDismissed] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [mediaViewer, setMediaViewer] = useState<{ messageId: string } | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
   const inputRef = useRef<TextInput>(null);
+
+  /** อยู่ในห้องแชต → heartbeat ออนไลน์ */
+  usePresenceSession('chat', chatFocused);
+
   const conversation = useChatStore((s) => s.getConversation(conversationId));
   const messages = useChatStore((s) => s.messagesById[conversationId] ?? []);
+  const allConversations = useChatStore((s) => s.conversations);
+  const chatImages = useMemo(() => selectChatImages(messages), [messages]);
+  const mediaViewerIndex = useMemo(() => {
+    if (!mediaViewer) return 0;
+    const i = chatImages.findIndex((m) => m.messageId === mediaViewer.messageId);
+    return i >= 0 ? i : 0;
+  }, [mediaViewer, chatImages]);
+  const forwardTargets = useMemo(
+    () =>
+      allConversations
+        .filter((c) => c.id !== conversationId && !c.isArchived && !c.isHidden)
+        .slice(0, 12)
+        .map((c) => ({
+          id: c.id,
+          peerName: c.peerName,
+          avatarColor: c.avatarColor,
+          avatarUri: c.avatarUri,
+        })),
+    [allConversations, conversationId],
+  );
   const notes = useChatStore((s) => s.notes);
   const activeNote = noteId ? notes.find((n) => n.id === noteId) : undefined;
   const showNoteBanner = Boolean(activeNote) && !noteDismissed;
@@ -63,6 +99,7 @@ export function ConversationScreen({ conversationId, backContext, noteId }: Prop
   const markConversationRead = useChatStore((s) => s.markConversationRead);
   const sendProductCard = useChatStore((s) => s.sendProductCard);
   const sendImage = useChatStore((s) => s.sendImage);
+  const deleteMessage = useChatStore((s) => s.deleteMessage);
   const sendQuotation = useChatStore((s) => s.sendQuotation);
   const startCall = useCallStore((s) => s.startCall);
   const setActive = useCallStore((s) => s.setActive);
@@ -115,6 +152,9 @@ export function ConversationScreen({ conversationId, backContext, noteId }: Prop
     }
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
+      const { pauseMusicForRecording } = await import('@/modules/music/audio/music-session');
+      await pauseMusicForRecording();
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
       await audioRecorder.prepareToRecordAsync();
       audioRecorder.record();
     } catch {
@@ -148,21 +188,21 @@ export function ConversationScreen({ conversationId, backContext, noteId }: Prop
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
-  const pickAndSendImage = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('ต้องการสิทธิ์เข้าถึงคลังภาพ', 'กรุณาอนุญาตให้ BoomMall เข้าถึงรูปภาพในเครื่อง');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images', 'videos'],
-      allowsEditing: true,
-      quality: 0.7,
+  const pickAndSendImage = () => {
+    setGalleryOpen(true);
+  };
+
+  const onGallerySend = (items: PickedGalleryItem[]) => {
+    // Close picker first so UI never looks frozen on the gallery overlay
+    setGalleryOpen(false);
+    if (!items.length) return;
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    // Stagger slightly so Zustand updates don't batch into one frozen paint on many photos
+    items.forEach((item, index) => {
+      setTimeout(() => {
+        sendImage(conversationId, item.uri);
+      }, index * 30);
     });
-    if (!result.canceled && result.assets[0]?.uri) {
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      sendImage(conversationId, result.assets[0].uri);
-    }
   };
 
   const takeAndSendPhoto = async () => {
@@ -173,7 +213,7 @@ export function ConversationScreen({ conversationId, backContext, noteId }: Prop
     }
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ['images'],
-      allowsEditing: true,
+      allowsEditing: false,
       quality: 0.7,
     });
     if (!result.canceled && result.assets[0]?.uri) {
@@ -199,12 +239,10 @@ export function ConversationScreen({ conversationId, backContext, noteId }: Prop
 
   const goBack = () => {
     if (backContext?.from === 'creator' && backContext.handle) {
-      const handle = backContext.handle;
+      const handle = backContext.handle.replace(/^@/, '');
       const feedId = backContext.feedId;
-      router.navigate('/(tabs)');
-      requestAnimationFrame(() => {
-        useFeedStore.getState().openCreatorProfile(handle, feedId);
-      });
+      const q = feedId ? `?feedId=${encodeURIComponent(feedId)}` : '';
+      router.replace(`/creator/${encodeURIComponent(handle)}${q}`);
       return;
     }
     if (router.canGoBack()) {
@@ -229,16 +267,10 @@ export function ConversationScreen({ conversationId, backContext, noteId }: Prop
         void takeAndSendPhoto();
         break;
       case 'gallery':
-        void pickAndSendImage();
-        break;
-      case 'file':
-        Alert.alert('ส่งไฟล์', 'รองรับเอกสาร PDF / ZIP ในรอบถัดไป');
+        pickAndSendImage();
         break;
       case 'reply':
         focusInput();
-        break;
-      case 'location':
-        Alert.alert('ตำแหน่งที่ตั้ง', 'แชร์พิกัดตำแหน่งจะเปิดใช้งานเร็ว ๆ นี้');
         break;
       case 'coupon':
         sendTestQuotation();
@@ -253,7 +285,11 @@ export function ConversationScreen({ conversationId, backContext, noteId }: Prop
         });
         break;
       case 'call':
+        if (!ENABLE_CALLS) break;
         startCall(conversation.peerName, 'voice');
+        break;
+      case 'file':
+      case 'location':
         break;
     }
   };
@@ -283,17 +319,31 @@ export function ConversationScreen({ conversationId, backContext, noteId }: Prop
                 : `${conversation.peerHandle} · WeChat Protocol`}
           </Text>
         </View>
+        {ENABLE_CALLS ? (
+          <>
+            <Pressable
+              style={styles.callBtn}
+              onPress={() => startCall(conversation.peerName, 'voice')}
+            >
+              <Ionicons name="call" size={18} color={colors.brand.ink} />
+            </Pressable>
+            <Pressable
+              style={styles.videoBtn}
+              onPress={() => startCall(conversation.peerName, 'video')}
+            >
+              <Ionicons name="videocam" size={18} color={colors.text.inverse} />
+            </Pressable>
+          </>
+        ) : null}
         <Pressable
           style={styles.callBtn}
-          onPress={() => startCall(conversation.peerName, 'voice')}
+          onPress={() => {
+            void Haptics.selectionAsync();
+            setReportOpen(true);
+          }}
+          accessibilityLabel="รายงานหรือบล็อก"
         >
-          <Ionicons name="call" size={18} color={colors.brand.ink} />
-        </Pressable>
-        <Pressable
-          style={styles.videoBtn}
-          onPress={() => startCall(conversation.peerName, 'video')}
-        >
-          <Ionicons name="videocam" size={18} color={colors.text.inverse} />
+          <Ionicons name="flag-outline" size={18} color={colors.brand.ink} />
         </Pressable>
       </View>
 
@@ -311,6 +361,7 @@ export function ConversationScreen({ conversationId, backContext, noteId }: Prop
               message={item}
               onPay={(qid) => payQuotation(conversationId, qid)}
               onConvertProduct={(pid) => convertProductToPayment(conversationId, pid)}
+              onPressImage={(messageId) => setMediaViewer({ messageId })}
             />
           )}
         />
@@ -420,6 +471,44 @@ export function ConversationScreen({ conversationId, backContext, noteId }: Prop
       </View>
 
       <AttachmentSheet visible={sheetOpen} onClose={closeSheet} onSelect={handleAttachment} />
+
+      <MediaGalleryPicker
+        visible={galleryOpen}
+        onClose={() => setGalleryOpen(false)}
+        onSend={onGallerySend}
+        initialMode="photo"
+        allowModeSwitch
+        selectionLimit={20}
+        sendLabel="ส่ง"
+        title="ล่าสุด"
+      />
+
+      <ChatMediaViewer
+        visible={Boolean(mediaViewer) && chatImages.length > 0}
+        items={chatImages}
+        initialIndex={mediaViewerIndex}
+        onClose={() => setMediaViewer(null)}
+        forwardTargets={forwardTargets}
+        onForward={(targetId, imageUri) => {
+          sendImage(targetId, imageUri);
+        }}
+        onDelete={(messageId) => {
+          deleteMessage(conversationId, messageId);
+          const remaining = chatImages.filter((m) => m.messageId !== messageId);
+          if (!remaining.length) {
+            setMediaViewer(null);
+          }
+        }}
+      />
+
+      <ReportBlockSheet
+        visible={reportOpen}
+        onClose={() => setReportOpen(false)}
+        kind="user"
+        targetId={conversation.peerHandle || conversationId}
+        targetLabel={conversation.peerName}
+        blockUserId={conversation.peerHandle || conversationId}
+      />
     </KeyboardAvoidingView>
   );
 }

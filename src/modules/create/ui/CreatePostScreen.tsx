@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import {
   Alert,
   Image,
@@ -12,42 +12,58 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
+import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { useInventoryStore } from '@/modules/commerce/state/inventory-store';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
 import { useWarehouseStore } from '@/modules/warehouse/state/warehouse-store';
 import type { ClonePrefill } from '@/modules/commerce/domain/stock-core';
-import type {
-  CommerceChannel,
-  CustomFieldValue,
-  WarehouseId,
-} from '@/modules/commerce/domain/types';
+import {
+  channelToCondition,
+  conditionHint,
+  conditionLabel,
+  conditionToChannel,
+  type ProductCondition,
+} from '@/modules/commerce/domain/product-condition';
+import type { CustomFieldValue, WarehouseId } from '@/modules/commerce/domain/types';
+import {
+  MediaGalleryPicker,
+  type PickedGalleryItem,
+} from '@/shared/media/MediaGalleryPicker';
 import { colors } from '@/shared/theme/colors';
+
+/** Paste clipboard into form fields (works when iOS long-press paste is flaky). */
+async function pasteFromClipboard(
+  onChange: (v: string) => void,
+  opts?: { appendTo?: string; numeric?: boolean },
+) {
+  try {
+    const raw = await Clipboard.getStringAsync();
+    if (!raw?.trim()) {
+      Alert.alert('คลิปบอร์ดว่าง', 'คัดลอกข้อความก่อน แล้วกดวางอีกครั้ง');
+      return;
+    }
+    let text = raw;
+    if (opts?.numeric) {
+      text = raw.replace(/[^\d.]/g, '');
+      if (!text) {
+        Alert.alert('วางไม่ได้', 'ในคลิปบอร์ดไม่มีตัวเลข');
+        return;
+      }
+      onChange(text);
+    } else if (opts?.appendTo && opts.appendTo.length > 0) {
+      onChange(`${opts.appendTo}${opts.appendTo.endsWith('\n') ? '' : '\n'}${text}`);
+    } else {
+      onChange(text);
+    }
+    void Haptics.selectionAsync();
+  } catch {
+    Alert.alert('วางไม่สำเร็จ', 'ลองคัดลอกใหม่แล้วกดวางอีกครั้ง');
+  }
+}
 
 const MAX_PRODUCT_IMAGES = 6;
 const MY_WAREHOUSE_ID = 'wh-boom-ev';
-
-type VariantRow = {
-  key: string;
-  label: string;
-  sku: string;
-  price: string;
-  onHand: string;
-};
-
-let rowSeq = 0;
-function newRow(partial?: Partial<VariantRow>): VariantRow {
-  rowSeq += 1;
-  return {
-    key: `row-${Date.now()}-${rowSeq}`,
-    label: 'Default',
-    sku: `BEV-CUSTOM-${`${Date.now()}`.slice(-5)}`,
-    price: '',
-    onHand: '0',
-    ...partial,
-  };
-}
 
 export function CreatePostScreen() {
   const insets = useSafeAreaInsets();
@@ -55,17 +71,18 @@ export function CreatePostScreen() {
     category?: string;
     categoryLabel?: string;
     clone?: string;
+    mode?: string;
   }>();
 
-  /** Clone Product → NEW PRODUCT MODE with prefilled data (never update-in-place) */
-  const prefill = useMemo<ClonePrefill | null>(() => {
-    if (typeof params.clone !== 'string' || !params.clone) return null;
+  /** คัดลอกสินค้า → ลงเป็นชิ้นใหม่ (ไม่แก้ของเดิม) */
+  let prefill: ClonePrefill | null = null;
+  if (typeof params.clone === 'string' && params.clone) {
     try {
-      return JSON.parse(params.clone) as ClonePrefill;
+      prefill = JSON.parse(params.clone) as ClonePrefill;
     } catch {
-      return null;
+      prefill = null;
     }
-  }, [params.clone]);
+  }
 
   const categoryKey =
     typeof params.category === 'string' && params.category !== 'all'
@@ -76,39 +93,38 @@ export function CreatePostScreen() {
       ? params.categoryLabel
       : undefined;
 
-  const [mode, setMode] = useState<'post' | 'sell'>('sell');
+  /** Hub / store / clone → sell-only (ไม่ปนคลิปหรือเว็บบอร์ด) */
+  const sellOnly = params.mode === 'sell' || Boolean(prefill);
+  const [mode, setMode] = useState<'post' | 'sell'>(() => (sellOnly ? 'sell' : 'post'));
   const [caption, setCaption] = useState('');
-  const [postPrice, setPostPrice] = useState('');
-  const [postChannel, setPostChannel] = useState<CommerceChannel>('B2C');
+  const [postPrice, setPostPrice] = useState('1990');
+  const [postCondition, setPostCondition] = useState<ProductCondition>('new');
   const [mediaUri, setMediaUri] = useState<string | null>(null);
   const [mediaType, setMediaType] = useState<'image' | 'video' | null>(null);
+  /** Legacy clip+sell — off by default; content clips use CameraStudio hub path */
+  const [sellWithClip, setSellWithClip] = useState(false);
+  const [postProductName, setPostProductName] = useState('');
+  const [postStock, setPostStock] = useState('10');
 
   const [sellImages, setSellImages] = useState<string[]>(() => prefill?.imageUris ?? []);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [galleryPurpose, setGalleryPurpose] = useState<'post' | 'sell'>('sell');
   const [title, setTitle] = useState(() => prefill?.title ?? '');
   const [description, setDescription] = useState(() => prefill?.description ?? '');
   const [masterSku, setMasterSku] = useState(() =>
-    prefill ? `BEV-CLONE-${`${Date.now()}`.slice(-5)}` : 'BEV-CUSTOM-',
+    prefill ? `BEV-CLONE-${`${Date.now()}`.slice(-5)}` : `BEV-${`${Date.now()}`.slice(-6)}`,
   );
-  const [channel, setChannel] = useState<CommerceChannel>(() => prefill?.channel ?? 'B2C');
+  const [condition, setCondition] = useState<ProductCondition>(() =>
+    channelToCondition(prefill?.channel ?? 'B2C'),
+  );
   const [basePrice, setBasePrice] = useState(() =>
     prefill ? String(prefill.basePrice) : '1990',
   );
-  const [variantRows, setVariantRows] = useState<VariantRow[]>(() =>
-    prefill?.variants.length
-      ? prefill.variants.map((v) =>
-          newRow({
-            label: v.label,
-            sku: v.suggestedSku,
-            price: String(v.price),
-            onHand: '0', // Clone never carries stock — user sets it fresh
-          }),
-        )
-      : [newRow({ price: '1990', onHand: '10' })],
-  );
+  const [simpleStock, setSimpleStock] = useState(() => (prefill ? '0' : '10'));
   const [warehouseId, setWarehouseId] = useState<WarehouseId>('WH-CTI-MAIN');
-  const [newFieldKey, setNewFieldKey] = useState('');
-  const [newFieldLabel, setNewFieldLabel] = useState('');
-  const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
+  const channel = conditionToChannel(condition);
+  const postChannel = conditionToChannel(postCondition);
+  const [fieldValues] = useState<Record<string, string>>(() =>
     prefill
       ? Object.fromEntries(prefill.customFields.map((f) => [f.key, String(f.value)]))
       : {},
@@ -117,65 +133,46 @@ export function CreatePostScreen() {
   const warehouses = useInventoryStore((s) => s.warehouses);
   const customFieldDefs = useInventoryStore((s) => s.customFieldDefs);
   const createMasterWithVariants = useInventoryStore((s) => s.createMasterWithVariants);
-  const addCustomFieldDef = useInventoryStore((s) => s.addCustomFieldDef);
   const addPost = useFeedStore((s) => s.addPost);
   const onNewProductCreated = useWarehouseStore((s) => s.onNewProductCreated);
 
-  const ensureLibraryPermission = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('ต้องการสิทธิ์เข้าถึงคลังภาพ', 'กรุณาอนุญาตให้ BoomMall เข้าถึงรูปภาพ/วิดีโอในเครื่อง');
-      return false;
-    }
-    return true;
+  const pickMedia = () => {
+    setGalleryPurpose('post');
+    setGalleryOpen(true);
   };
 
-  const pickMedia = async () => {
-    if (!(await ensureLibraryPermission())) return;
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images', 'videos'],
-      allowsEditing: true,
-      aspect: [9, 16],
-      quality: 0.8,
-    });
-    if (!result.canceled && result.assets[0]) {
-      setMediaUri(result.assets[0].uri);
-      setMediaType(result.assets[0].type === 'video' ? 'video' : 'image');
-    }
-  };
-
-  const pickSellImages = async () => {
+  const pickSellImages = () => {
     const remaining = MAX_PRODUCT_IMAGES - sellImages.length;
     if (remaining <= 0) {
       Alert.alert('รูปครบแล้ว', `ลงได้สูงสุด ${MAX_PRODUCT_IMAGES} รูปต่อสินค้า`);
       return;
     }
-    if (!(await ensureLibraryPermission())) return;
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsMultipleSelection: true,
-      selectionLimit: remaining,
-      quality: 0.8,
-    });
-    if (!result.canceled && result.assets.length) {
-      setSellImages((prev) =>
-        [...prev, ...result.assets.map((a) => a.uri)].slice(0, MAX_PRODUCT_IMAGES),
-      );
+    setGalleryPurpose('sell');
+    setGalleryOpen(true);
+  };
+
+  const onGallerySend = (items: PickedGalleryItem[]) => {
+    setGalleryOpen(false);
+    if (!items.length) return;
+    if (galleryPurpose === 'post') {
+      const first = items[0]!;
+      setMediaUri(first.uri);
+      setMediaType(first.mediaType === 'video' ? 'video' : 'image');
       void Haptics.selectionAsync();
+      return;
     }
+    setSellImages((prev) =>
+      [...prev, ...items.filter((i) => i.mediaType === 'photo').map((i) => i.uri)].slice(
+        0,
+        MAX_PRODUCT_IMAGES,
+      ),
+    );
+    void Haptics.selectionAsync();
   };
 
   const removeSellImage = (uri: string) => {
     setSellImages((prev) => prev.filter((u) => u !== uri));
   };
-
-  const patchRow = (key: string, patch: Partial<VariantRow>) =>
-    setVariantRows((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
-
-  const channelWarehouses = useMemo(
-    () => warehouses.filter((w) => w.channelFocus.includes(channel)),
-    [warehouses, channel],
-  );
 
   const closeAll = () => {
     if (router.canDismiss()) router.dismissAll();
@@ -188,49 +185,88 @@ export function CreatePostScreen() {
         Alert.alert('ยังไม่มีเนื้อหา', 'กรุณาเลือกรูป/วิดีโอ หรือพิมพ์แคปชันก่อนโพสต์');
         return;
       }
+
+      let masterProductId: string | undefined;
+      let sellPrice = Number(postPrice) || 0;
+      let sellStock = Number(postStock);
+      const productName =
+        postProductName.trim() || caption.trim().slice(0, 60) || 'สินค้าจากคลิป';
+
+      if (sellWithClip) {
+        if (!Number.isFinite(sellPrice) || sellPrice <= 0) {
+          Alert.alert('ราคาไม่ถูกต้อง', 'กรุณาใส่ราคาสินค้าก่อนลงขายพร้อมคลิป');
+          return;
+        }
+        if (!Number.isFinite(sellStock) || sellStock < 0) {
+          Alert.alert('สต็อกไม่ถูกต้อง', 'กรุณาใส่จำนวนสต็อกเป็นตัวเลข');
+          return;
+        }
+        const skuTail = `${Date.now()}`.slice(-6);
+        masterProductId = createMasterWithVariants({
+          title: productName,
+          masterSku: `BEV-CLIP-${skuTail}`,
+          channel: postChannel,
+          basePrice: sellPrice,
+          tags: [postChannel, 'Clip', 'Shop'],
+          customFields: [],
+          description: caption.trim() || undefined,
+          imageUris: mediaType === 'image' && mediaUri ? [mediaUri] : undefined,
+          variants: [
+            {
+              label: 'มาตรฐาน',
+              sku: `BEV-CLIP-${skuTail}-A`,
+              price: sellPrice,
+              attrs: {},
+              warehouseId,
+              onHand: sellStock,
+            },
+          ],
+        });
+        onNewProductCreated(MY_WAREHOUSE_ID, masterProductId, categoryKey);
+      }
+
       addPost({
         caption: caption.trim(),
-        price: Number(postPrice) || 0,
+        price: sellWithClip ? sellPrice : Number(postPrice) || 0,
         channel: postChannel,
         imageUri: mediaType === 'image' ? mediaUri ?? undefined : undefined,
         videoUri: mediaType === 'video' ? mediaUri ?? undefined : undefined,
+        productName: sellWithClip ? productName : undefined,
+        masterProductId,
+        stock: sellWithClip ? sellStock : undefined,
+        intent: 'content',
       });
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('โพสต์สำเร็จ', 'คอนเทนต์ของคุณขึ้นบนสุดของ Home Feed แล้ว');
+      Alert.alert(
+        sellWithClip ? 'โพสต์และลงขายแล้ว' : 'โพสต์แล้ว',
+        sellWithClip
+          ? 'คลิปขึ้นฟีดแล้ว และคนดูซื้อของจากคลิปได้'
+          : 'คลิปขึ้นฟีดแล้ว',
+      );
       closeAll();
       return;
     }
 
-    if (!title.trim() || !masterSku.trim()) {
-      Alert.alert('กรอกไม่ครบ', 'ต้องมีชื่อสินค้าและ Master SKU');
+    if (!title.trim()) {
+      Alert.alert('ยังไม่มีชื่อสินค้า', 'พิมพ์ชื่อให้รู้ว่าขายอะไรนะ');
       return;
     }
     const price = Number(basePrice);
     if (!Number.isFinite(price) || price <= 0) {
-      Alert.alert('ราคาไม่ถูกต้อง', 'กรุณากรอกราคาฐานเป็นตัวเลขมากกว่า 0');
+      Alert.alert('ราคายังไม่ถูก', 'ใส่ตัวเลขราคามากกว่า 0 นะ');
       return;
     }
-    for (const row of variantRows) {
-      if (!row.label.trim() || !row.sku.trim()) {
-        Alert.alert('Variant ไม่ครบ', 'ทุก Variant ต้องมีชื่อและ SKU Code');
-        return;
-      }
-      const vPrice = Number(row.price || basePrice);
-      if (!Number.isFinite(vPrice) || vPrice <= 0) {
-        Alert.alert('ราคา Variant ไม่ถูกต้อง', `กรุณาตรวจราคาของ "${row.label}"`);
-        return;
-      }
-      const vStock = Number(row.onHand);
-      if (!Number.isFinite(vStock) || vStock < 0) {
-        Alert.alert('สต็อกไม่ถูกต้อง', `กรุณาตรวจสต็อกของ "${row.label}"`);
-        return;
-      }
-    }
-    const skuCodes = variantRows.map((r) => r.sku.trim().toUpperCase());
-    if (new Set(skuCodes).size !== skuCodes.length) {
-      Alert.alert('SKU ซ้ำ', 'SKU Code ของแต่ละ Variant ต้องไม่ซ้ำกัน');
+    const stockQty = Number(simpleStock);
+    if (!Number.isFinite(stockQty) || stockQty < 0) {
+      Alert.alert('จำนวนยังไม่ถูก', 'ใส่จำนวนชิ้นที่มีขายเป็นตัวเลขนะ');
       return;
     }
+
+    const autoSku =
+      masterSku.trim() ||
+      `BEV-${condition === 'used' ? 'USED' : 'NEW'}-${`${Date.now()}`.slice(-6)}`;
+    const wh =
+      warehouses.find((w) => w.channelFocus.includes(channel))?.id ?? warehouseId;
 
     const customFields: CustomFieldValue[] = customFieldDefs
       .map((def) => {
@@ -245,26 +281,28 @@ export function CreatePostScreen() {
 
     const masterId = createMasterWithVariants({
       title: title.trim(),
-      masterSku: masterSku.trim(),
+      masterSku: autoSku,
       channel,
       basePrice: price,
-      tags: [channel, 'Custom', ...(categoryLabel ? [categoryLabel] : [])],
+      tags: [conditionLabel(condition), 'Custom', ...(categoryLabel ? [categoryLabel] : [])],
       customFields,
       description: description.trim() || undefined,
       categoryKey,
       imageUris: sellImages.length ? sellImages : undefined,
-      variants: variantRows.map((row) => ({
-        label: row.label.trim(),
-        sku: row.sku.trim(),
-        price: Number(row.price || basePrice),
-        attrs: {
-          voltage: fieldValues.voltage,
-          capacityAh: fieldValues.capacityAh ? Number(fieldValues.capacityAh) : undefined,
-          color: fieldValues.material,
+      variants: [
+        {
+          label: 'มาตรฐาน',
+          sku: `${autoSku}-A`,
+          price,
+          attrs: {
+            voltage: fieldValues.voltage,
+            capacityAh: fieldValues.capacityAh ? Number(fieldValues.capacityAh) : undefined,
+            color: fieldValues.material,
+          },
+          warehouseId: wh,
+          onHand: stockQty,
         },
-        warehouseId,
-        onHand: Number(row.onHand) || 0,
-      })),
+      ],
     });
 
     // Auto-sync: shops subscribed to my warehouse get a listing (per policy)
@@ -272,12 +310,12 @@ export function CreatePostScreen() {
 
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     Alert.alert(
-      prefill ? 'โคลนสำเร็จ — สร้างเป็นสินค้าใหม่' : 'ลงขายสำเร็จ',
+      prefill ? 'คัดลอกสินค้าเรียบร้อย' : 'ลงขายเรียบร้อย',
       [
         prefill
-          ? 'ได้ Product ID / SKU / Inventory ชุดใหม่ทั้งหมด (ไม่แตะสินค้าต้นฉบับ)'
-          : `สร้าง Master SKU + ${variantRows.length} Variant + Warehouse Stock แล้ว`,
-        syncedShops > 0 ? `ซิงก์ให้ร้านที่ Subscribe อัตโนมัติ ${syncedShops} ร้าน` : null,
+          ? 'สร้างเป็นสินค้าชิ้นใหม่แล้ว ของเดิมไม่เปลี่ยน'
+          : `ลงขายเป็น${conditionLabel(condition)} ราคา ฿${price.toLocaleString('th-TH')} · มี ${stockQty} ชิ้น`,
+        syncedShops > 0 ? `ร้านที่เชื่อมคลังเห็นสินค้านี้แล้ว ${syncedShops} ร้าน` : null,
       ]
         .filter(Boolean)
         .join('\n'),
@@ -285,50 +323,46 @@ export function CreatePostScreen() {
     closeAll();
   };
 
+  const sellRemaining = Math.max(0, MAX_PRODUCT_IMAGES - sellImages.length);
+
   return (
+    <>
     <ScrollView
       style={styles.root}
       contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: 40 }}
-      keyboardShouldPersistTaps="handled"
+      keyboardShouldPersistTaps="always"
+      keyboardDismissMode="none"
     >
       <View style={styles.header}>
         <Pressable onPress={closeAll}>
           <Text style={styles.cancel}>ปิด</Text>
         </Pressable>
-        <Text style={styles.title}>{prefill ? 'โคลนสินค้า → สินค้าใหม่' : 'สร้าง'}</Text>
+        <Text style={styles.title}>
+          {prefill ? 'คัดลอกมาลงขายใหม่' : mode === 'sell' ? 'ลงขายสินค้า' : 'สร้าง'}
+        </Text>
         <Pressable onPress={publish}>
           <Text style={styles.publish}>
-            {mode === 'sell' ? (prefill ? 'สร้างสินค้าใหม่' : 'ลงขาย') : 'โพสต์'}
+            {mode === 'sell' ? 'ลงขายเลย' : sellWithClip ? 'โพสต์และขาย' : 'โพสต์'}
           </Text>
         </Pressable>
       </View>
 
       {prefill ? (
         <View style={styles.cloneBanner}>
-          <Ionicons name="copy" size={14} color={colors.accent.info} />
+          <Ionicons name="happy-outline" size={16} color={colors.accent.info} />
           <Text style={styles.cloneBannerText}>
-            โหมดโคลน: ข้อมูลถูก Prefill จากสินค้าต้นฉบับ — ระบบจะสร้าง Product ID, SKU และ
-            Inventory ใหม่ทั้งหมด สต็อกเริ่มที่ 0 ให้กำหนดเอง
+            คัดลอกจากของเดิมมาให้แล้ว — แก้ชื่อ ราคา จำนวนได้ตามใจ ของเดิมไม่หาย สต็อกเริ่มที่ 0
+            ใส่จำนวนใหม่เองนะ
           </Text>
         </View>
-      ) : (
-        <View style={styles.modes}>
-          <Pressable
-            style={[styles.mode, mode === 'post' && styles.modeActive]}
-            onPress={() => setMode('post')}
-          >
-            <Text style={[styles.modeText, mode === 'post' && styles.modeTextActive]}>โพสต์คลิป</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.mode, mode === 'sell' && styles.modeActive]}
-            onPress={() => setMode('sell')}
-          >
-            <Text style={[styles.modeText, mode === 'sell' && styles.modeTextActive]}>
-              ลงขายสินค้า
-            </Text>
-          </Pressable>
+      ) : sellOnly ? (
+        <View style={styles.cloneBanner}>
+          <Ionicons name="bag-handle-outline" size={16} color={colors.brand.primaryDark} />
+          <Text style={styles.cloneBannerText}>
+            ฟอร์มลงขายสินค้าอย่างเดียว — ไม่ปนกับเว็บบอร์ดหางานหรือคลิปฟีด
+          </Text>
         </View>
-      )}
+      ) : null}
 
       {mode === 'post' ? (
         <Pressable onPress={pickMedia}>
@@ -358,7 +392,7 @@ export function CreatePostScreen() {
       ) : (
         <>
           <Text style={styles.label}>
-            รูปสินค้า ({sellImages.length}/{MAX_PRODUCT_IMAGES}) · รูปแรกคือรูปปก
+            1) ใส่รูปสินค้า ({sellImages.length}/{MAX_PRODUCT_IMAGES}) · รูปแรก = รูปปก
           </Text>
           <ScrollView
             horizontal
@@ -385,7 +419,7 @@ export function CreatePostScreen() {
             ))}
             {sellImages.length < MAX_PRODUCT_IMAGES ? (
               <Pressable style={styles.addPhotoTile} onPress={pickSellImages}>
-                <Ionicons name="camera" size={22} color={colors.brand.primaryDark} />
+                <Ionicons name="camera" size={22} color={colors.text.secondary} />
                 <Text style={styles.addPhotoText}>เพิ่มรูป</Text>
               </Pressable>
             ) : null}
@@ -403,193 +437,165 @@ export function CreatePostScreen() {
             onChangeText={setCaption}
             multiline
           />
-          <Text style={styles.label}>ตั้งราคา (ไม่บังคับ)</Text>
-          <TextInput
-            style={styles.inputSingle}
-            placeholder="เช่น 1990"
-            placeholderTextColor={colors.text.muted}
-            value={postPrice}
-            onChangeText={setPostPrice}
-            keyboardType="numeric"
-          />
-          <Text style={styles.label}>ร้านค้า / ช่องทางขาย</Text>
-          <View style={styles.row}>
-            {(['B2B', 'B2C', 'C2C'] as CommerceChannel[]).map((c) => (
-              <Pressable
-                key={c}
-                style={[styles.chip, postChannel === c && styles.chipActive]}
-                onPress={() => setPostChannel(c)}
-              >
-                <Text style={[styles.chipText, postChannel === c && styles.chipTextActive]}>{c}</Text>
-              </Pressable>
-            ))}
-          </View>
+
+          {sellWithClip ? (
+            <>
+              <Text style={styles.label}>ชื่อสินค้า</Text>
+              <TextInput
+                style={styles.inputSingle}
+                placeholder="เช่น แบต 60V (ว่างได้ ใช้แคปชันแทน)"
+                placeholderTextColor={colors.text.muted}
+                value={postProductName}
+                onChangeText={setPostProductName}
+              />
+              <Text style={styles.label}>ราคา (บาท)</Text>
+              <TextInput
+                style={styles.inputSingle}
+                placeholder="เช่น 1990"
+                placeholderTextColor={colors.text.muted}
+                value={postPrice}
+                onChangeText={setPostPrice}
+                keyboardType="numeric"
+              />
+              <Text style={styles.label}>มีกี่ชิ้น</Text>
+              <TextInput
+                style={styles.inputSingle}
+                placeholder="เช่น 10"
+                placeholderTextColor={colors.text.muted}
+                value={postStock}
+                onChangeText={setPostStock}
+                keyboardType="numeric"
+              />
+              <Text style={styles.label}>สภาพสินค้า</Text>
+              <View style={styles.row}>
+                {(['new', 'used'] as ProductCondition[]).map((c) => (
+                  <Pressable
+                    key={c}
+                    style={[styles.chip, postCondition === c && styles.chipActive]}
+                    onPress={() => {
+                      setPostCondition(c);
+                      const ch = conditionToChannel(c);
+                      const wh = warehouses.find((w) => w.channelFocus.includes(ch));
+                      if (wh) setWarehouseId(wh.id);
+                    }}
+                  >
+                    <Text style={[styles.chipText, postCondition === c && styles.chipTextActive]}>
+                      {conditionLabel(c)}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={styles.conditionHint}>{conditionHint(postCondition)}</Text>
+            </>
+          ) : (
+            <Text style={styles.sellOffNote}>
+              ปิดขายไว้ — โพสต์ดูอย่างเดียว ยังไม่มีปุ่มซื้อ
+            </Text>
+          )}
         </>
       ) : (
         <>
-          <Text style={styles.label}>ช่องทางขาย</Text>
+          <Text style={styles.label}>2) สภาพสินค้า</Text>
           <View style={styles.row}>
-            {(['B2B', 'B2C', 'C2C'] as CommerceChannel[]).map((c) => (
+            {(['new', 'used'] as ProductCondition[]).map((c) => (
               <Pressable
                 key={c}
-                style={[styles.chip, channel === c && styles.chipActive]}
+                style={[styles.chip, condition === c && styles.chipActive]}
                 onPress={() => {
-                  setChannel(c);
-                  const wh = warehouses.find((w) => w.channelFocus.includes(c));
+                  setCondition(c);
+                  const ch = conditionToChannel(c);
+                  const wh = warehouses.find((w) => w.channelFocus.includes(ch));
                   if (wh) setWarehouseId(wh.id);
+                  void Haptics.selectionAsync();
                 }}
               >
-                <Text style={[styles.chipText, channel === c && styles.chipTextActive]}>{c}</Text>
-              </Pressable>
-            ))}
-          </View>
-
-          {categoryLabel ? (
-            <View style={styles.categoryHint}>
-              <Ionicons name="pricetag" size={13} color={colors.brand.primaryDark} />
-              <Text style={styles.categoryHintText}>ลงในหมวดหมู่: {categoryLabel}</Text>
-            </View>
-          ) : null}
-
-          <Field label="ชื่อสินค้า" value={title} onChange={setTitle} placeholder="เช่น แบต 60V 32Ah" />
-
-          <Text style={styles.label}>รายละเอียดสินค้า</Text>
-          <TextInput
-            style={[styles.input, { marginBottom: 10 }]}
-            placeholder="อธิบายสินค้า จุดเด่น สภาพ การรับประกัน..."
-            placeholderTextColor={colors.text.muted}
-            value={description}
-            onChangeText={setDescription}
-            multiline
-          />
-
-          <Field label="Master SKU" value={masterSku} onChange={setMasterSku} />
-          <Field
-            label="ราคาฐาน (THB)"
-            value={basePrice}
-            onChange={setBasePrice}
-            keyboardType="numeric"
-          />
-
-          <View style={styles.variantHeader}>
-            <Text style={[styles.label, { marginBottom: 0 }]}>
-              Variant / SKU ({variantRows.length})
-            </Text>
-            <Pressable
-              style={styles.addVariantBtn}
-              onPress={() => setVariantRows((rows) => [...rows, newRow({ price: basePrice })])}
-            >
-              <Ionicons name="add" size={13} color={colors.brand.primaryDark} />
-              <Text style={styles.addVariantText}>เพิ่ม Variant</Text>
-            </Pressable>
-          </View>
-
-          {variantRows.map((row, index) => (
-            <View key={row.key} style={styles.variantCard}>
-              <View style={styles.variantCardHeader}>
-                <Text style={styles.variantIndex}>#{index + 1}</Text>
-                {variantRows.length > 1 ? (
-                  <Pressable
-                    hitSlop={8}
-                    onPress={() =>
-                      setVariantRows((rows) => rows.filter((r) => r.key !== row.key))
-                    }
-                  >
-                    <Ionicons name="trash-outline" size={16} color={colors.accent.live} />
-                  </Pressable>
-                ) : null}
-              </View>
-              <View style={styles.variantGrid}>
-                <View style={{ flex: 1 }}>
-                  <Field
-                    label="ชื่อ Variant"
-                    value={row.label}
-                    onChange={(v) => patchRow(row.key, { label: v })}
-                    placeholder="เช่น 48V"
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Field
-                    label="SKU Code"
-                    value={row.sku}
-                    onChange={(v) => patchRow(row.key, { sku: v })}
-                  />
-                </View>
-              </View>
-              <View style={styles.variantGrid}>
-                <View style={{ flex: 1 }}>
-                  <Field
-                    label="ราคา (THB)"
-                    value={row.price}
-                    onChange={(v) => patchRow(row.key, { price: v })}
-                    keyboardType="numeric"
-                    placeholder={basePrice}
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Field
-                    label="สต็อกเริ่มต้น"
-                    value={row.onHand}
-                    onChange={(v) => patchRow(row.key, { onHand: v })}
-                    keyboardType="numeric"
-                  />
-                </View>
-              </View>
-            </View>
-          ))}
-
-          <Text style={styles.label}>คลังสินค้า (Multi-Warehouse)</Text>
-          <View style={styles.row}>
-            {channelWarehouses.map((w) => (
-              <Pressable
-                key={w.id}
-                style={[styles.chip, warehouseId === w.id && styles.chipActive]}
-                onPress={() => setWarehouseId(w.id)}
-              >
-                <Text
-                  style={[styles.chipText, warehouseId === w.id && styles.chipTextActive]}
-                  numberOfLines={1}
-                >
-                  {w.name}
+                <Text style={[styles.chipText, condition === c && styles.chipTextActive]}>
+                  {conditionLabel(c)}
                 </Text>
               </Pressable>
             ))}
           </View>
+          <Text style={styles.conditionHint}>{conditionHint(condition)}</Text>
 
-          <Text style={styles.label}>Custom Fields</Text>
-          {customFieldDefs.map((def) => (
-            <Field
-              key={def.key}
-              label={`${def.label}${def.required ? ' *' : ''}`}
-              value={fieldValues[def.key] ?? ''}
-              onChange={(v) => setFieldValues((prev) => ({ ...prev, [def.key]: v }))}
-              placeholder={def.options?.join(' / ') ?? def.type}
-              keyboardType={def.type === 'number' ? 'numeric' : 'default'}
-            />
-          ))}
+          {categoryLabel ? (
+            <View style={styles.categoryHint}>
+              <Ionicons name="pricetag" size={13} color={colors.brand.primaryDark} />
+              <Text style={styles.categoryHintText}>หมวด: {categoryLabel}</Text>
+            </View>
+          ) : null}
 
-          <Text style={styles.label}>เพิ่มฟิลด์ใหม่ (Customize อิสระ)</Text>
-          <Field label="Field Key" value={newFieldKey} onChange={setNewFieldKey} placeholder="e.g. cellBrand" />
-          <Field label="Field Label" value={newFieldLabel} onChange={setNewFieldLabel} placeholder="ยี่ห้อเซลล์" />
-          <Pressable
-            style={styles.addField}
-            onPress={() => {
-              if (!newFieldKey.trim() || !newFieldLabel.trim()) return;
-              addCustomFieldDef({
-                key: newFieldKey.trim(),
-                label: newFieldLabel.trim(),
-                type: 'text',
-              });
-              setNewFieldKey('');
-              setNewFieldLabel('');
-              Alert.alert('เพิ่มฟิลด์แล้ว', 'ใช้ได้ทันทีในฟอร์มนี้');
-            }}
-          >
-            <Text style={styles.addFieldText}>+ เพิ่ม Custom Field</Text>
-          </Pressable>
+          <Field
+            label="3) ชื่อสินค้า"
+            value={title}
+            onChange={setTitle}
+            placeholder="เช่น แบตมอเตอร์ไซค์ 60V"
+            allowPaste
+          />
+
+          <View style={styles.labelRow}>
+            <Text style={styles.label}>เล่าเกี่ยวกับสินค้า (ไม่บังคับ)</Text>
+            <Pressable
+              hitSlop={8}
+              onPress={() =>
+                void pasteFromClipboard(setDescription, { appendTo: description })
+              }
+              style={styles.pasteBtn}
+            >
+              <Ionicons name="clipboard-outline" size={14} color={colors.brand.primaryDark} />
+              <Text style={styles.pasteBtnText}>วาง</Text>
+            </Pressable>
+          </View>
+          <TextInput
+            style={[styles.input, { marginBottom: 10 }]}
+            placeholder="ของสภาพไหน ใช้นานแค่ไหน มีประกันไหม... (วางข้อความที่คัดลอกได้)"
+            placeholderTextColor={colors.text.muted}
+            value={description}
+            onChangeText={setDescription}
+            multiline
+            contextMenuHidden={false}
+            textAlignVertical="top"
+            autoCorrect
+            autoCapitalize="sentences"
+            scrollEnabled
+          />
+
+          <Field
+            label="4) ราคา (บาท)"
+            value={basePrice}
+            onChange={setBasePrice}
+            keyboardType="numeric"
+            placeholder="เช่น 1990"
+            allowPaste
+            pasteNumeric
+          />
+          <Field
+            label="5) มีกี่ชิ้น"
+            value={simpleStock}
+            onChange={setSimpleStock}
+            keyboardType="numeric"
+            placeholder={prefill ? 'ใส่จำนวนใหม่ (เริ่มที่ 0)' : 'เช่น 10'}
+            allowPaste
+            pasteNumeric
+          />
+
+          <Text style={styles.easyTip}>
+            พอครบแล้วกด “ลงขายเลย” มุมขวาบน — ง่ายๆ แค่นี้
+          </Text>
         </>
       )}
     </ScrollView>
+
+    <MediaGalleryPicker
+      visible={galleryOpen}
+      onClose={() => setGalleryOpen(false)}
+      onSend={onGallerySend}
+      initialMode={galleryPurpose === 'sell' ? 'photo' : 'photo'}
+      allowModeSwitch={galleryPurpose === 'post'}
+      selectionLimit={galleryPurpose === 'sell' ? sellRemaining || 1 : 1}
+      sendLabel="ส่ง"
+      title="ล่าสุด"
+    />
+    </>
   );
 }
 
@@ -599,16 +605,37 @@ function Field({
   onChange,
   placeholder,
   keyboardType = 'default',
+  allowPaste = false,
+  pasteNumeric = false,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   keyboardType?: 'default' | 'numeric';
+  allowPaste?: boolean;
+  pasteNumeric?: boolean;
 }) {
   return (
     <View style={{ marginBottom: 10 }}>
-      <Text style={styles.label}>{label}</Text>
+      <View style={styles.labelRow}>
+        <Text style={styles.label}>{label}</Text>
+        {allowPaste ? (
+          <Pressable
+            hitSlop={8}
+            onPress={() =>
+              void pasteFromClipboard(onChange, {
+                appendTo: pasteNumeric ? undefined : value,
+                numeric: pasteNumeric,
+              })
+            }
+            style={styles.pasteBtn}
+          >
+            <Ionicons name="clipboard-outline" size={14} color={colors.brand.primaryDark} />
+            <Text style={styles.pasteBtnText}>วาง</Text>
+          </Pressable>
+        ) : null}
+      </View>
       <TextInput
         style={styles.inputSingle}
         value={value}
@@ -616,7 +643,8 @@ function Field({
         placeholder={placeholder}
         placeholderTextColor={colors.text.muted}
         keyboardType={keyboardType}
-        autoCapitalize="none"
+        autoCapitalize={keyboardType === 'numeric' ? 'none' : 'sentences'}
+        contextMenuHidden={false}
       />
     </View>
   );
@@ -637,6 +665,29 @@ const styles = StyleSheet.create({
   cancel: { color: colors.text.secondary, fontWeight: '600', fontSize: 16 },
   title: { fontWeight: '900', fontSize: 18, color: colors.text.primary },
   publish: { color: colors.brand.primaryDark, fontWeight: '800', fontSize: 16 },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  pasteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: colors.brand.mist,
+    borderWidth: 1,
+    borderColor: 'rgba(0,160,110,0.25)',
+    marginBottom: 6,
+  },
+  pasteBtnText: {
+    color: colors.brand.primaryDark,
+    fontWeight: '800',
+    fontSize: 12,
+  },
   cloneBanner: {
     flexDirection: 'row',
     gap: 8,
@@ -655,6 +706,70 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   modes: { flexDirection: 'row', gap: 8, marginBottom: 14 },
+  sellToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: colors.surface.card,
+    borderWidth: 1,
+    borderColor: colors.border.soft,
+    marginBottom: 14,
+  },
+  sellToggleOn: {
+    backgroundColor: colors.brand.mist,
+    borderColor: colors.brand.primaryDark,
+  },
+  sellToggleLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  sellToggleTitle: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: colors.text.primary,
+  },
+  sellToggleTitleOn: {
+    color: colors.brand.primaryDark,
+  },
+  sellToggleHint: {
+    marginTop: 2,
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.text.secondary,
+    lineHeight: 15,
+  },
+  sellSwitch: {
+    width: 44,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#D5DBD8',
+    padding: 2,
+    justifyContent: 'center',
+  },
+  sellSwitchOn: {
+    backgroundColor: colors.brand.primaryDark,
+  },
+  sellKnob: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#fff',
+  },
+  sellKnobOn: {
+    alignSelf: 'flex-end',
+  },
+  sellOffNote: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.text.muted,
+    lineHeight: 17,
+    marginBottom: 8,
+  },
   mode: {
     flex: 1,
     paddingVertical: 12,
@@ -797,13 +912,28 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1.5,
     borderStyle: 'dashed',
-    borderColor: colors.brand.primaryDark,
-    backgroundColor: colors.brand.mist,
+    borderColor: 'rgba(10,22,17,0.22)',
+    backgroundColor: '#F2F4F3',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,
   },
-  addPhotoText: { color: colors.brand.primaryDark, fontSize: 11, fontWeight: '800' },
+  addPhotoText: { color: colors.text.secondary, fontSize: 11, fontWeight: '800' },
+  conditionHint: {
+    marginTop: -4,
+    marginBottom: 14,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.text.secondary,
+  },
+  easyTip: {
+    marginTop: 8,
+    marginBottom: 20,
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.brand.primaryDark,
+    lineHeight: 18,
+  },
   categoryHint: {
     flexDirection: 'row',
     alignItems: 'center',

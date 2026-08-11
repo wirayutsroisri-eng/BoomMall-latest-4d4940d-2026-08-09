@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
@@ -12,9 +12,46 @@ type Props = {
   message: ChatMessage;
   onPay?: (quotationId: string) => void;
   onConvertProduct?: (productCardId: string) => void;
+  /** LINE/WeChat: open fullscreen media viewer for this image */
+  onPressImage?: (messageId: string) => void;
 };
 
-export function ChatBubble({ message, onPay, onConvertProduct }: Props) {
+function ChatImage({ uri }: { uri: string }) {
+  const [failed, setFailed] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  if (failed || uri.startsWith('ph://')) {
+    return (
+      <View style={[styles.image, styles.imageFallback]}>
+        <Ionicons name="image-outline" size={28} color="rgba(255,255,255,0.7)" />
+        <Text style={styles.imageFallbackText}>ส่งรูปแล้ว</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View>
+      <Image
+        source={{ uri }}
+        style={styles.image}
+        resizeMode="cover"
+        onLoadStart={() => setLoading(true)}
+        onLoadEnd={() => setLoading(false)}
+        onError={() => {
+          setFailed(true);
+          setLoading(false);
+        }}
+      />
+      {loading ? (
+        <View style={styles.imageLoading} pointerEvents="none">
+          <ActivityIndicator color="#fff" />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+export function ChatBubble({ message, onPay, onConvertProduct, onPressImage }: Props) {
   const mine = message.senderId === CURRENT_USER_ID;
 
   if (message.kind === 'product' && message.product) {
@@ -94,6 +131,33 @@ export function ChatBubble({ message, onPay, onConvertProduct }: Props) {
     );
   }
 
+  if (message.kind === 'job_match' && message.jobMatch) {
+    const job = message.jobMatch;
+    return (
+      <View style={[styles.jobMatchWrap, styles.peerAlign]}>
+        <Text style={styles.jobMatchHeader}>{job.header}</Text>
+        <Text style={styles.jobMatchDetails} numberOfLines={4}>
+          {job.details}
+        </Text>
+        <Text style={styles.jobMatchDistance}>
+          ห่าง {job.distanceKm.toFixed(1)} กม.
+        </Text>
+        {job.skills.length > 0 ? (
+          <View style={styles.jobSkillRow}>
+            {job.skills.slice(0, 4).map((skill) => (
+              <View key={skill} style={styles.jobSkillChip}>
+                <Text style={styles.jobSkillText}>{skill}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+        <View style={styles.jobCta}>
+          <Text style={styles.jobCtaText}>{job.actionLabel}</Text>
+        </View>
+      </View>
+    );
+  }
+
   if (message.kind === 'voice' && message.audioUri) {
     return <VoiceBubble message={message} mine={mine} />;
   }
@@ -101,7 +165,16 @@ export function ChatBubble({ message, onPay, onConvertProduct }: Props) {
   if (message.kind === 'image' && message.imageUri) {
     return (
       <View style={[styles.imageWrap, mine ? styles.mineAlign : styles.peerAlign]}>
-        <Image source={{ uri: message.imageUri }} style={styles.image} resizeMode="cover" />
+        <Pressable
+          onPress={() => {
+            void Haptics.selectionAsync();
+            onPressImage?.(message.id);
+          }}
+          accessibilityRole="imagebutton"
+          accessibilityLabel="ดูรูป"
+        >
+          <ChatImage uri={message.imageUri} />
+        </Pressable>
         <View style={styles.metaRow}>
           <Text style={[styles.time, mine && styles.timeMine]}>{message.createdAt}</Text>
           {mine ? (
@@ -249,6 +322,24 @@ const styles = StyleSheet.create({
     height: 220,
     borderRadius: 16,
     backgroundColor: colors.surface.card,
+  },
+  imageFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1A2A24',
+    gap: 6,
+  },
+  imageFallbackText: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  imageLoading: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.25)',
+    borderRadius: 16,
   },
   quoteEyebrow: {
     color: colors.brand.primary,
@@ -403,5 +494,61 @@ const styles = StyleSheet.create({
     color: colors.text.muted,
     fontSize: 11,
     fontWeight: '600',
+  },
+  jobMatchWrap: {
+    maxWidth: '88%',
+    marginVertical: 8,
+    backgroundColor: colors.surface.card,
+    borderRadius: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.brand.primary,
+  },
+  jobMatchHeader: {
+    color: colors.brand.primaryDark,
+    fontWeight: '800',
+    fontSize: 13,
+    marginBottom: 8,
+  },
+  jobMatchDetails: {
+    color: colors.text.primary,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '600',
+  },
+  jobMatchDistance: {
+    marginTop: 8,
+    color: colors.text.secondary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  jobSkillRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 10,
+  },
+  jobSkillChip: {
+    backgroundColor: colors.brand.ink,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  jobSkillText: {
+    color: colors.brand.primary,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  jobCta: {
+    marginTop: 12,
+    backgroundColor: colors.brand.primary,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  jobCtaText: {
+    color: colors.brand.ink,
+    fontWeight: '900',
+    fontSize: 13,
   },
 });

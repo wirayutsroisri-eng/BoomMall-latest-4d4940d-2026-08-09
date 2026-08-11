@@ -1,5 +1,14 @@
-import React, { useMemo } from 'react';
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import {
+  Alert,
+  Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,27 +17,50 @@ import { masterContentImage } from '@/modules/commerce/data/catalog';
 import { useInventoryStore } from '@/modules/commerce/state/inventory-store';
 import {
   DEFAULT_LOW_STOCK_THRESHOLD,
-  shouldReorder,
+  availableOf,
   stockStatusOf,
 } from '@/modules/commerce/domain/stock-core';
-import type { SkuVariant, StockLedgerEntry, WarehouseId } from '@/modules/commerce/domain/types';
+import type { SkuVariant, StockLedgerEntry, WarehouseId, WarehouseStock } from '@/modules/commerce/domain/types';
 import { useWarehouseStore, MY_SHOP_ID } from '@/modules/warehouse/state/warehouse-store';
 import { LedgerRow } from './LedgerScreen';
 import { colors } from '@/shared/theme/colors';
-
-const STATUS_META = {
-  ready: { label: 'พร้อมขาย', color: '#22C55E' },
-  low: { label: 'ใกล้หมด', color: '#F5A524' },
-  out: { label: 'หมดสต็อก', color: '#FF3B4A' },
-} as const;
 
 function formatTHB(n: number) {
   return `฿${n.toLocaleString('th-TH')}`;
 }
 
+function primaryRow(rows: WarehouseStock[]): WarehouseStock | undefined {
+  if (!rows.length) return undefined;
+  return [...rows].sort((a, b) => availableOf(b) - availableOf(a))[0];
+}
+
+function friendlyLedgerLine(entry: StockLedgerEntry): string {
+  const abs = Math.abs(entry.qtyChange);
+  switch (entry.type) {
+    case 'RESTOCK':
+      return `+${abs} เติมสินค้า`;
+    case 'SALE':
+      return `-${abs} ขายสินค้า`;
+    case 'ORDER_CANCEL':
+    case 'RETURN':
+      return `+${abs} ลูกค้ายกเลิก/คืน`;
+    case 'ORDER_RESERVE':
+      return `จอง ${abs} ชิ้น (ออเดอร์)`;
+    case 'TRANSFER':
+      return entry.qtyChange >= 0 ? `+${abs} รับโอนคลัง` : `-${abs} โอนออก`;
+    case 'MANUAL_ADJUSTMENT':
+      return entry.qtyChange >= 0 ? `+${abs} ปรับจำนวน` : `-${abs} ปรับจำนวน`;
+    default:
+      return `${entry.qtyChange > 0 ? '+' : ''}${entry.qtyChange} เปลี่ยนแปลง`;
+  }
+}
+
 export function ProductSkuScreen() {
   const insets = useSafeAreaInsets();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id: idParam } = useLocalSearchParams<{ id: string | string[] }>();
+  const id = Array.isArray(idParam) ? idParam[0] : idParam;
+  const [advanced, setAdvanced] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const masters = useInventoryStore((s) => s.masters);
   const variants = useInventoryStore((s) => s.variants);
@@ -39,6 +71,8 @@ export function ProductSkuScreen() {
   const adjustStock = useInventoryStore((s) => s.adjustStock);
   const transferStock = useInventoryStore((s) => s.transferStock);
   const setLowStockThreshold = useInventoryStore((s) => s.setLowStockThreshold);
+  const addVariantToMaster = useInventoryStore((s) => s.addVariantToMaster);
+  const ensureStockRow = useInventoryStore((s) => s.ensureStockRow);
   const warehousesShared = useWarehouseStore((s) => s.warehouses);
   const canI = useWarehouseStore((s) => s.canI);
 
@@ -48,104 +82,153 @@ export function ProductSkuScreen() {
     [variants, id],
   );
   const variantIds = useMemo(() => new Set(productVariants.map((v) => v.id)), [productVariants]);
-
   const productLedger = useMemo(
-    () => ledger.filter((e) => variantIds.has(e.variantId)).slice(0, 30),
+    () => ledger.filter((e) => variantIds.has(e.variantId)).slice(0, 40),
     [ledger, variantIds],
   );
 
   if (!master) {
     return (
       <View style={[styles.root, { paddingTop: insets.top + 12, alignItems: 'center' }]}>
-        <Text style={styles.title}>ไม่พบสินค้า</Text>
+        <Text style={styles.topTitle}>ไม่พบสินค้า</Text>
       </View>
     );
   }
 
-  // Shared products: only the warehouse owner (or EDIT_STOCK members) may mutate stock
   const isMine = !master.ownerShopId || master.ownerShopId === MY_SHOP_ID;
   const sourceWarehouse = warehousesShared.find((w) => w.ownerShopId === master.ownerShopId);
   const canEditStock = isMine || (sourceWarehouse ? canI(sourceWarehouse.id, 'EDIT_STOCK') : false);
+  const sharedLabel = sourceWarehouse?.name ?? master.shopName ?? 'คลัง Boom EV';
 
   const rowsOf = (variantId: string) =>
     Object.values(stockByKey).filter((r) => r.variantId === variantId);
 
-  const doRestock = (variant: SkuVariant, warehouseId: WarehouseId) => {
-    Alert.prompt(
-      `เติมสต็อก · ${variant.sku}`,
-      `คลัง ${warehouseId} — ใส่จำนวนที่เติม`,
-      (text) => {
-        const qty = Number(text);
-        if (!Number.isFinite(qty) || qty <= 0) return;
-        const result = restock(variant.id, warehouseId, qty, 'เติมสต็อกจากหน้า SKU Management');
-        if (result.ok) {
-          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        } else {
-          Alert.alert('เติมสต็อกไม่สำเร็จ', result.reason);
-        }
-      },
-      'plain-text',
-      '',
-      'number-pad',
-    );
+  const defaultWarehouseId = (): WarehouseId => {
+    const first = productVariants[0] ? rowsOf(productVariants[0].id)[0]?.warehouseId : undefined;
+    return first ?? 'WH-CTI-MAIN';
   };
 
-  const doAdjust = (variant: SkuVariant, warehouseId: WarehouseId, currentOnHand: number) => {
+  const resolvePrimaryRow = (variant: SkuVariant): WarehouseStock | undefined => {
+    const rows = rowsOf(variant.id);
+    const existing = primaryRow(rows);
+    if (existing) return existing;
+    const wh = defaultWarehouseId();
+    ensureStockRow(variant.id, wh);
+    return useInventoryStore.getState().stockByKey[`${variant.id}::${wh}`];
+  };
+
+  const bumpSellable = (variant: SkuVariant, delta: number) => {
+    if (!canEditStock) return;
+    const row = resolvePrimaryRow(variant);
+    if (!row) return;
+
+    if (delta > 0) {
+      const result = restock(variant.id, row.warehouseId, delta, 'เพิ่มจำนวนสินค้า');
+      if (result.ok) void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      else Alert.alert('เพิ่มไม่ได้', result.reason);
+      return;
+    }
+
+    const nextOnHand = Math.max(row.reserved, row.onHand + delta);
+    if (nextOnHand === row.onHand) {
+      Alert.alert('ลดไม่ได้', 'มียอดที่ถูกจองไว้แล้ว — ขายได้น้อยสุดตามยอดจอง');
+      return;
+    }
+    const result = adjustStock(variant.id, row.warehouseId, nextOnHand, 'ลดจำนวนสินค้า');
+    if (result.ok) void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    else Alert.alert('ลดไม่ได้', 'มียอดจองอยู่ ไม่สามารถลดต่ำกว่านั้น');
+  };
+
+  const setSellableQty = (variant: SkuVariant, targetAvailable: number) => {
+    if (!canEditStock) return;
+    if (!Number.isFinite(targetAvailable) || targetAvailable < 0) return;
+    const row = resolvePrimaryRow(variant);
+    if (!row) return;
+
+    const rows = rowsOf(variant.id);
+    const others = rows
+      .filter((r) => !(r.variantId === row.variantId && r.warehouseId === row.warehouseId))
+      .reduce((s, r) => s + availableOf(r), 0);
+    const needAvailableOnPrimary = Math.max(0, Math.floor(targetAvailable) - others);
+    const newOnHand = needAvailableOnPrimary + row.reserved;
+    const result = adjustStock(
+      variant.id,
+      row.warehouseId,
+      newOnHand,
+      `ตั้งจำนวนขายได้เป็น ${Math.floor(targetAvailable)}`,
+    );
+    if (result.ok) void Haptics.selectionAsync();
+    else Alert.alert('ตั้งจำนวนไม่ได้', 'มียอดจองอยู่ ไม่สามารถตั้งต่ำกว่านั้น');
+  };
+
+  const promptSellable = (variant: SkuVariant, currentAvailable: number) => {
+    if (!canEditStock) return;
     Alert.prompt(
-      `ปรับยอดสต็อก · ${variant.sku}`,
-      `คลัง ${warehouseId} — ยอดปัจจุบัน ${currentOnHand} ใส่ยอดใหม่ (บันทึกลง Ledger เสมอ)`,
+      'จำนวนที่ขายได้',
+      `${variant.label} — ตอนนี้ขายได้ ${currentAvailable} ชิ้น`,
       (text) => {
         const next = Number(text);
         if (!Number.isFinite(next) || next < 0) return;
-        const result = adjustStock(
-          variant.id,
-          warehouseId,
-          next,
-          `ปรับยอดด้วยตนเอง (${currentOnHand} → ${next})`,
-        );
-        if (result.ok) {
-          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        } else {
-          Alert.alert(
-            'ปรับยอดไม่สำเร็จ',
-            result.reason === 'INSUFFICIENT'
-              ? 'ยอดใหม่ต่ำกว่าจำนวนที่ถูกจองไว้ (Reserved) — ห้าม Available ติดลบ'
-              : result.reason,
-          );
-        }
+        setSellableQty(variant, next);
       },
       'plain-text',
-      String(currentOnHand),
+      String(currentAvailable),
       'number-pad',
     );
   };
 
-  const doTransfer = (variant: SkuVariant, fromWarehouseId: WarehouseId) => {
-    const targets = warehouses.filter((w) => w.id !== fromWarehouseId);
-    Alert.alert('โอนสต็อกไปคลังอื่น', `จาก ${fromWarehouseId}`, [
-      ...targets.map((w) => ({
-        text: w.name,
-        onPress: () =>
-          Alert.prompt(`โอนไป ${w.name}`, 'ใส่จำนวนที่โอน', (text) => {
-            const qty = Number(text);
-            if (!Number.isFinite(qty) || qty <= 0) return;
-            const result = transferStock(variant.id, fromWarehouseId, w.id, qty);
-            if (result.ok) {
-              void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            } else {
-              Alert.alert('โอนไม่สำเร็จ', result.reason === 'INSUFFICIENT' ? 'สต็อกพร้อมโอนไม่พอ' : result.reason);
-            }
-          }, 'plain-text', '', 'number-pad'),
-      })),
-      { text: 'ยกเลิก', style: 'cancel' },
-    ]);
+  const promptAddVariant = () => {
+    if (!canEditStock) return;
+    Alert.prompt('ชื่อรุ่น', 'เช่น 30Ah หรือ สีดำ', (label) => {
+      const name = label?.trim();
+      if (!name) return;
+      Alert.prompt(
+        'ราคา (บาท)',
+        `รุ่น ${name}`,
+        (priceText) => {
+          const price = Number(priceText);
+          if (!Number.isFinite(price) || price <= 0) {
+            Alert.alert('ราคายังไม่ถูก', 'ใส่ตัวเลขมากกว่า 0 นะ');
+            return;
+          }
+          Alert.prompt(
+            'มีกี่ชิ้น',
+            'จำนวนที่พร้อมขาย',
+            (qtyText) => {
+              const onHand = Number(qtyText);
+              if (!Number.isFinite(onHand) || onHand < 0) {
+                Alert.alert('จำนวนยังไม่ถูก', 'ใส่ตัวเลข 0 ขึ้นไป');
+                return;
+              }
+              const idNew = addVariantToMaster(master.id, {
+                label: name,
+                price,
+                onHand,
+                warehouseId: defaultWarehouseId(),
+              });
+              if (idNew) {
+                void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              } else {
+                Alert.alert('เพิ่มไม่ได้', 'ลองใหม่อีกครั้ง');
+              }
+            },
+            'plain-text',
+            '10',
+            'number-pad',
+          );
+        },
+        'plain-text',
+        String(master.basePrice || 1000),
+        'number-pad',
+      );
+    });
   };
 
-  const doThreshold = (variant: SkuVariant) => {
+  const promptLowStockAmount = (variant: SkuVariant) => {
     const current = variant.lowStockThreshold ?? DEFAULT_LOW_STOCK_THRESHOLD;
     Alert.prompt(
-      `Low Stock Threshold · ${variant.sku}`,
-      `แจ้งเตือนเมื่อ Available ≤ ค่านี้ (ปัจจุบัน ${current})`,
+      'แจ้งเมื่อเหลือกี่ชิ้น',
+      'ระบบจะเตือนเมื่อขายได้เหลือไม่เกินจำนวนนี้',
       (text) => {
         const next = Number(text);
         if (!Number.isFinite(next) || next < 0) return;
@@ -153,172 +236,306 @@ export function ProductSkuScreen() {
         void Haptics.selectionAsync();
       },
       'plain-text',
-      String(current),
+      String(current > 0 ? current : DEFAULT_LOW_STOCK_THRESHOLD),
       'number-pad',
     );
+  };
+
+  // Advanced-only helpers (unchanged behavior)
+  const doRestock = (variant: SkuVariant, warehouseId: WarehouseId) => {
+    Alert.prompt(`เติมสต็อก · ${variant.sku}`, `คลัง ${warehouseId}`, (text) => {
+      const qty = Number(text);
+      if (!Number.isFinite(qty) || qty <= 0) return;
+      const result = restock(variant.id, warehouseId, qty, 'เติมสต็อก (ขั้นสูง)');
+      if (result.ok) void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      else Alert.alert('เติมไม่สำเร็จ', result.reason);
+    }, 'plain-text', '', 'number-pad');
+  };
+
+  const doAdjust = (variant: SkuVariant, warehouseId: WarehouseId, currentOnHand: number) => {
+    Alert.prompt(`ปรับ On Hand · ${variant.sku}`, `ปัจจุบัน ${currentOnHand}`, (text) => {
+      const next = Number(text);
+      if (!Number.isFinite(next) || next < 0) return;
+      const result = adjustStock(variant.id, warehouseId, next, `ปรับยอด (${currentOnHand} → ${next})`);
+      if (result.ok) void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      else Alert.alert('ปรับไม่สำเร็จ', result.reason === 'INSUFFICIENT' ? 'ต่ำกว่า Reserved' : result.reason);
+    }, 'plain-text', String(currentOnHand), 'number-pad');
+  };
+
+  const doTransfer = (variant: SkuVariant, fromWarehouseId: WarehouseId) => {
+    const targets = warehouses.filter((w) => w.id !== fromWarehouseId);
+    Alert.alert('โอนสต็อก', `จาก ${fromWarehouseId}`, [
+      ...targets.map((w) => ({
+        text: w.name,
+        onPress: () =>
+          Alert.prompt(`โอนไป ${w.name}`, 'จำนวน', (text) => {
+            const qty = Number(text);
+            if (!Number.isFinite(qty) || qty <= 0) return;
+            const result = transferStock(variant.id, fromWarehouseId, w.id, qty);
+            if (result.ok) void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            else Alert.alert('โอนไม่สำเร็จ', result.reason === 'INSUFFICIENT' ? 'สต็อกไม่พอ' : result.reason);
+          }, 'plain-text', '', 'number-pad'),
+      })),
+      { text: 'ยกเลิก', style: 'cancel' },
+    ]);
   };
 
   return (
     <ScrollView
       style={styles.root}
-      contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: insets.bottom + 32 }}
+      contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: insets.bottom + 40 }}
+      keyboardShouldPersistTaps="handled"
     >
       <View style={styles.topBar}>
         <Pressable hitSlop={10} onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={24} color={colors.text.primary} />
         </Pressable>
         <Text style={styles.topTitle} numberOfLines={1}>
-          จัดการสต็อก & SKU
+          รายละเอียดสินค้า
         </Text>
-        <View style={{ width: 24 }} />
+        {isMine ? (
+          <Pressable
+            hitSlop={8}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              router.push({ pathname: '/products/[id]/edit', params: { id: master.id } });
+            }}
+            accessibilityLabel="แก้ไขสินค้า"
+          >
+            <Text style={styles.editLink}>แก้ไข</Text>
+          </Pressable>
+        ) : (
+          <View style={{ width: 40 }} />
+        )}
       </View>
 
-      {/* Product summary */}
       <View style={styles.productCard}>
         <Image
-          source={{ uri: master.imageUri ?? masterContentImage(master.id) }}
+          source={{ uri: master.imageUri ?? master.imageUris?.[0] ?? masterContentImage(master.id) }}
           style={styles.productImage}
         />
-        <View style={{ flex: 1, gap: 3 }}>
-          <Text style={styles.title} numberOfLines={2}>
+        <View style={{ flex: 1, gap: 4 }}>
+          <Text style={styles.productTitle} numberOfLines={2}>
             {master.title}
           </Text>
-          <Text style={styles.meta}>
-            {master.masterSku} · {master.channel}
-          </Text>
           {!isMine ? (
-            <View style={styles.sourceBadge}>
-              <Ionicons name="business" size={10} color="#fff" />
-              <Text style={styles.sourceBadgeText}>
-                {sourceWarehouse?.name ?? master.shopName} · สต็อกกลาง
-              </Text>
-            </View>
-          ) : null}
-          {master.description ? (
-            <Text style={styles.desc} numberOfLines={3}>
-              {master.description}
-            </Text>
-          ) : null}
+            <Text style={styles.sharedHint}>สินค้าจากคลัง {sharedLabel}</Text>
+          ) : (
+            <Text style={styles.sharedHint}>ร้านคุณ · พร้อมปรับจำนวนได้เลย</Text>
+          )}
         </View>
       </View>
 
       {!canEditStock ? (
         <View style={styles.readOnlyBanner}>
-          <Ionicons name="lock-closed" size={13} color={colors.accent.warning} />
+          <Ionicons name="eye-outline" size={16} color={colors.accent.warning} />
           <Text style={styles.readOnlyText}>
-            สินค้าจากคลังที่เชื่อม — คุณดูสต็อกได้ (VIEW_STOCK) แต่แก้ไขได้เฉพาะผู้มีสิทธิ์ EDIT_STOCK
+            ดูได้อย่างเดียว — ไม่มีสิทธิ์แก้จำนวนสินค้าจากคลังนี้
           </Text>
         </View>
       ) : null}
 
-      {/* SKU list */}
-      <Text style={styles.sectionTitle}>SKU ทั้งหมด ({productVariants.length})</Text>
+      <Text style={styles.sectionTitle}>รุ่นสินค้า ({productVariants.length})</Text>
+
       {productVariants.map((variant) => {
         const rows = rowsOf(variant.id);
-        const available = rows.reduce((s, r) => s + Math.max(0, r.onHand - r.reserved), 0);
-        const reserved = rows.reduce((s, r) => s + r.reserved, 0);
-        const onHand = rows.reduce((s, r) => s + r.onHand, 0);
+        const sellable = rows.reduce((s, r) => s + availableOf(r), 0);
         const threshold = variant.lowStockThreshold ?? DEFAULT_LOW_STOCK_THRESHOLD;
-        const status = stockStatusOf(available, threshold);
-        const reorder = shouldReorder({ available, threshold });
-        const meta = STATUS_META[status];
+        const alertOn = threshold > 0;
+        const status = stockStatusOf(sellable, alertOn ? threshold : 0);
+        const row = primaryRow(rows);
 
         return (
-          <View key={variant.id} style={styles.skuCard}>
-            <View style={styles.skuHeader}>
+          <View key={variant.id} style={styles.variantCard}>
+            <View style={styles.variantTop}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.skuCode}>{variant.sku}</Text>
-                <Text style={styles.meta}>
-                  {variant.label} · {formatTHB(variant.price)}
-                  {variant.cost != null ? ` · ทุน ${formatTHB(variant.cost)}` : ''}
+                <Text style={styles.variantName}>{variant.label}</Text>
+                <Text style={styles.variantPrice}>{formatTHB(variant.price)}</Text>
+              </View>
+            </View>
+
+            <Text style={styles.sellableLabel}>
+              {sellable > 0 ? `ขายได้ ${sellable.toLocaleString('th-TH')} ชิ้น` : 'สินค้าหมด'}
+            </Text>
+
+            {canEditStock ? (
+              <View style={styles.stepper}>
+                <Pressable
+                  style={styles.stepBtn}
+                  onPress={() => bumpSellable(variant, -1)}
+                  hitSlop={6}
+                >
+                  <Text style={styles.stepBtnText}>−</Text>
+                </Pressable>
+                <Pressable style={styles.stepValueHit} onPress={() => promptSellable(variant, sellable)}>
+                  <Text style={styles.stepValue}>{sellable.toLocaleString('th-TH')}</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.stepBtn}
+                  onPress={() => bumpSellable(variant, 1)}
+                  hitSlop={6}
+                >
+                  <Text style={styles.stepBtnText}>+</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <Text style={styles.stepValueReadonly}>{sellable.toLocaleString('th-TH')}</Text>
+            )}
+
+            {status === 'ready' ? (
+              <Text style={styles.statusReady}>🟢 พร้อมขาย</Text>
+            ) : null}
+            {status === 'low' ? (
+              <Text style={styles.statusLow}>
+                🟠 ใกล้หมด — เหลือ {sellable.toLocaleString('th-TH')} ชิ้น
+              </Text>
+            ) : null}
+            {status === 'out' ? <Text style={styles.statusOut}>🔴 สินค้าหมด</Text> : null}
+
+            <View style={styles.alertRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.alertTitle}>แจ้งเตือนเมื่อสินค้าเหลือน้อย</Text>
+                {alertOn ? (
+                  <Pressable onPress={() => canEditStock && promptLowStockAmount(variant)}>
+                    <Text style={styles.alertSub}>
+                      แจ้งเมื่อเหลือ{' '}
+                      <Text style={styles.alertNum}>{threshold}</Text> ชิ้น
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <Text style={styles.alertSub}>ปิดอยู่</Text>
+                )}
+              </View>
+              {canEditStock ? (
+                <Pressable
+                  style={[styles.alertSwitch, alertOn && styles.alertSwitchOn]}
+                  onPress={() => {
+                    setLowStockThreshold(
+                      variant.id,
+                      alertOn ? 0 : variant.lowStockThreshold || DEFAULT_LOW_STOCK_THRESHOLD,
+                    );
+                    void Haptics.selectionAsync();
+                  }}
+                >
+                  <Text style={[styles.alertSwitchText, alertOn && styles.alertSwitchTextOn]}>
+                    {alertOn ? 'เปิด' : 'ปิด'}
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+
+            {advanced ? (
+              <View style={styles.advancedBlock}>
+                <Text style={styles.advLine}>SKU Code · {variant.sku}</Text>
+                <Text style={styles.advLine}>
+                  On Hand {rows.reduce((s, r) => s + r.onHand, 0)} · Reserved{' '}
+                  {rows.reduce((s, r) => s + r.reserved, 0)} · Available {sellable}
                 </Text>
-              </View>
-              <View style={[styles.statusPill, { backgroundColor: meta.color }]}>
-                <Text style={styles.statusPillText}>{meta.label}</Text>
-              </View>
-            </View>
-
-            <View style={styles.numbersRow}>
-              <NumberCell label="On Hand" value={onHand} />
-              <NumberCell label="Reserved" value={reserved} />
-              <NumberCell label="Available" value={available} strong />
-              <Pressable onPress={() => canEditStock && doThreshold(variant)} style={styles.numberCell}>
-                <Text style={styles.numberValue}>{threshold}</Text>
-                <Text style={styles.numberLabel}>แจ้งเตือน ≤</Text>
-              </Pressable>
-            </View>
-
-            {reorder ? (
-              <View style={styles.reorderHint}>
-                <Ionicons name="alert-circle" size={13} color={colors.accent.warning} />
-                <Text style={styles.reorderHintText}>ควรเติมสินค้า — Available ต่ำกว่าเกณฑ์</Text>
+                <Text style={styles.advLine}>
+                  Low Stock Threshold · {threshold} {alertOn ? '' : '(off)'}
+                </Text>
+                {rows.map((r) => (
+                  <View key={`${r.variantId}-${r.warehouseId}`} style={styles.advWarehouse}>
+                    <Text style={styles.advLine}>
+                      Warehouse {warehouses.find((w) => w.id === r.warehouseId)?.name ?? r.warehouseId}
+                    </Text>
+                    <Text style={styles.advMeta}>
+                      On Hand {r.onHand} · Reserved {r.reserved} · Available {availableOf(r)} · rev{' '}
+                      {r.revision}
+                    </Text>
+                    {canEditStock ? (
+                      <View style={styles.advActions}>
+                        <Pressable style={styles.miniBtn} onPress={() => doRestock(variant, r.warehouseId)}>
+                          <Text style={styles.miniBtnText}>+ เติม</Text>
+                        </Pressable>
+                        <Pressable
+                          style={styles.miniBtn}
+                          onPress={() => doAdjust(variant, r.warehouseId, r.onHand)}
+                        >
+                          <Text style={styles.miniBtnText}>ปรับยอด</Text>
+                        </Pressable>
+                        <Pressable style={styles.miniBtn} onPress={() => doTransfer(variant, r.warehouseId)}>
+                          <Text style={styles.miniBtnText}>โอน</Text>
+                        </Pressable>
+                      </View>
+                    ) : null}
+                  </View>
+                ))}
+                {!row ? <Text style={styles.advMeta}>ยังไม่มีแถว Inventory</Text> : null}
               </View>
             ) : null}
-
-            {rows.map((row) => (
-              <View key={`${row.variantId}-${row.warehouseId}`} style={styles.warehouseRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.warehouseName}>
-                    {warehouses.find((w) => w.id === row.warehouseId)?.name ?? row.warehouseId}
-                  </Text>
-                  <Text style={styles.meta}>
-                    On Hand {row.onHand} · จอง {row.reserved} · เหลือ{' '}
-                    {Math.max(0, row.onHand - row.reserved)} · rev {row.revision}
-                  </Text>
-                </View>
-                {canEditStock ? (
-                  <View style={styles.rowActions}>
-                    <Pressable
-                      style={styles.miniBtn}
-                      onPress={() => doRestock(variant, row.warehouseId)}
-                    >
-                      <Text style={styles.miniBtnText}>+ เติม</Text>
-                    </Pressable>
-                    <Pressable
-                      style={styles.miniBtn}
-                      onPress={() => doAdjust(variant, row.warehouseId, row.onHand)}
-                    >
-                      <Text style={styles.miniBtnText}>ปรับยอด</Text>
-                    </Pressable>
-                    <Pressable
-                      style={styles.miniBtn}
-                      onPress={() => doTransfer(variant, row.warehouseId)}
-                    >
-                      <Text style={styles.miniBtnText}>โอน</Text>
-                    </Pressable>
-                  </View>
-                ) : null}
-              </View>
-            ))}
           </View>
         );
       })}
 
-      {/* Movement history */}
-      <Text style={styles.sectionTitle}>ประวัติความเคลื่อนไหว (Inventory Ledger)</Text>
-      {productLedger.length === 0 ? (
-        <Text style={[styles.meta, { paddingHorizontal: 16 }]}>
-          ยังไม่มีความเคลื่อนไหว — ทุกการเปลี่ยนสต็อกจะถูกบันทึกที่นี่อัตโนมัติ
-        </Text>
-      ) : (
-        productLedger.map((entry: StockLedgerEntry) => <LedgerRow key={entry.id} entry={entry} />)
-      )}
-      <Pressable style={styles.allLedgerBtn} onPress={() => router.push('/store/ledger')}>
-        <Ionicons name="receipt-outline" size={14} color={colors.brand.primaryDark} />
-        <Text style={styles.allLedgerText}>ดู Ledger ทั้งร้าน (ทุกสินค้า)</Text>
-      </Pressable>
-    </ScrollView>
-  );
-}
+      {canEditStock ? (
+        <Pressable style={styles.addVariantBtn} onPress={promptAddVariant}>
+          <Ionicons name="add" size={20} color={colors.brand.primaryDark} />
+          <Text style={styles.addVariantText}>เพิ่มรุ่นสินค้า</Text>
+        </Pressable>
+      ) : null}
 
-function NumberCell({ label, value, strong }: { label: string; value: number; strong?: boolean }) {
-  return (
-    <View style={styles.numberCell}>
-      <Text style={[styles.numberValue, strong && { color: colors.brand.primaryDark }]}>
-        {value.toLocaleString('th-TH')}
-      </Text>
-      <Text style={styles.numberLabel}>{label}</Text>
-    </View>
+      <Pressable
+        style={styles.historyHeader}
+        onPress={() => setHistoryOpen((v) => !v)}
+      >
+        <Text style={styles.historyTitle}>ประวัติการเปลี่ยนแปลง</Text>
+        <Ionicons
+          name={historyOpen ? 'chevron-up' : 'chevron-down'}
+          size={18}
+          color={colors.text.secondary}
+        />
+      </Pressable>
+      {historyOpen ? (
+        <View style={styles.historyBody}>
+          {productLedger.length === 0 ? (
+            <Text style={styles.historyEmpty}>ยังไม่มีรายการ</Text>
+          ) : (
+            productLedger.slice(0, 12).map((entry) => (
+              <Text key={entry.id} style={styles.historyLine}>
+                {friendlyLedgerLine(entry)}
+              </Text>
+            ))
+          )}
+          {advanced ? (
+            <>
+              <Text style={[styles.sectionTitle, { paddingHorizontal: 0, marginTop: 12 }]}>
+                Inventory Ledger (เทคนิค)
+              </Text>
+              {productLedger.slice(0, 8).map((entry) => (
+                <LedgerRow key={`adv-${entry.id}`} entry={entry} />
+              ))}
+              <Pressable style={styles.allLedgerBtn} onPress={() => router.push('/store/ledger')}>
+                <Text style={styles.allLedgerText}>ดู Ledger ทั้งร้าน</Text>
+              </Pressable>
+            </>
+          ) : null}
+        </View>
+      ) : null}
+
+      <Pressable
+        style={styles.advancedToggle}
+        onPress={() => {
+          setAdvanced((v) => !v);
+          void Haptics.selectionAsync();
+        }}
+      >
+        <Text style={styles.advancedToggleText}>
+          ⚙️ การตั้งค่าสต๊อกขั้นสูง {advanced ? '· เปิดอยู่' : ''}
+        </Text>
+        <Text style={styles.advancedToggleHint}>
+          {advanced ? 'แตะเพื่อซ่อนรายละเอียดคลัง/SKU' : 'สำหรับแอดมินหรือคนจัดการคลังละเอียด'}
+        </Text>
+      </Pressable>
+
+      {advanced ? (
+        <View style={styles.advancedProductMeta}>
+          <Text style={styles.advLine}>Master SKU · {master.masterSku}</Text>
+          <Text style={styles.advLine}>Channel · {master.channel}</Text>
+          <Text style={styles.advLine}>Product ID · {master.id}</Text>
+        </View>
+      ) : null}
+    </ScrollView>
   );
 }
 
@@ -331,7 +548,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingBottom: 10,
   },
-  topTitle: { fontSize: 16, fontWeight: '900', color: colors.text.primary },
+  topTitle: { fontSize: 17, fontWeight: '900', color: colors.text.primary, flex: 1, textAlign: 'center' },
+  editLink: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.brand.primaryDark,
+    minWidth: 40,
+    textAlign: 'right',
+  },
   productCard: {
     flexDirection: 'row',
     gap: 12,
@@ -344,103 +568,204 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   productImage: { width: 72, height: 72, borderRadius: 12, backgroundColor: '#0B1F17' },
-  title: { fontSize: 15, fontWeight: '900', color: colors.text.primary },
-  meta: { fontSize: 11, color: colors.text.muted, fontWeight: '600' },
-  desc: { fontSize: 11, color: colors.text.secondary, lineHeight: 15 },
-  sourceBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: colors.accent.info,
-    alignSelf: 'flex-start',
-    borderRadius: 7,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-  },
-  sourceBadgeText: { color: '#fff', fontSize: 9, fontWeight: '800' },
+  productTitle: { fontSize: 16, fontWeight: '900', color: colors.text.primary },
+  sharedHint: { fontSize: 12, fontWeight: '600', color: colors.text.secondary },
   readOnlyBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
     marginHorizontal: 14,
     marginBottom: 10,
     backgroundColor: '#FFF6E5',
     borderRadius: 12,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(245,165,36,0.35)',
+    padding: 12,
   },
-  readOnlyText: { flex: 1, fontSize: 11, color: '#8A6210', fontWeight: '600', lineHeight: 15 },
+  readOnlyText: { flex: 1, fontSize: 13, color: '#8A6210', fontWeight: '600', lineHeight: 18 },
   sectionTitle: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '900',
     color: colors.text.primary,
     paddingHorizontal: 16,
-    marginTop: 8,
+    marginTop: 6,
     marginBottom: 8,
   },
-  skuCard: {
+  variantCard: {
     marginHorizontal: 14,
     backgroundColor: colors.surface.card,
-    borderRadius: 16,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: colors.border.soft,
-    padding: 12,
-    marginBottom: 10,
-    gap: 8,
+    padding: 16,
+    marginBottom: 12,
+    gap: 10,
   },
-  skuHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  skuCode: { fontSize: 13, fontWeight: '900', color: colors.text.primary },
-  statusPill: { borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4 },
-  statusPillText: { color: '#fff', fontSize: 10, fontWeight: '900' },
-  numbersRow: { flexDirection: 'row', gap: 8 },
-  numberCell: {
-    flex: 1,
-    backgroundColor: '#F3F5F4',
-    borderRadius: 10,
-    alignItems: 'center',
-    paddingVertical: 8,
-    gap: 1,
+  variantTop: { flexDirection: 'row', alignItems: 'flex-start' },
+  variantName: { fontSize: 20, fontWeight: '900', color: colors.text.primary },
+  variantPrice: {
+    marginTop: 2,
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.brand.primaryDark,
   },
-  numberValue: { fontSize: 14, fontWeight: '900', color: colors.text.primary },
-  numberLabel: { fontSize: 9, fontWeight: '700', color: colors.text.muted },
-  reorderHint: {
+  sellableLabel: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text.secondary,
+  },
+  stepper: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    backgroundColor: '#FFF6E5',
-    borderRadius: 10,
-    paddingHorizontal: 9,
-    paddingVertical: 6,
+    justifyContent: 'center',
+    gap: 18,
+    paddingVertical: 4,
   },
-  reorderHintText: { fontSize: 11, fontWeight: '800', color: '#8A6210' },
-  warehouseRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    borderTopWidth: 1,
-    borderTopColor: colors.border.soft,
-    paddingTop: 8,
-  },
-  warehouseName: { fontSize: 12, fontWeight: '800', color: colors.text.primary },
-  rowActions: { flexDirection: 'row', gap: 5 },
-  miniBtn: {
+  stepBtn: {
+    width: 52,
+    height: 52,
+    borderRadius: 16,
     backgroundColor: colors.brand.mist,
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  miniBtnText: { fontSize: 10, fontWeight: '900', color: colors.brand.primaryDark },
-  allLedgerBtn: {
+  stepBtnText: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: colors.brand.primaryDark,
+    marginTop: -2,
+  },
+  stepValueHit: {
+    minWidth: 88,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+  },
+  stepValue: {
+    fontSize: 36,
+    fontWeight: '900',
+    color: colors.text.primary,
+    fontVariant: ['tabular-nums'],
+  },
+  stepValueReadonly: {
+    fontSize: 32,
+    fontWeight: '900',
+    color: colors.text.primary,
+    textAlign: 'center',
+  },
+  statusReady: { fontSize: 15, fontWeight: '800', color: '#15803D' },
+  statusLow: { fontSize: 15, fontWeight: '800', color: '#B45309' },
+  statusOut: { fontSize: 15, fontWeight: '800', color: '#DC2626' },
+  alertRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#F3F5F4',
+    borderRadius: 14,
+    padding: 12,
+  },
+  alertTitle: { fontSize: 13, fontWeight: '800', color: colors.text.primary },
+  alertSub: { marginTop: 2, fontSize: 12, fontWeight: '600', color: colors.text.secondary },
+  alertNum: { fontWeight: '900', color: colors.brand.primaryDark },
+  alertSwitch: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#E5E7E6',
+  },
+  alertSwitchOn: { backgroundColor: colors.brand.primary },
+  alertSwitchText: { fontWeight: '900', fontSize: 13, color: colors.text.secondary },
+  alertSwitchTextOn: { color: colors.brand.ink },
+  addVariantBtn: {
+    marginHorizontal: 14,
+    marginBottom: 14,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(10,22,17,0.2)',
+    backgroundColor: '#fff',
+    paddingVertical: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
+  },
+  addVariantText: { fontSize: 16, fontWeight: '900', color: colors.brand.primaryDark },
+  historyHeader: {
     marginHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.surface.card,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: colors.border.soft,
+  },
+  historyTitle: { fontSize: 15, fontWeight: '900', color: colors.text.primary },
+  historyBody: {
+    marginHorizontal: 14,
+    marginTop: 8,
+    backgroundColor: colors.surface.card,
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.border.soft,
+    gap: 8,
+  },
+  historyEmpty: { fontSize: 13, color: colors.text.muted, fontWeight: '600' },
+  historyLine: { fontSize: 15, fontWeight: '700', color: colors.text.primary },
+  advancedToggle: {
+    marginHorizontal: 14,
+    marginTop: 16,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: '#EEF1F0',
+  },
+  advancedToggleText: { fontSize: 14, fontWeight: '900', color: colors.text.primary },
+  advancedToggleHint: {
     marginTop: 4,
-    backgroundColor: colors.brand.mist,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.text.secondary,
+  },
+  advancedBlock: {
+    marginTop: 4,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: colors.border.soft,
+    gap: 6,
+  },
+  advancedProductMeta: {
+    marginHorizontal: 14,
+    marginTop: 10,
+    padding: 12,
     borderRadius: 12,
-    paddingVertical: 12,
+    backgroundColor: '#E8ECEA',
+    gap: 4,
+  },
+  advLine: { fontSize: 12, fontWeight: '700', color: colors.text.primary },
+  advMeta: { fontSize: 11, fontWeight: '600', color: colors.text.muted },
+  advWarehouse: {
+    marginTop: 6,
+    paddingTop: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border.soft,
+    gap: 4,
+  },
+  advActions: { flexDirection: 'row', gap: 6, marginTop: 4 },
+  miniBtn: {
+    backgroundColor: colors.brand.mist,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  miniBtnText: { fontSize: 11, fontWeight: '900', color: colors.brand.primaryDark },
+  allLedgerBtn: {
+    marginTop: 8,
+    alignItems: 'center',
+    paddingVertical: 10,
+    backgroundColor: colors.brand.mist,
+    borderRadius: 10,
   },
   allLedgerText: { fontSize: 12, fontWeight: '900', color: colors.brand.primaryDark },
 });

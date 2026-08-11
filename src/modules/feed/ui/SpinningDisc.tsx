@@ -1,7 +1,8 @@
 import React, { useEffect } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
   Easing,
+  cancelAnimation,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
@@ -9,22 +10,32 @@ import Animated, {
 } from 'react-native-reanimated';
 import { colors } from '@/shared/theme/colors';
 
-export function SpinningDisc() {
+type Props = {
+  spinning?: boolean;
+  onPress?: () => void;
+};
+
+/** TikTok-style disc — tap to open BoomMall Listen Mode (long-form music). */
+export function SpinningDisc({ spinning = true, onPress }: Props) {
   const rotation = useSharedValue(0);
 
   useEffect(() => {
-    rotation.value = withRepeat(
-      withTiming(360, { duration: 3200, easing: Easing.linear }),
-      -1,
-      false,
-    );
-  }, [rotation]);
+    if (spinning) {
+      rotation.value = withRepeat(
+        withTiming(360, { duration: 3200, easing: Easing.linear }),
+        -1,
+        false,
+      );
+    } else {
+      cancelAnimation(rotation);
+    }
+  }, [spinning, rotation]);
 
   const style = useAnimatedStyle(() => ({
     transform: [{ rotate: `${rotation.value}deg` }],
   }));
 
-  return (
+  const disc = (
     <View style={styles.wrap}>
       <Animated.View style={[styles.disc, style]}>
         <View style={styles.groove} />
@@ -33,6 +44,14 @@ export function SpinningDisc() {
         </View>
       </Animated.View>
     </View>
+  );
+
+  if (!onPress) return disc;
+
+  return (
+    <Pressable onPress={onPress} accessibilityLabel="เปิดโหมดฟังเพลง" hitSlop={6}>
+      {disc}
+    </Pressable>
   );
 }
 

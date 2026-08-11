@@ -9,37 +9,36 @@ import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
-import { useOrdersStore } from '@/modules/store/state/orders-store';
-import { ORDER_STATUS_LABEL, type MyOrder, type OrderStatus } from '@/modules/store/domain/types';
+import { useBoomWalletStore } from '@/modules/wallet/state/boom-wallet-store';
+import { BoomWalletProfileButton } from '@/modules/wallet/ui/BoomWalletProfileButton';
+import { BoomCoinRewardPopup } from '@/modules/wallet/ui/BoomCoinRewardPopup';
+import { BoomCoinAmountView } from '@/modules/wallet/ui/BoomCoinAmountView';
+import { normalizeAuthorHandle } from '@/modules/feed/domain/selectFeedByAuthor';
+import { buildOwnerFeedItems } from '@/modules/profile/data/buildOwnerFeedItems';
+import type { FeedItem } from '@/modules/feed/domain/types';
 import { Avatar } from '@/shared/components/Avatar';
 import { colors } from '@/shared/theme/colors';
+import { ENABLE_BOOM_WALLET_UI, ENABLE_FEED_COIN_REACTION } from '@/shared/compliance/appStoreGates';
 import { ContentGrid } from './ContentGrid';
+import { MyOrdersHub } from './MyOrdersHub';
+
+function openOwnerFeed(handle: string, item: FeedItem) {
+  router.push({
+    pathname: '/profile-feed',
+    params: {
+      handle: normalizeAuthorHandle(handle),
+      startId: item.id,
+    },
+  });
+}
 
 type ProfileTab = 'videos' | 'orders' | 'saved' | 'liked';
 type NavTab = ProfileTab | 'store';
 
-const GRID_PADDING = 16;
-
 function formatCompact(n: number) {
-  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
-}
-
-function orderStatusColor(status: OrderStatus) {
-  switch (status) {
-    case 'pending':
-      return colors.accent.warning;
-    case 'paid':
-    case 'shipped':
-      return colors.accent.info;
-    case 'delivered':
-      return colors.brand.primaryDark;
-    case 'cancelled':
-      return colors.text.muted;
-    default:
-      return colors.text.muted;
-  }
 }
 
 const TABS: Array<{ key: NavTab; icon: keyof typeof Ionicons.glyphMap }> = [
@@ -55,11 +54,30 @@ export function ProfileScreen() {
   const profile = useLoyaltyStore((s) => s.profile);
   const updateProfile = useLoyaltyStore((s) => s.updateProfile);
   const items = useFeedStore((s) => s.items);
-  const myOrders = useOrdersStore((s) => s.myOrders);
+  const lifetimeCoins = useBoomWalletStore((s) => s.lifetimeCoinsReceived);
+  const available = useBoomWalletStore((s) => s.available);
   const [tab, setTab] = useState<ProfileTab>('videos');
 
+  const myHandle = normalizeAuthorHandle(profile.handle);
+  const myContent = useMemo(
+    () =>
+      buildOwnerFeedItems(myHandle, items, {
+        isSelf: true,
+        displayName: profile.displayName,
+      }),
+    [items, myHandle, profile.displayName],
+  );
+  /** ได้รับ Coin = ยอดทิปสะสมบนคลิปของเรา (ขึ้นเมื่อมีคนกดเหรียญ) */
+  const coinsReceived = useMemo(
+    () => myContent.reduce((sum, item) => sum + (item.tips ?? 0), 0),
+    [myContent],
+  );
   const likedItems = useMemo(() => items.filter((i) => i.liked), [items]);
   const savedItems = useMemo(() => items.filter((i) => i.saved), [items]);
+  const productsCount = useMemo(
+    () => myContent.filter((i) => (i.product?.basePrice ?? 0) > 0).length || 84,
+    [myContent],
+  );
 
   const handleTabPress = (key: NavTab) => {
     void Haptics.selectionAsync();
@@ -139,6 +157,25 @@ export function ProfileScreen() {
     Alert.alert('คัดลอกแล้ว', `คัดลอก ${profile.handle} ไปยังคลิปบอร์ดแล้ว`);
   };
 
+  const onLifetimePress = () => {
+    void Haptics.selectionAsync();
+    if (!ENABLE_BOOM_WALLET_UI) {
+      Alert.alert(
+        'ได้รับเหรียญ',
+        `สะสมบนคลิป ${coinsReceived.toLocaleString('en-US')} ครั้ง\n\nเป็นตัวนับบนฟีดเท่านั้น — ไม่มีมูลค่าเงิน`,
+      );
+      return;
+    }
+    Alert.alert(
+      'ได้รับ Coin',
+      `สะสมบนคลิป ${coinsReceived.toLocaleString('en-US')} Coin\nLedger lifetime ${lifetimeCoins.toLocaleString('en-US')}\n\nขึ้นเมื่อมีคนกดเหรียญสนับสนุน (แทนหัวใจ)\nไม่ใช่ยอดใน Wallet — ยอดใช้จ่ายจริงอยู่ที่ปุ่ม Wallet`,
+      [
+        { text: 'ปิด', style: 'cancel' },
+        { text: 'เปิด Wallet', onPress: () => router.push('/wallet') },
+      ],
+    );
+  };
+
   return (
     <ScrollView
       style={styles.root}
@@ -168,21 +205,22 @@ export function ProfileScreen() {
             <Pressable
               hitSlop={8}
               style={styles.coverIconBtn}
-              onPress={() => Alert.alert('เมนู', 'ตั้งค่า / ความเป็นส่วนตัว')}
+              onPress={() => router.push('/wallet/security')}
             >
-              <Ionicons name="menu-outline" size={20} color="#fff" />
+              <Ionicons name="settings-outline" size={20} color="#fff" />
             </Pressable>
           </View>
         </View>
       </Pressable>
 
-      <View style={styles.pageInfoRow}>
-        <Pressable style={styles.avatarWrap} onLongPress={editAvatar} delayLongPress={350}>
+      {/* Centered identity — same pattern as reference / Creator profile */}
+      <View style={styles.identityBlock}>
+        <Pressable onLongPress={editAvatar} delayLongPress={350}>
           <Avatar
             uri={profile.avatarUri}
             initial={profile.displayName.slice(0, 1)}
-            size={84}
-            radius={20}
+            size={88}
+            radius={44}
             borderWidth={3}
             borderColor={colors.surface.canvas}
             textStyle={styles.avatarText}
@@ -193,34 +231,117 @@ export function ProfileScreen() {
             </View>
           ) : null}
         </Pressable>
-        <View style={styles.pageInfoBody}>
-          <Text style={styles.shopName} numberOfLines={1} onLongPress={editDisplayName}>
-            {profile.displayName}
-          </Text>
-          <Text style={styles.statsLine} numberOfLines={1}>
-            <Text style={styles.statsLineStrong}>{formatCompact(profile.followersCount)}</Text> ผู้ติดตาม
-            {'  •  '}
-            <Text style={styles.statsLineStrong}>{formatCompact(profile.followingCount)}</Text> กำลังติดตาม
-          </Text>
-        </View>
-      </View>
-
-      <View style={styles.handleRow}>
-        <Text style={styles.handleText} onLongPress={copyHandle}>
+        <Text style={styles.displayName} numberOfLines={1} onLongPress={editDisplayName}>
+          {profile.displayName}
+        </Text>
+        <Text style={styles.handleCentered} numberOfLines={1} onLongPress={copyHandle}>
           {profile.handle}
         </Text>
-        <View style={styles.vipPill}>
-          <Text style={styles.vipText}>{profile.loyaltyTier}</Text>
+      </View>
+
+      {/* 4-column stats: Following | Followers | Coins | Products */}
+      <View style={styles.statsRow}>
+        <View style={styles.statCell}>
+          <Text style={styles.statValue}>{formatCompact(profile.followingCount)}</Text>
+          <Text style={styles.statLabel}>กำลังติดตาม</Text>
+        </View>
+        <View style={styles.statCell}>
+          <Text style={styles.statValue}>{formatCompact(profile.followersCount)}</Text>
+          <Text style={styles.statLabel}>ผู้ติดตาม</Text>
+        </View>
+        {ENABLE_BOOM_WALLET_UI || ENABLE_FEED_COIN_REACTION ? (
+          <View style={styles.statCell}>
+            <BoomCoinAmountView
+              amount={coinsReceived}
+              variant="compact"
+              label="ได้รับ Coin"
+              iconSize={22}
+              valueSize={17}
+              animate
+              onPress={onLifetimePress}
+              valueStyle={styles.statValue}
+              labelStyle={styles.statLabel}
+            />
+          </View>
+        ) : (
+          <View style={styles.statCell}>
+            <Text style={styles.statValue}>{formatCompact(profile.followingCount + profile.followersCount)}</Text>
+            <Text style={styles.statLabel}>ชุมชน</Text>
+          </View>
+        )}
+        <View style={styles.statCell}>
+          <Text style={styles.statValue}>{formatCompact(productsCount)}</Text>
+          <Text style={styles.statLabel}>สินค้า</Text>
         </View>
       </View>
-      <Text style={styles.categoryText}>{profile.technicianBadge}</Text>
 
+      {/* Owner actions — Edit (+ Wallet when enabled) */}
+      <View style={styles.actionRow}>
+        <Pressable
+          style={styles.secondaryBtn}
+          onPress={() => Alert.alert('แก้ไขโปรไฟล์', 'กดค้างที่ชื่อ / รูป / คำบรรยาย เพื่อแก้ไข')}
+        >
+          <Text style={styles.secondaryBtnText}>แก้ไขโปรไฟล์</Text>
+        </Pressable>
+        {ENABLE_BOOM_WALLET_UI ? (
+          <Pressable
+            style={styles.secondaryBtn}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              router.push('/wallet');
+            }}
+          >
+            <BoomCoinAmountView
+              amount={available}
+              variant="balance"
+              iconSize={18}
+              valueSize={14}
+              animate
+              style={styles.walletBtnInner}
+              valueStyle={styles.secondaryBtnText}
+            />
+          </Pressable>
+        ) : null}
+        <Pressable
+          style={styles.moreBtn}
+          onPress={() =>
+            Alert.alert(profile.displayName, undefined, [
+              { text: 'แชร์โปรไฟล์', onPress: () => Alert.alert('แชร์แล้ว', profile.handle) },
+              {
+                text: 'ความปลอดภัย / Moderation',
+                onPress: () => router.push('/settings/moderation'),
+              },
+              { text: 'ตั้งค่าบัญชี', onPress: () => router.push('/wallet/security') },
+              {
+                text: 'นโยบายความเป็นส่วนตัว',
+                onPress: () => router.push({ pathname: '/legal/[doc]', params: { doc: 'privacy' } }),
+              },
+              {
+                text: 'ข้อกำหนดการใช้บริการ',
+                onPress: () => router.push({ pathname: '/legal/[doc]', params: { doc: 'terms' } }),
+              },
+              { text: 'ปิด', style: 'cancel' },
+            ])
+          }
+        >
+          <Ionicons name="chevron-down" size={16} color={colors.text.primary} />
+        </Pressable>
+      </View>
+
+      <Text style={styles.categoryText}>{profile.technicianBadge}</Text>
       <Text
         style={[styles.bio, !profile.bio && styles.bioPlaceholder]}
         onLongPress={editBio}
       >
         {profile.bio || 'กดค้างเพื่อเพิ่มคำบรรยายโปรไฟล์'}
       </Text>
+
+      {ENABLE_BOOM_WALLET_UI ? (
+        <>
+          <BoomWalletProfileButton />
+          <BoomCoinRewardPopup />
+        </>
+      ) : null}
 
       <View style={styles.tabBar}>
         {TABS.map((t) => {
@@ -241,14 +362,15 @@ export function ProfileScreen() {
       {tab === 'videos' ? (
         <ContentGrid
           mode="content"
-          items={items}
+          items={myContent}
+          pinnedCount={3}
           emptyIcon="videocam-outline"
-          emptyText="ยังไม่มีคลิปวิดีโอ"
-          onPressItem={() => router.push('/(tabs)')}
+          emptyText="ยังไม่มีคลิปวิดีโอ — โพสต์จาก Creator Studio จะโชว์ตรงนี้"
+          onPressItem={(item) => openOwnerFeed(myHandle, item)}
         />
       ) : null}
 
-      {tab === 'orders' ? <OrdersList orders={myOrders} /> : null}
+      {tab === 'orders' ? <MyOrdersHub /> : null}
 
       {tab === 'saved' ? (
         <ContentGrid
@@ -256,7 +378,9 @@ export function ProfileScreen() {
           items={savedItems}
           emptyIcon="bookmark-outline"
           emptyText="แตะปุ่มบันทึกในคลิปที่อยากดูทีหลัง แล้วคอนเทนต์จะมาโชว์ตรงนี้"
-          onPressItem={() => router.push('/(tabs)')}
+          onPressItem={(item) =>
+            openOwnerFeed(normalizeAuthorHandle(item.authorHandle), item)
+          }
         />
       ) : null}
 
@@ -266,53 +390,12 @@ export function ProfileScreen() {
           items={likedItems}
           emptyIcon="heart-outline"
           emptyText="กดหัวใจคลิปที่ชอบแล้วจะมาโชว์ตรงนี้"
-          onPressItem={() => router.push('/(tabs)')}
+          onPressItem={(item) =>
+            openOwnerFeed(normalizeAuthorHandle(item.authorHandle), item)
+          }
         />
       ) : null}
     </ScrollView>
-  );
-}
-
-function OrdersList({ orders }: { orders: MyOrder[] }) {
-  if (orders.length === 0) {
-    return (
-      <View style={styles.gridEmpty}>
-        <Ionicons name="bag-handle-outline" size={40} color={colors.text.muted} />
-        <Text style={styles.gridEmptyText}>ยังไม่มีคำสั่งซื้อ</Text>
-      </View>
-    );
-  }
-  return (
-    <View style={styles.ordersList}>
-      {orders.map((order) => (
-        <View key={order.id} style={styles.orderCard}>
-          <View style={[styles.orderThumb, { backgroundColor: order.thumbnailColor }]} />
-          <View style={styles.orderBody}>
-            <Text style={styles.orderTitle} numberOfLines={1}>{order.productTitle}</Text>
-            <Text style={styles.orderVariant} numberOfLines={1}>{order.variantLabel}</Text>
-            <Text style={styles.orderMeta}>
-              {order.shopName} · {order.qty} ชิ้น · ฿{order.amount.toLocaleString('th-TH')}
-            </Text>
-            {order.trackingNo ? (
-              <Text style={styles.orderTracking}>เลขพัสดุ {order.trackingNo}</Text>
-            ) : null}
-          </View>
-          <View style={styles.orderStatusCol}>
-            <View
-              style={[
-                styles.orderStatusPill,
-                { backgroundColor: `${orderStatusColor(order.status)}22` },
-              ]}
-            >
-              <Text style={[styles.orderStatusText, { color: orderStatusColor(order.status) }]}>
-                {ORDER_STATUS_LABEL[order.status]}
-              </Text>
-            </View>
-            <Text style={styles.orderDate}>{order.placedAt}</Text>
-          </View>
-        </View>
-      ))}
-    </View>
   );
 }
 
@@ -323,7 +406,7 @@ const styles = StyleSheet.create({
   },
   coverBanner: {
     width: '100%',
-    height: 152,
+    height: 140,
     backgroundColor: colors.brand.forest,
     overflow: 'hidden',
   },
@@ -341,16 +424,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  pageInfoRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
+  identityBlock: {
+    alignItems: 'center',
+    marginTop: -44,
     paddingHorizontal: 16,
   },
-  avatarWrap: {
-    marginTop: -40,
-  },
   avatarText: {
-    fontSize: 34,
+    fontSize: 36,
   },
   verifiedDot: {
     position: 'absolute',
@@ -365,66 +445,90 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: colors.surface.canvas,
   },
-  pageInfoBody: {
-    flex: 1,
-    marginLeft: 12,
-    paddingBottom: 6,
-  },
-  shopName: {
-    fontSize: 19,
+  displayName: {
+    marginTop: 10,
+    fontSize: 20,
     fontWeight: '900',
     color: colors.text.primary,
   },
-  statsLine: {
-    fontSize: 12.5,
+  handleCentered: {
+    marginTop: 2,
+    fontSize: 13,
+    fontWeight: '600',
     color: colors.text.secondary,
-    marginTop: 4,
   },
-  statsLineStrong: {
-    fontWeight: '800',
+  statsRow: {
+    flexDirection: 'row',
+    marginTop: 16,
+    paddingHorizontal: 8,
+  },
+  statCell: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 2,
+  },
+  statValue: {
+    fontSize: 17,
+    fontWeight: '900',
     color: colors.text.primary,
   },
-  handleRow: {
+  statLabel: {
+    fontSize: 12,
+    color: colors.text.secondary,
+    fontWeight: '600',
+  },
+  actionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     paddingHorizontal: 16,
-    marginTop: 12,
+    marginTop: 14,
   },
-  handleText: {
-    fontSize: 13,
-    color: colors.text.secondary,
-    fontWeight: '600',
+  secondaryBtn: {
+    flex: 1,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: 'rgba(10,22,17,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  secondaryBtnText: {
+    fontWeight: '800',
+    fontSize: 14,
+    color: colors.text.primary,
+  },
+  walletBtnInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  moreBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: 'rgba(10,22,17,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   categoryText: {
     fontSize: 12,
     color: colors.text.secondary,
     fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 12,
     paddingHorizontal: 16,
-    marginTop: 4,
   },
   bio: {
-    textAlign: 'left',
+    textAlign: 'center',
     color: colors.text.primary,
     fontSize: 13,
-    marginTop: 8,
-    paddingHorizontal: 16,
+    marginTop: 6,
+    paddingHorizontal: 24,
     lineHeight: 18,
   },
   bioPlaceholder: {
     color: colors.text.muted,
     fontStyle: 'italic',
-  },
-  vipPill: {
-    backgroundColor: colors.brand.ink,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 8,
-  },
-  vipText: {
-    color: colors.accent.vault,
-    fontWeight: '900',
-    fontSize: 11,
   },
   tabBar: {
     flexDirection: 'row',
@@ -444,75 +548,5 @@ const styles = StyleSheet.create({
     height: 2,
     borderRadius: 1,
     backgroundColor: colors.text.primary,
-  },
-  gridEmpty: {
-    alignItems: 'center',
-    paddingVertical: 50,
-    gap: 10,
-  },
-  gridEmptyText: {
-    color: colors.text.muted,
-    fontSize: 13,
-    textAlign: 'center',
-    paddingHorizontal: 40,
-  },
-  ordersList: {
-    paddingHorizontal: GRID_PADDING,
-    paddingTop: 4,
-    gap: 10,
-  },
-  orderCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: colors.surface.card,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.border.soft,
-    padding: 12,
-  },
-  orderThumb: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-  },
-  orderBody: { flex: 1 },
-  orderTitle: {
-    color: colors.text.primary,
-    fontWeight: '800',
-    fontSize: 13,
-  },
-  orderVariant: {
-    color: colors.text.secondary,
-    fontSize: 11,
-    marginTop: 2,
-  },
-  orderMeta: {
-    color: colors.text.muted,
-    fontSize: 11,
-    marginTop: 3,
-  },
-  orderTracking: {
-    color: colors.brand.primaryDark,
-    fontSize: 11,
-    fontWeight: '700',
-    marginTop: 3,
-  },
-  orderStatusCol: {
-    alignItems: 'flex-end',
-    gap: 6,
-  },
-  orderStatusPill: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  orderStatusText: {
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  orderDate: {
-    color: colors.text.muted,
-    fontSize: 10,
   },
 });

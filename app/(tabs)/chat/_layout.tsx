@@ -1,5 +1,6 @@
 import React from 'react';
 import { Stack } from 'expo-router';
+import { dismissibleModalOptions } from '@/shared/components/DragDownDismiss';
 import { colors } from '@/shared/theme/colors';
 
 export default function ChatLayout() {
@@ -7,7 +8,7 @@ export default function ChatLayout() {
     <Stack
       screenOptions={{
         headerShown: false,
-        contentStyle: { backgroundColor: colors.surface.canvas },
+        contentStyle: { backgroundColor: '#000000' },
       }}
     >
       <Stack.Screen name="index" />
@@ -17,7 +18,7 @@ export default function ChatLayout() {
         name="add-friend"
         options={{
           presentation: 'modal',
-          animation: 'slide_from_bottom',
+          ...dismissibleModalOptions,
         }}
       />
     </Stack>

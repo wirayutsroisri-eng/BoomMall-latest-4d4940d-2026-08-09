@@ -1,18 +1,26 @@
-import React from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
+import { CURRENT_USER_ID } from '@/modules/chat/data/mockChatData';
 import { useChatStore } from '@/modules/chat/state/chat-store';
+import { usePresenceStore } from '@/modules/chat/state/presence-store';
+import {
+  filterVisibleMomentNotes,
+  isPresenceOnline,
+} from '@/modules/chat/data/presenceService';
 import type { ActiveNote } from '@/modules/chat/domain/types';
 import { Avatar } from '@/shared/components/Avatar';
 import { colors } from '@/shared/theme/colors';
 
-const SLOT_WIDTH = 64;
-const AVATAR_SIZE = 58;
-const SLOT_GAP = 8;
+const SLOT_WIDTH = 88;
+const AVATAR_SIZE = 80;
+const SLOT_GAP = 10;
+const AVATAR_RADIUS = 20;
 const ONLINE_GREEN = '#31D158';
+const RING_PAD = 3;
 
 /** "ลูกค้า VIP — คุณมิ้นท์" → "คุณมิ้นท์" — keep only a short display name under the avatar. */
 function shortName(name: string) {
@@ -21,14 +29,25 @@ function shortName(name: string) {
 }
 
 /**
- * LINE/WeChat-style Moments bar — photo squircles + name.
- * Only ONLINE friends appear here. The [+] slot picks a photo for your moment.
+ * Moments bar — ขอบเขียว = ออนไลน์ (อยู่ในแชต / เล่นฟีด)
+ * คนออฟไลน์ไม่โชว์ในแถบนี้
  */
 export function ActiveNotesBar() {
   const notes = useChatStore((s) => s.notes);
   const myNote = useChatStore((s) => s.myNote);
   const setMyNote = useChatStore((s) => s.setMyNote);
-  const onlineNotes = notes.filter((n) => n.isOnline);
+  const startPresenceEngine = usePresenceStore((s) => s.startPresenceEngine);
+  const stopPresenceEngine = usePresenceStore((s) => s.stopPresenceEngine);
+  const myPresence = usePresenceStore((s) => s.presenceByUserId[CURRENT_USER_ID]);
+  const iAmOnline = isPresenceOnline(myPresence);
+
+  useEffect(() => {
+    startPresenceEngine();
+    return () => stopPresenceEngine();
+  }, [startPresenceEngine, stopPresenceEngine]);
+
+  /** ออนไลน์จาก presence engine + โมเมนต์ยังไม่หมดอายุ */
+  const onlineNotes = useMemo(() => filterVisibleMomentNotes(notes), [notes]);
 
   const pickMomentPhoto = async () => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -63,26 +82,22 @@ export function ActiveNotesBar() {
     <View style={styles.row}>
       <Pressable style={styles.slot} onPress={pickMomentPhoto} accessibilityLabel="เพิ่มรูปโมเมนต์">
         {myNote?.imageUri ? (
-          <View style={styles.avatarWrap}>
+          <View style={[styles.avatarRing, iAmOnline && styles.avatarRingOnline]}>
             <Avatar
               uri={myNote.imageUri}
               initial={myNote.emoji}
               backgroundColor={colors.brand.mist}
               size={AVATAR_SIZE}
-              radius={16}
-              borderColor={colors.brand.primary}
-              borderWidth={2}
+              radius={AVATAR_RADIUS}
+              borderWidth={0}
             />
-            <View style={styles.emojiBadge}>
-              <Text style={styles.emojiText}>{myNote.emoji}</Text>
-            </View>
             <View style={styles.editBadge}>
-              <Ionicons name="add" size={10} color={colors.text.inverse} />
+              <Ionicons name="add" size={12} color={colors.text.inverse} />
             </View>
           </View>
         ) : (
-          <View style={[styles.avatarWrap, styles.addCircle]}>
-            <Ionicons name="add" size={26} color={colors.brand.primaryDark} />
+          <View style={styles.addSlot}>
+            <Ionicons name="add" size={36} color="#FFFFFF" style={styles.addGlow} />
           </View>
         )}
         <Text style={styles.slotLabel} numberOfLines={1}>
@@ -97,21 +112,21 @@ export function ActiveNotesBar() {
         style={styles.scroll}
       >
         {onlineNotes.map((note) => (
-          <Pressable key={note.id} style={styles.slot} onPress={() => openNoteChat(note)}>
-            <View style={styles.avatarWrap}>
+          <Pressable
+            key={note.id}
+            style={styles.slot}
+            onPress={() => openNoteChat(note)}
+            accessibilityLabel={`${shortName(note.authorName)} ออนไลน์`}
+          >
+            <View style={[styles.avatarRing, styles.avatarRingOnline]}>
               <Avatar
                 uri={note.imageUri}
                 initial={note.authorName.slice(0, 1)}
                 backgroundColor={note.avatarColor}
                 size={AVATAR_SIZE}
-                radius={16}
-                borderColor={ONLINE_GREEN}
-                borderWidth={2}
+                radius={AVATAR_RADIUS}
+                borderWidth={0}
               />
-              <View style={styles.emojiBadge}>
-                <Text style={styles.emojiText}>{note.emoji}</Text>
-              </View>
-              <View style={styles.onlineDot} />
             </View>
             <Text style={styles.slotLabel} numberOfLines={1}>
               {shortName(note.authorName)}
@@ -127,7 +142,7 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 6,
+    marginBottom: 10,
   },
   scroll: {
     flex: 1,
@@ -140,70 +155,51 @@ const styles = StyleSheet.create({
   slot: {
     width: SLOT_WIDTH,
     alignItems: 'center',
-    gap: 3,
+    gap: 5,
   },
-  avatarWrap: {
-    position: 'relative',
-  },
-  emojiBadge: {
-    position: 'absolute',
-    top: -4,
-    right: -6,
-    minWidth: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: colors.surface.card,
+  /** วงนอก — เขียวเฉพาะตอนออนไลน์ */
+  avatarRing: {
+    width: AVATAR_SIZE + RING_PAD * 2,
+    height: AVATAR_SIZE + RING_PAD * 2,
+    borderRadius: AVATAR_RADIUS + RING_PAD,
+    padding: RING_PAD,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: colors.surface.canvas,
-    paddingHorizontal: 2,
-    zIndex: 2,
+    backgroundColor: 'transparent',
   },
-  emojiText: {
-    fontSize: 12,
-    lineHeight: 16,
-    textAlign: 'center',
+  avatarRingOnline: {
+    borderWidth: 2.5,
+    borderColor: ONLINE_GREEN,
   },
-  addCircle: {
-    width: AVATAR_SIZE,
-    height: AVATAR_SIZE,
-    borderRadius: 16,
-    backgroundColor: colors.brand.mist,
-    borderWidth: 2,
-    borderColor: colors.brand.primary,
-    borderStyle: 'dashed',
+  addSlot: {
+    width: AVATAR_SIZE + RING_PAD * 2,
+    height: AVATAR_SIZE + RING_PAD * 2,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  addGlow: {
+    textShadowColor: 'rgba(255,255,255,0.55)',
+    textShadowRadius: 6,
+    textShadowOffset: { width: 0, height: 0 },
   },
   editBadge: {
     position: 'absolute',
-    bottom: -2,
-    right: -2,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
+    bottom: 0,
+    right: 0,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     backgroundColor: colors.brand.primaryDark,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1.5,
-    borderColor: colors.surface.canvas,
-  },
-  onlineDot: {
-    position: 'absolute',
-    bottom: -1,
-    right: -1,
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: ONLINE_GREEN,
-    borderWidth: 2,
-    borderColor: colors.surface.canvas,
+    borderColor: '#000000',
   },
   slotLabel: {
     fontSize: 12,
     fontWeight: '600',
-    color: colors.text.secondary,
+    color: 'rgba(255,255,255,0.72)',
     textAlign: 'center',
+    width: '100%',
   },
 });

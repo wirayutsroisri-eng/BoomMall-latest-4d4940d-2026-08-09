@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "BoomMall Boom Coin (internal)",
+      "Group": "Servers",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "boommall_coin",
+      "Username": "boom",
+      "SSLMode": "require",
+      "Comment": "Docker internal network — TLS required"
+    }
+  }
+}

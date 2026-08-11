@@ -47,11 +47,31 @@ export type MasterSku = {
   imageUris?: string[];
   /** Free-text product description */
   description?: string;
+  /** Product barcode / EAN / UPC (unique across catalog when set) */
+  barcode?: string;
   /** Short caption overlaid on the content card */
   caption?: string;
   /** ISO timestamp when the product was listed */
   createdAt?: string;
 };
+
+/** Full product edit payload (PUT/PATCH equivalent) */
+export type UpdateProductInput = {
+  title?: string;
+  masterSku?: string;
+  barcode?: string | null;
+  categoryKey?: string;
+  description?: string;
+  price?: number;
+  cost?: number;
+  availableTotal?: number;
+  imageUris?: string[];
+  customFields?: CustomFieldValue[];
+};
+
+export type UpdateProductResult =
+  | { ok: true }
+  | { ok: false; reason: string; field?: 'title' | 'sku' | 'barcode' | 'price' | 'stock' | 'cost' };
 
 export type SkuVariant = {
   id: string;
@@ -89,6 +109,8 @@ export type CartLine = {
   warehouseId: WarehouseId;
   qty: number;
   unitPrice: number;
+  /** Selected for checkout (Shopee-style cart checkboxes) */
+  selected?: boolean;
 };
 
 export type StockMutationResult =

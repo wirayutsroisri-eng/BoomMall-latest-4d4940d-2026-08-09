@@ -18,6 +18,7 @@ import type {
   ChatMessage,
   ContentReferenceCard,
   Conversation,
+  JobMatchCard,
   MyNote,
   ProductCard,
   QuotationCard,
@@ -48,10 +49,14 @@ type ChatState = {
   lockHiddenChats: () => void;
   sendText: (conversationId: string, text: string) => void;
   sendImage: (conversationId: string, imageUri: string) => void;
+  /** Remove a single message (e.g. delete image from chat album) */
+  deleteMessage: (conversationId: string, messageId: string) => void;
   sendVoice: (conversationId: string, audioUri: string, durationSec: number) => void;
   sendQuotation: (conversationId: string, quotation: QuotationCard) => void;
   sendProductCard: (conversationId: string, product: ProductCard) => void;
   attachContentReference: (conversationId: string, contentRef: ContentReferenceCard) => void;
+  /** Boom automation: attach a Community Board job-match card (system sender). */
+  sendJobMatchCard: (conversationId: string, jobMatch: JobMatchCard) => void;
   convertProductToPayment: (conversationId: string, productCardId: string) => void;
   payQuotation: (conversationId: string, quotationId: string) => void;
   setPeerTyping: (conversationId: string, typing: boolean) => void;
@@ -91,6 +96,9 @@ function colorForSeed(seed: string) {
   let h = 0;
   for (let i = 0; i < seed.length; i += 1) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
   return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
+}
+function avatarUriForSeed(seed: string) {
+  return `https://i.pravatar.cc/150?u=boommall-${normalizeHandle(seed)}`;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -162,6 +170,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isHidden: false,
       updatedAt: 'ตอนนี้',
       avatarColor,
+      avatarUri: avatarUriForSeed(peerHandle || peerName),
       kind: 'official',
     };
     set((state) => ({
@@ -206,6 +215,40 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
   },
 
+  sendJobMatchCard: (conversationId, jobMatch) => {
+    const existing = get().messagesById[conversationId] ?? [];
+    const alreadyAttached = existing.some(
+      (m) => m.kind === 'job_match' && m.jobMatch?.feedId === jobMatch.feedId,
+    );
+    if (alreadyAttached) return;
+
+    const message: ChatMessage = {
+      id: `m-job-${jobMatch.feedId}-${Date.now()}`,
+      conversationId,
+      senderId: 'system',
+      kind: 'job_match',
+      jobMatch,
+      createdAt: 'ตอนนี้',
+      readAt: null,
+    };
+    set((state) => ({
+      messagesById: {
+        ...state.messagesById,
+        [conversationId]: [...(state.messagesById[conversationId] ?? []), message],
+      },
+      conversations: state.conversations.map((c) =>
+        c.id === conversationId
+          ? {
+              ...c,
+              lastMessage: jobMatch.header,
+              updatedAt: 'ตอนนี้',
+              unread: c.unread + 1,
+            }
+          : c,
+      ),
+    }));
+  },
+
   createGroup: (name, memberCount) => {
     const id = `c-group-${Date.now()}`;
     const systemText = `สร้างกลุ่ม "${name}" แล้ว — เชิญสมาชิกได้เลย`;
@@ -227,6 +270,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isHidden: false,
       updatedAt: 'ตอนนี้',
       avatarColor: colorForSeed(name),
+      avatarUri: `https://picsum.photos/seed/boom-group-${id}/240/240`,
       kind: 'group',
       memberCount,
     };
@@ -264,6 +308,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isHidden: false,
       updatedAt: 'ตอนนี้',
       avatarColor: colorForSeed(name),
+      avatarUri: avatarUriForSeed(handle || name),
       kind: 'friend',
     };
     set((state) => ({
@@ -342,7 +387,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   sendImage: (conversationId, imageUri) => {
     const message: ChatMessage = {
-      id: `m-img-${Date.now()}`,
+      id: `m-img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       conversationId,
       senderId: CURRENT_USER_ID,
       kind: 'image',
@@ -363,6 +408,37 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     get().queueBotReply(conversationId, getBotImageReply(message.id.length));
+  },
+
+  deleteMessage: (conversationId, messageId) => {
+    set((state) => {
+      const prev = state.messagesById[conversationId] ?? [];
+      const next = prev.filter((m) => m.id !== messageId);
+      const last = next[next.length - 1];
+      let lastPreview = 'ไม่มีข้อความ';
+      if (last) {
+        if (last.kind === 'image') lastPreview = '📷 รูปภาพ';
+        else if (last.kind === 'voice') lastPreview = '🎤 ข้อความเสียง';
+        else if (last.kind === 'quotation') lastPreview = 'ใบเสนอราคา';
+        else if (last.kind === 'product') lastPreview = 'สินค้า';
+        else if (last.text) lastPreview = last.text;
+      }
+      return {
+        messagesById: {
+          ...state.messagesById,
+          [conversationId]: next,
+        },
+        conversations: state.conversations.map((c) =>
+          c.id === conversationId
+            ? {
+                ...c,
+                lastMessage: lastPreview,
+                updatedAt: 'ตอนนี้',
+              }
+            : c,
+        ),
+      };
+    });
   },
 
   sendVoice: (conversationId, audioUri, durationSec) => {

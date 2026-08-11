@@ -9,6 +9,23 @@ type LoyaltyState = {
   updateProfile: (
     patch: Partial<Pick<VipProfile, 'displayName' | 'handle' | 'bio' | 'avatarUri' | 'coverUri'>>,
   ) => void;
+  /** Apple 5.1.1(v) — wipe local account profile */
+  deleteAccount: () => void;
+};
+
+const DEFAULT_PROFILE: VipProfile = {
+  displayName: 'ผู้ใช้ BoomMall',
+  handle: '@boommall_user',
+  bio: '',
+  avatarUri: null,
+  coverUri: null,
+  loyaltyTier: 'Bronze',
+  points: 0,
+  technicianBadge: '',
+  shopVerified: false,
+  followingCount: 0,
+  followersCount: 0,
+  likesCount: 0,
 };
 
 export const useLoyaltyStore = create<LoyaltyState>()(
@@ -54,6 +71,11 @@ export const useLoyaltyStore = create<LoyaltyState>()(
       ],
       updateProfile: (patch) =>
         set((state) => ({ profile: { ...state.profile, ...patch } })),
+      deleteAccount: () =>
+        set({
+          profile: { ...DEFAULT_PROFILE },
+          warranties: [],
+        }),
     }),
     {
       name: 'boommall-profile-storage',

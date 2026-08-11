@@ -1,0 +1,671 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
+export type ReportKind = 'user' | 'content' | 'message' | 'comment';
+export type ReportStatus = 'open' | 'reviewed' | 'actioned' | 'dismissed';
+export type ContentModerationStatus = 'hidden' | 'removed' | 'pending_review';
+export type UserAccountStatus = 'active' | 'soft_banned' | 'banned' | 'hard_deleted';
+export type SocialProvider = 'apple' | 'google' | 'line';
+
+export type ModerationReport = {
+  id: string;
+  kind: ReportKind;
+  targetId: string;
+  targetLabel?: string;
+  reason: string;
+  details?: string;
+  reporterRef?: string;
+  status: ReportStatus;
+  createdAt: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  resolution?: string;
+};
+
+export type ContentModerationRecord = {
+  contentId: string;
+  status: ContentModerationStatus;
+  reason: string;
+  authorHandle?: string;
+  authorUserId?: string;
+  captionPreview?: string;
+  actedBy: string;
+  actedAt: string;
+  relatedReportId?: string;
+  auto?: boolean;
+};
+
+export type ModeratedUser = {
+  id: string;
+  displayName: string;
+  handle?: string;
+  status: UserAccountStatus;
+  banCount: number;
+  social: Partial<Record<SocialProvider, string>>;
+  productIds: string[];
+  contentIds: string[];
+  createdAt: string;
+  updatedAt: string;
+  softBannedAt?: string;
+  bannedAt?: string;
+  hardDeletedAt?: string;
+  lastBanReason?: string;
+};
+
+export type SocialBlacklistEntry = {
+  id: string;
+  provider: SocialProvider;
+  providerUserId: string;
+  userId: string;
+  reason: string;
+  createdAt: string;
+  createdBy: string;
+};
+
+export type AuditEntry = {
+  id: string;
+  actor: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  detail: Record<string, unknown>;
+  createdAt: string;
+};
+
+type StoreShape = {
+  reports: ModerationReport[];
+  content: Record<string, ContentModerationRecord>;
+  users: Record<string, ModeratedUser>;
+  blacklist: SocialBlacklistEntry[];
+  audit: AuditEntry[];
+  keywordBlacklist: string[];
+};
+
+const DATA_DIR = path.join(process.cwd(), 'data');
+const DATA_FILE = path.join(DATA_DIR, 'moderation.json');
+/** Rule 3: auto-hide when unique reporters exceed 3 (>3 → 4+) */
+const AUTO_HIDE_REPORT_THRESHOLD = 4;
+const PERMA_BAN_AFTER = 2;
+
+function emptyStore(): StoreShape {
+  return {
+    reports: [],
+    content: {},
+    users: {},
+    blacklist: [],
+    audit: [],
+    keywordBlacklist: [
+      'ยาเสพติด',
+      'พนันออนไลน์',
+      'หลอกลวงโอนเงิน',
+      'porn',
+      'sex for sale',
+      'ฆ่า',
+    ],
+  };
+}
+
+function newId(prefix: string) {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function writeStore(store: StoreShape) {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(DATA_FILE, JSON.stringify(store, null, 2), 'utf8');
+}
+
+function ensureSeed(store: StoreShape): StoreShape {
+  if (!store.keywordBlacklist?.length) {
+    store.keywordBlacklist = emptyStore().keywordBlacklist;
+  }
+  if (!store.users) store.users = {};
+  if (!store.blacklist) store.blacklist = [];
+  if (!store.audit) store.audit = [];
+  if (!store.content) store.content = {};
+  if (!store.reports) store.reports = [];
+
+  if (Object.keys(store.users).length === 0) {
+    const now = new Date().toISOString();
+    store.users['user-spam'] = {
+      id: 'user-spam',
+      displayName: 'สแปมทดสอบ',
+      handle: '@spam_demo',
+      status: 'active',
+      banCount: 0,
+      social: { google: 'google-spam-demo' },
+      productIds: ['ms-spam-1'],
+      contentIds: ['feed-01', 'feed-02'],
+      createdAt: now,
+      updatedAt: now,
+    };
+    store.users['user-ok'] = {
+      id: 'user-ok',
+      displayName: 'ช่างเอิร์ธ',
+      handle: '@earth_ok',
+      status: 'active',
+      banCount: 0,
+      social: { apple: 'apple-earth-demo' },
+      productIds: ['ms-01'],
+      contentIds: ['feed-03'],
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  if (store.reports.length === 0) {
+    const now = Date.now();
+    store.reports = [
+      {
+        id: `rpt_seed_${now}_1`,
+        kind: 'content',
+        targetId: 'feed-01',
+        targetLabel: 'ตัวอย่างโพสต์ · สแปมราคา',
+        reason: 'สแปมหรือหลอกลวง',
+        details: 'โพสต์โฆษณาซ้ำ',
+        status: 'open',
+        createdAt: new Date(now - 3600_000).toISOString(),
+        reporterRef: 'reporter-a',
+      },
+      {
+        id: `rpt_seed_${now}_2`,
+        kind: 'content',
+        targetId: 'feed-01',
+        targetLabel: 'ตัวอย่างโพสต์ · สแปมราคา',
+        reason: 'สแปมหรือหลอกลวง',
+        status: 'open',
+        createdAt: new Date(now - 3000_000).toISOString(),
+        reporterRef: 'reporter-b',
+      },
+      {
+        id: `rpt_seed_${now}_3`,
+        kind: 'user',
+        targetId: 'user-spam',
+        targetLabel: '@spam_demo',
+        reason: 'การคุกคามหรือกลั่นแกล้ง',
+        status: 'open',
+        createdAt: new Date(now - 1800_000).toISOString(),
+        reporterRef: 'reporter-c',
+      },
+    ];
+  }
+  return store;
+}
+
+function readStore(): StoreShape {
+  try {
+    if (!fs.existsSync(DATA_FILE)) {
+      const seeded = ensureSeed(emptyStore());
+      writeStore(seeded);
+      return seeded;
+    }
+    const parsed = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')) as StoreShape;
+    return ensureSeed({
+      reports: Array.isArray(parsed.reports) ? parsed.reports : [],
+      content: parsed.content && typeof parsed.content === 'object' ? parsed.content : {},
+      users: parsed.users && typeof parsed.users === 'object' ? parsed.users : {},
+      blacklist: Array.isArray(parsed.blacklist) ? parsed.blacklist : [],
+      audit: Array.isArray(parsed.audit) ? parsed.audit : [],
+      keywordBlacklist: Array.isArray(parsed.keywordBlacklist)
+        ? parsed.keywordBlacklist
+        : emptyStore().keywordBlacklist,
+    });
+  } catch {
+    return ensureSeed(emptyStore());
+  }
+}
+
+function pushAudit(
+  store: StoreShape,
+  input: { actor: string; action: string; entityType: string; entityId: string; detail?: Record<string, unknown> },
+) {
+  store.audit = [
+    {
+      id: newId('aud'),
+      actor: input.actor,
+      action: input.action,
+      entityType: input.entityType,
+      entityId: input.entityId,
+      detail: input.detail ?? {},
+      createdAt: new Date().toISOString(),
+    },
+    ...store.audit,
+  ].slice(0, 1000);
+}
+
+function uniqueReportsForTarget(store: StoreShape, targetId: string) {
+  const reporters = new Set<string>();
+  for (const r of store.reports) {
+    if (r.targetId !== targetId) continue;
+    reporters.add((r.reporterRef || r.id).toLowerCase());
+  }
+  return reporters.size;
+}
+
+function quarantineUserContent(store: StoreShape, user: ModeratedUser, actor: string, reason: string) {
+  for (const contentId of user.contentIds) {
+    store.content[contentId] = {
+      contentId,
+      status: 'hidden',
+      reason,
+      authorHandle: user.handle,
+      authorUserId: user.id,
+      actedBy: actor,
+      actedAt: new Date().toISOString(),
+      auto: true,
+    };
+  }
+  for (const productId of user.productIds) {
+    store.content[`product:${productId}`] = {
+      contentId: `product:${productId}`,
+      status: 'hidden',
+      reason: `commerce quarantine · ${reason}`,
+      authorUserId: user.id,
+      actedBy: actor,
+      actedAt: new Date().toISOString(),
+      auto: true,
+    };
+  }
+}
+
+function addBlacklist(store: StoreShape, user: ModeratedUser, actor: string, reason: string) {
+  const now = new Date().toISOString();
+  for (const [provider, providerUserId] of Object.entries(user.social) as Array<
+    [SocialProvider, string]
+  >) {
+    if (!providerUserId) continue;
+    const exists = store.blacklist.some(
+      (b) => b.provider === provider && b.providerUserId === providerUserId,
+    );
+    if (exists) continue;
+    store.blacklist.push({
+      id: newId('bl'),
+      provider,
+      providerUserId,
+      userId: user.id,
+      reason,
+      createdAt: now,
+      createdBy: actor,
+    });
+  }
+}
+
+export function scanKeywords(text: string) {
+  const store = readStore();
+  const hay = text.toLowerCase();
+  return store.keywordBlacklist.filter((k) => hay.includes(k.toLowerCase()));
+}
+
+export function listReports(status?: string) {
+  const store = readStore();
+  if (!status || status === 'all') return store.reports;
+  return store.reports.filter((r) => r.status === status);
+}
+
+export function createReport(input: {
+  kind: ReportKind;
+  targetId: string;
+  targetLabel?: string;
+  reason: string;
+  details?: string;
+  reporterRef?: string;
+}) {
+  const store = readStore();
+  const report: ModerationReport = {
+    id: newId('rpt'),
+    kind: input.kind,
+    targetId: input.targetId,
+    targetLabel: input.targetLabel,
+    reason: input.reason,
+    details: input.details,
+    reporterRef: input.reporterRef,
+    status: 'open',
+    createdAt: new Date().toISOString(),
+  };
+  store.reports = [report, ...store.reports].slice(0, 500);
+
+  // Rule 3: >3 unique reporters → auto-hide
+  const unique = uniqueReportsForTarget(store, input.targetId);
+  let autoHide: ContentModerationRecord | null = null;
+  if (unique >= AUTO_HIDE_REPORT_THRESHOLD) {
+    const existing = store.content[input.targetId];
+    if (!existing || existing.status === 'pending_review') {
+      autoHide = {
+        contentId: input.targetId,
+        status: 'hidden',
+        reason: `auto-hide · ${unique} unique reports`,
+        captionPreview: input.targetLabel,
+        actedBy: 'system',
+        actedAt: new Date().toISOString(),
+        relatedReportId: report.id,
+        auto: true,
+      };
+      store.content[input.targetId] = autoHide;
+      pushAudit(store, {
+        actor: 'system',
+        action: 'auto_hide_content',
+        entityType: 'content',
+        entityId: input.targetId,
+        detail: { uniqueReports: unique },
+      });
+    }
+  }
+
+  writeStore(store);
+  return { report, autoHide, uniqueReports: unique };
+}
+
+export function listContentActions() {
+  const store = readStore();
+  return Object.values(store.content).sort((a, b) => b.actedAt.localeCompare(a.actedAt));
+}
+
+export function getPublicContentBlocks() {
+  const rows = listContentActions();
+  const store = readStore();
+  const bannedUserIds = Object.values(store.users)
+    .filter((u) => u.status === 'banned' || u.status === 'soft_banned' || u.status === 'hard_deleted')
+    .map((u) => u.id);
+  return {
+    hiddenIds: rows.filter((r) => r.status === 'hidden' || r.status === 'pending_review').map((r) => r.contentId),
+    removedIds: rows.filter((r) => r.status === 'removed').map((r) => r.contentId),
+    bannedUserIds,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function setContentStatus(input: {
+  contentId: string;
+  status: ContentModerationStatus;
+  reason: string;
+  actor: string;
+  authorHandle?: string;
+  authorUserId?: string;
+  captionPreview?: string;
+  relatedReportId?: string;
+  auto?: boolean;
+}) {
+  const store = readStore();
+  const record: ContentModerationRecord = {
+    contentId: input.contentId,
+    status: input.status,
+    reason: input.reason,
+    authorHandle: input.authorHandle,
+    authorUserId: input.authorUserId,
+    captionPreview: input.captionPreview,
+    actedBy: input.actor,
+    actedAt: new Date().toISOString(),
+    relatedReportId: input.relatedReportId,
+    auto: input.auto,
+  };
+  store.content[input.contentId] = record;
+  pushAudit(store, {
+    actor: input.actor,
+    action: `content_${input.status}`,
+    entityType: 'content',
+    entityId: input.contentId,
+    detail: { reason: input.reason },
+  });
+  writeStore(store);
+  return record;
+}
+
+export function restoreContent(contentId: string, actor = 'admin') {
+  const store = readStore();
+  const existing = store.content[contentId];
+  if (!existing) return null;
+  delete store.content[contentId];
+  pushAudit(store, {
+    actor,
+    action: 'content_restore',
+    entityType: 'content',
+    entityId: contentId,
+    detail: { previous: existing.status },
+  });
+  writeStore(store);
+  return existing;
+}
+
+export function resolveReport(input: {
+  reportId: string;
+  actor: string;
+  action: 'hide_content' | 'remove_content' | 'dismiss' | 'mark_reviewed' | 'hide' | 'remove';
+  note?: string;
+}) {
+  const store = readStore();
+  const report = store.reports.find((r) => r.id === input.reportId);
+  if (!report) return null;
+
+  const normalized =
+    input.action === 'hide'
+      ? 'hide_content'
+      : input.action === 'remove'
+        ? 'remove_content'
+        : input.action;
+
+  if (normalized === 'hide_content' || normalized === 'remove_content') {
+    const status: ContentModerationStatus =
+      normalized === 'hide_content' ? 'hidden' : 'removed';
+    store.content[report.targetId] = {
+      contentId: report.targetId,
+      status,
+      reason: input.note || report.reason,
+      captionPreview: report.targetLabel,
+      actedBy: input.actor,
+      actedAt: new Date().toISOString(),
+      relatedReportId: report.id,
+    };
+    report.status = 'actioned';
+    report.resolution = status === 'hidden' ? 'content_hidden' : 'content_removed';
+  } else if (normalized === 'dismiss') {
+    report.status = 'dismissed';
+    report.resolution = 'dismissed';
+  } else {
+    report.status = 'reviewed';
+    report.resolution = 'reviewed';
+  }
+
+  report.resolvedAt = new Date().toISOString();
+  report.resolvedBy = input.actor;
+  pushAudit(store, {
+    actor: input.actor,
+    action: `report_${normalized}`,
+    entityType: 'report',
+    entityId: report.id,
+    detail: { targetId: report.targetId },
+  });
+  writeStore(store);
+  return { report, content: store.content[report.targetId] ?? null };
+}
+
+/** Rule 9: keyword quarantine before feed */
+export function quarantineIfKeywordHit(input: {
+  contentId: string;
+  text: string;
+  authorUserId?: string;
+  authorHandle?: string;
+  actor?: string;
+}) {
+  const hits = scanKeywords(input.text);
+  if (!hits.length) return { quarantined: false, hits: [] as string[] };
+  const record = setContentStatus({
+    contentId: input.contentId,
+    status: 'pending_review',
+    reason: `keyword quarantine · ${hits.join(', ')}`,
+    actor: input.actor ?? 'system',
+    authorHandle: input.authorHandle,
+    authorUserId: input.authorUserId,
+    captionPreview: input.text.slice(0, 80),
+    auto: true,
+  });
+  return { quarantined: true, hits, record };
+}
+
+export function listUsers() {
+  return Object.values(readStore().users).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+export function getUser(userId: string) {
+  return readStore().users[userId] ?? null;
+}
+
+export function upsertUser(input: {
+  id: string;
+  displayName: string;
+  handle?: string;
+  social?: Partial<Record<SocialProvider, string>>;
+  productIds?: string[];
+  contentIds?: string[];
+}) {
+  const store = readStore();
+  const existing = store.users[input.id];
+  const now = new Date().toISOString();
+  const user: ModeratedUser = {
+    id: input.id,
+    displayName: input.displayName,
+    handle: input.handle,
+    status: existing?.status ?? 'active',
+    banCount: existing?.banCount ?? 0,
+    social: { ...(existing?.social ?? {}), ...(input.social ?? {}) },
+    productIds: input.productIds ?? existing?.productIds ?? [],
+    contentIds: input.contentIds ?? existing?.contentIds ?? [],
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+    softBannedAt: existing?.softBannedAt,
+    bannedAt: existing?.bannedAt,
+    hardDeletedAt: existing?.hardDeletedAt,
+    lastBanReason: existing?.lastBanReason,
+  };
+  store.users[input.id] = user;
+  writeStore(store);
+  return user;
+}
+
+export function isSocialBlacklisted(provider: SocialProvider, providerUserId: string) {
+  const store = readStore();
+  return store.blacklist.find(
+    (b) => b.provider === provider && b.providerUserId === providerUserId,
+  );
+}
+
+export function banUser(input: {
+  userId: string;
+  actor: string;
+  reason: string;
+  mode?: 'soft' | 'hard';
+}) {
+  const store = readStore();
+  const user = store.users[input.userId];
+  if (!user) return null;
+  if (user.status === 'hard_deleted') return { user, created: false };
+
+  const mode = input.mode ?? 'hard';
+  const now = new Date().toISOString();
+  user.banCount += 1;
+  user.lastBanReason = input.reason;
+  user.updatedAt = now;
+
+  // Rule 3: 2 bans → permanent
+  const permanent = user.banCount >= PERMA_BAN_AFTER || mode === 'hard';
+  if (permanent) {
+    user.status = 'banned';
+    user.bannedAt = now;
+    addBlacklist(store, user, input.actor, input.reason);
+  } else {
+    user.status = 'soft_banned';
+    user.softBannedAt = now;
+  }
+
+  // Rule 7: quarantine commerce + UGC
+  quarantineUserContent(store, user, input.actor, input.reason);
+
+  pushAudit(store, {
+    actor: input.actor,
+    action: permanent ? 'user_ban_permanent' : 'user_soft_ban',
+    entityType: 'user',
+    entityId: user.id,
+    detail: { reason: input.reason, banCount: user.banCount },
+  });
+  writeStore(store);
+  return { user, permanent };
+}
+
+export function hardDeleteUser(input: { userId: string; actor: string; reason?: string }) {
+  const store = readStore();
+  const user = store.users[input.userId];
+  if (!user) return null;
+
+  const reason = input.reason || 'PDPA hard delete';
+  const now = new Date().toISOString();
+
+  // Blacklist social ids before purge
+  addBlacklist(store, user, input.actor, reason);
+  quarantineUserContent(store, user, input.actor, reason);
+
+  // Rule 8: purge personal fields
+  user.displayName = 'deleted_user';
+  user.handle = undefined;
+  user.social = {};
+  user.status = 'hard_deleted';
+  user.hardDeletedAt = now;
+  user.updatedAt = now;
+  user.productIds = [];
+  // keep contentIds for blocklist continuity
+
+  pushAudit(store, {
+    actor: input.actor,
+    action: 'user_hard_delete',
+    entityType: 'user',
+    entityId: user.id,
+    detail: { reason },
+  });
+  writeStore(store);
+  return user;
+}
+
+export function listBlacklist() {
+  return readStore().blacklist;
+}
+
+export function listAudit(limit = 50) {
+  return readStore().audit.slice(0, limit);
+}
+
+export function listKeywords() {
+  return readStore().keywordBlacklist;
+}
+
+export function moderationStats() {
+  const store = readStore();
+  const open = store.reports.filter((r) => r.status === 'open').length;
+  const actioned = store.reports.filter((r) => r.status === 'actioned').length;
+  const hidden = Object.values(store.content).filter((c) => c.status === 'hidden').length;
+  const removed = Object.values(store.content).filter((c) => c.status === 'removed').length;
+  const pending = Object.values(store.content).filter((c) => c.status === 'pending_review').length;
+  const autoHidden = Object.values(store.content).filter((c) => c.auto && c.status === 'hidden').length;
+  const bannedUsers = Object.values(store.users).filter(
+    (u) => u.status === 'banned' || u.status === 'soft_banned',
+  ).length;
+  const hardDeleted = Object.values(store.users).filter((u) => u.status === 'hard_deleted').length;
+
+  const categoryCount: Record<string, number> = {};
+  for (const r of store.reports) {
+    categoryCount[r.reason] = (categoryCount[r.reason] ?? 0) + 1;
+  }
+  const topCategories = Object.entries(categoryCount)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([reason, count]) => ({ reason, count }));
+
+  return {
+    openReports: open,
+    actionedReports: actioned,
+    hiddenPosts: hidden,
+    removedPosts: removed,
+    pendingReview: pending,
+    autoHiddenPosts: autoHidden,
+    bannedUsers,
+    hardDeletedUsers: hardDeleted,
+    blacklistEntries: store.blacklist.length,
+    topCategories,
+  };
+}

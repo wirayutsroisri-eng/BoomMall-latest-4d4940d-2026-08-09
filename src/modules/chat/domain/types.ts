@@ -5,7 +5,8 @@ export type MessageKind =
   | 'system'
   | 'image'
   | 'voice'
-  | 'content_ref';
+  | 'content_ref'
+  | 'job_match';
 
 export type QuotationStatus = 'pending' | 'paid' | 'expired';
 
@@ -42,6 +43,17 @@ export type ContentReferenceCard = {
   authorHandle: string;
 };
 
+/** Auto-matched job card from Community Board Smart Matching */
+export type JobMatchCard = {
+  id: string;
+  feedId: string;
+  header: string;
+  details: string;
+  distanceKm: number;
+  skills: string[];
+  actionLabel: string;
+};
+
 export type ChatMessage = {
   id: string;
   conversationId: string;
@@ -55,6 +67,7 @@ export type ChatMessage = {
   quotation?: QuotationCard;
   product?: ProductCard;
   contentRef?: ContentReferenceCard;
+  jobMatch?: JobMatchCard;
   createdAt: string;
   /** ISO or display — WeChat-style read receipt */
   readAt?: string | null;
@@ -102,7 +115,10 @@ export type ActiveNote = {
   /** Moment photo — preferred display in the Active Notes / Moments bar. */
   imageUri?: string;
   postedAt: string;
-  /** Notes only appear in the status bar while the author is online. */
+  /**
+   * ออนไลน์ (อยู่ในแชต / เล่นฟีด) → โชว์ในแถบโมเมนต์พร้อมขอบเขียว
+   * ออฟไลน์ → ไม่โชว์ในแถบนี้
+   */
   isOnline: boolean;
   /** Optional link back to UserStatus.userId for data-layer sync. */
   userId?: string;
@@ -129,6 +145,8 @@ export type Conversation = {
   isHidden: boolean;
   updatedAt: string;
   avatarColor: string;
+  /** รูปโปรไฟล์จำลอง — ถ้าไม่มีใช้ตัวอักษรบน avatarColor */
+  avatarUri?: string;
   /** peer is typing */
   peerTyping?: boolean;
   /** LINE-style chat classification for the Filter Chips — defaults to 'friend' when omitted */

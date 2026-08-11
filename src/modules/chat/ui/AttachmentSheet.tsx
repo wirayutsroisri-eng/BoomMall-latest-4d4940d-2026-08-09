@@ -13,6 +13,7 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { colors } from '@/shared/theme/colors';
+import { ENABLE_CALLS } from '@/shared/compliance/appStoreGates';
 
 export type AttachmentAction =
   | 'camera'
@@ -33,7 +34,7 @@ type Props = {
 const SPRING = { damping: 22, stiffness: 280, mass: 0.7 };
 const PANEL_HEIGHT = 208;
 
-const ACTIONS: Array<{
+const ALL_ACTIONS: Array<{
   key: AttachmentAction;
   emoji: string;
   label: string;
@@ -41,13 +42,19 @@ const ACTIONS: Array<{
 }> = [
   { key: 'camera', emoji: '📸', label: 'กล้อง', iconBg: '#E8F1FF' },
   { key: 'gallery', emoji: '🖼️', label: 'รูป & วิดีโอ', iconBg: '#EAF8F1' },
-  { key: 'file', emoji: '📄', label: 'ไฟล์', iconBg: '#FFF4E5' },
   { key: 'reply', emoji: '💬', label: 'ข้อความตอบกลับ', iconBg: '#F0ECFF' },
-  { key: 'location', emoji: '📍', label: 'ตำแหน่งที่ตั้ง', iconBg: '#FFECEC' },
   { key: 'coupon', emoji: '🏷️', label: 'คูปอง', iconBg: '#FFF7E0' },
   { key: 'order', emoji: '🛒', label: 'Order', iconBg: '#E8F7F0' },
   { key: 'call', emoji: '📞', label: 'คำขอการโทร', iconBg: '#EAF3FF' },
 ];
+
+/** Hide unfinished attachment types (file/location) and gated calls — App Store 2.1 */
+function visibleActions() {
+  return ALL_ACTIONS.filter((a) => {
+    if (a.key === 'call') return ENABLE_CALLS;
+    return true;
+  });
+}
 
 /**
  * LINE OA–style attachment panel — expands below the composer with iOS spring
@@ -92,7 +99,7 @@ export function AttachmentSheet({ visible, onClose, onSelect }: Props) {
           </View>
 
           <View style={styles.grid}>
-            {ACTIONS.map((item) => (
+            {visibleActions().map((item) => (
               <Pressable
                 key={item.key}
                 style={styles.cell}

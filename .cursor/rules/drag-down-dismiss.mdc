@@ -1,0 +1,45 @@
+---
+description: Iron rule — every closable screen/modal must support drag-down to dismiss
+alwaysApply: true
+---
+
+# Drag-down to dismiss (กฎเหล็ก)
+
+Any UI that can be closed (X / ปิด / back that dismisses a modal) **must** also close by dragging down.
+
+## How to implement
+
+### Expo Router screens (`presentation: 'modal' | 'fullScreenModal'`)
+
+```ts
+import { dismissibleModalOptions } from '@/shared/components/DragDownDismiss';
+
+<Stack.Screen
+  name="example"
+  options={{
+    presentation: 'modal', // or fullScreenModal
+    ...dismissibleModalOptions,
+  }}
+/>
+```
+
+### React Native `<Modal>` / custom overlays
+
+Wrap content with `DragDownDismiss`:
+
+```tsx
+import { DragDownDismiss } from '@/shared/components/DragDownDismiss';
+
+<Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+  <DragDownDismiss onDismiss={onClose} showDim rootInModal style={{ flex: 1 }}>
+    {/* sheet content */}
+  </DragDownDismiss>
+</Modal>
+```
+
+If the sheet has a vertical `ScrollView` / `FlatList`, pass `scrollY` (Reanimated `SharedValue`) so dismiss only starts when scrolled to the top.
+
+## Do not
+
+- Ship a closable fullscreen/modal with only an X button and no drag-down.
+- Disable `gestureEnabled` on dismissible modals unless there is an explicit product reason (document it).

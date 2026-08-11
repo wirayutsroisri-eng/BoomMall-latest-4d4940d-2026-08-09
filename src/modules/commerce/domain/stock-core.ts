@@ -297,6 +297,71 @@ export function buildMasterWithVariants(
   return { master, variants, stockRows, ledgerDrafts };
 }
 
+/** เพิ่มรุ่นใต้ Master เดิม — สร้าง SKU/สต็อกแถวใหม่โดยไม่แตะ Atomic Reservation */
+export function buildAddedVariant(
+  master: MasterSku,
+  input: {
+    label: string;
+    price: number;
+    onHand: number;
+    warehouseId: WarehouseId;
+    sku?: string;
+    lowStockThreshold?: number;
+  },
+  now: number,
+): {
+  variant: SkuVariant;
+  stockRow: WarehouseStock;
+  ledgerDraft: LedgerDraft | null;
+  nextMaster: MasterSku;
+} {
+  const id = `sv-${now}-${Math.floor(Math.random() * 900 + 100)}`;
+  const sku =
+    input.sku?.trim() ||
+    `${master.masterSku}-${input.label.replace(/\s+/g, '').toUpperCase().slice(0, 8) || 'V'}-${`${now}`.slice(-4)}`;
+  const variant: SkuVariant = {
+    id,
+    masterSkuId: master.id,
+    sku,
+    label: input.label.trim(),
+    attrs: {},
+    price: input.price,
+    lowStockThreshold: input.lowStockThreshold,
+    status: 'active',
+  };
+  const stockRow: WarehouseStock = {
+    variantId: id,
+    warehouseId: input.warehouseId,
+    onHand: Math.max(0, input.onHand),
+    reserved: 0,
+    revision: 1,
+  };
+  const ledgerDraft: LedgerDraft | null =
+    stockRow.onHand > 0
+      ? {
+          type: 'RESTOCK',
+          variantId: id,
+          warehouseId: input.warehouseId,
+          availableBefore: 0,
+          qtyChange: stockRow.onHand,
+          availableAfter: stockRow.onHand,
+          onHandAfter: stockRow.onHand,
+          reservedAfter: 0,
+          reason: 'เพิ่มรุ่นสินค้า',
+        }
+      : null;
+  return {
+    variant,
+    stockRow,
+    ledgerDraft,
+    nextMaster: {
+      ...master,
+      variantIds: [...master.variantIds, id],
+      basePrice: master.basePrice || input.price,
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Clone product — prefill only; NEVER carries ids, SKU codes, stock, history
 // ---------------------------------------------------------------------------
@@ -331,7 +396,7 @@ export function buildClonePrefill(
 ): ClonePrefill {
   const stamp = `${now}`.slice(-4);
   return {
-    title: `${master.title} (สำเนา)`,
+    title: `${master.title} (คัดลอก)`,
     description: master.description,
     channel: master.channel,
     basePrice: master.basePrice,

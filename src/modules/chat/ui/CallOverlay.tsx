@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { useCallStore } from '@/modules/chat/state/call-store';
+import { ENABLE_CALLS } from '@/shared/compliance/appStoreGates';
 import { CallActionBar } from './CallActionBar';
 import { Avatar } from '@/shared/components/Avatar';
 import { colors } from '@/shared/theme/colors';
@@ -11,6 +12,8 @@ export function CallOverlay() {
   const type = useCallStore((s) => s.type);
   const peerName = useCallStore((s) => s.peerName);
 
+  // App Store: no VoIP / WebRTC — never show fake call chrome
+  if (!ENABLE_CALLS) return null;
   if (mode === 'idle' || mode === 'ended') return null;
 
   return (
@@ -20,15 +23,14 @@ export function CallOverlay() {
       style={styles.overlay}
     >
       <View style={styles.center}>
-        <Text style={styles.badge}>WebRTC HD · Enterprise Ready</Text>
         <Avatar initial={peerName?.slice(0, 1) ?? '?'} size={96} radius={26} textStyle={styles.avatarText} />
         <Text style={styles.name}>{peerName}</Text>
         <Text style={styles.status}>
           {mode === 'connecting'
             ? `กำลังเชื่อมต่อ${type === 'video' ? 'วิดีโอ' : 'เสียง'}...`
             : type === 'video'
-              ? 'วิดีโอคอล HD · สายหลุดยาก'
-              : 'วอยซ์คอล · เสียงคมชัด'}
+              ? 'วิดีโอคอล'
+              : 'วอยซ์คอล'}
         </Text>
       </View>
       <CallActionBar />

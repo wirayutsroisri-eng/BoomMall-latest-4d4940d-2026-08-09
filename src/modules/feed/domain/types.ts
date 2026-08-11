@@ -1,4 +1,10 @@
-export type FeedTab = 'nearby' | 'following' | 'foryou';
+export type FeedTab = 'nearby' | 'following' | 'foryou' | 'board';
+
+/** เลนคอนเทนต์หลัก — สำหรับคุณ / กำลังติดตาม / ใกล้คุณ / เว็บบอร์ด */
+export type FeedLane = FeedTab;
+
+/** Two-sided Community Board marketplace */
+export type BoardSide = 'demand' | 'supply';
 
 export type CommerceTier = 'B2B' | 'B2C' | 'C2C';
 
@@ -30,11 +36,26 @@ export type FeedItem = {
   id: string;
   author: string;
   authorHandle: string;
+  /** แท็บหลักที่คลิปนี้โผล่ (โปรไฟล์ยังรวมทุกเลนของ handle เดียวกัน) */
+  lane?: FeedLane;
   caption: string;
   location: string;
+  /** Optional GPS for Community Board matching (defaults to Chanthaburi on user posts). */
+  gps?: { lat: number; lng: number };
+  /** Preferred match radius from create/publish (3–50 km or all). Default 10. */
+  searchRadius?: 3 | 5 | 10 | 25 | 50 | 'all';
+  /**
+   * Community Board side:
+   * demand = หาช่าง/หาคนช่วย · supply = รับงาน/เสนอบริการ
+   */
+  boardSide?: BoardSide;
   likes: number;
   comments: number;
   shares: number;
+  /** ยอดเหรียญที่คลิปนี้ได้รับ (วอลเล็ตทิป) */
+  tips?: number;
+  /** เหรียญที่ "เรา" ส่งให้คลิปนี้ในเซสชันนี้ */
+  myTipTotal?: number;
   isLive: boolean;
   musicTitle: string;
   gradient: [string, string];
@@ -43,7 +64,19 @@ export type FeedItem = {
   saved?: boolean;
   /** Real photo/video picked from device — overrides gradient background when present */
   imageUri?: string;
+  /** หลายรูปในโพสต์เดียว — ปัดซ้าย/ขวาเลื่อนในโพสต์ (ไม่เปิดโปรไฟล์) */
+  imageUris?: string[];
   videoUri?: string;
+  /** ข้อความที่พิมพ์ทับบนภาพตอนแต่ง (คงอยู่ถึงฟีด) */
+  overlayText?: string;
+  overlayTextColor?: string;
+  /** ตำแหน่ง normalized 0–1 ล็อกจากหน้าแต่ง */
+  overlayTransform?: {
+    x: number;
+    y: number;
+    scale: number;
+    rotation: number;
+  };
   /** true when created via the in-app Camera/Creator Studio during this session */
   isUserPost?: boolean;
 };

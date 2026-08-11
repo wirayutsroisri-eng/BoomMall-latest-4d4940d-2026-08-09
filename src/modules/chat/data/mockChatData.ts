@@ -3,63 +3,81 @@ import type { ActiveNote, ChatMessage, Conversation, OpenChatGroup } from '../do
 export const CURRENT_USER_ID = 'me';
 
 /** Seed photo moments for the horizontal Active Notes / Moments bar above the chat list. */
+/** expiresAt ไกลพอสำหรับ mock — คอนเทนต์โมเมนต์ยังไม่หมดอายุ */
+const NOTE_EXPIRES = '2099-12-31T23:59:59.000Z';
+
 export const mockActiveNotes: ActiveNote[] = [
   {
     id: 'note-1',
     conversationId: 'c-1',
+    userId: 'user-earth',
     authorName: 'ช่างเอิร์ธ Boom EV',
     avatarColor: '#00A86B',
     emoji: '🔧',
     text: 'คิวติดตั้งแบตวันนี้เต็มแล้ว พรุ่งนี้ว่างครับ',
     imageUri: 'https://picsum.photos/seed/boom-moment-earth/240/240',
     postedAt: '5 นาทีที่แล้ว',
+    expiresAt: NOTE_EXPIRES,
     isOnline: true,
   },
   {
     id: 'note-2',
     conversationId: 'c-2',
+    userId: 'user-showroom',
     authorName: 'แม่ค้าโชว์รูมจันทบุรี',
     avatarColor: '#2E8CFF',
     emoji: '🛵',
     text: 'สต็อกโช้คใหม่เข้าแล้วจ้า ทักจองได้เลย',
     imageUri: 'https://picsum.photos/seed/boom-moment-showroom/240/240',
     postedAt: '18 นาทีที่แล้ว',
+    expiresAt: NOTE_EXPIRES,
     isOnline: true,
   },
   {
     id: 'note-3',
     conversationId: 'c-3',
+    userId: 'user-mint',
     authorName: 'ลูกค้า VIP — คุณมิ้นท์',
     avatarColor: '#F5A524',
     emoji: '⚡',
     text: 'รอใบรับประกันดิจิทัลอยู่นะคะ',
     imageUri: 'https://picsum.photos/seed/boom-moment-mint/240/240',
     postedAt: '32 นาทีที่แล้ว',
+    expiresAt: NOTE_EXPIRES,
     isOnline: true,
   },
   {
     id: 'note-4',
     conversationId: 'c-sky',
+    userId: 'user-sky',
     authorName: 'น้อง Sky',
     avatarColor: '#FE2C55',
     emoji: '💬',
     text: 'พร้อมตอบแชตตลอดวันนี้ค่ะ',
     imageUri: 'https://picsum.photos/seed/boom-moment-sky/240/240',
     postedAt: '1 ชั่วโมงที่แล้ว',
+    expiresAt: NOTE_EXPIRES,
     isOnline: true,
   },
   {
     id: 'note-5',
     conversationId: 'c-0',
+    userId: 'user-boomev-shop',
     authorName: 'Boom EV Shop Chanthaburi',
     avatarColor: '#00D68F',
     emoji: '🔋',
     text: 'โปรแบต 60V ลดพิเศษถึงสิ้นเดือนนี้!',
     imageUri: 'https://picsum.photos/seed/boom-moment-shop/240/240',
     postedAt: '2 ชั่วโมงที่แล้ว',
+    expiresAt: NOTE_EXPIRES,
     isOnline: false,
   },
 ];
+
+/** รูปโปรไฟล์จำลอง (หน้าคน / ร้าน) — seed คงที่ต่อแชต */
+function avatar(seed: string) {
+  return `https://i.pravatar.cc/150?u=boommall-${seed}`;
+}
 
 export const mockConversations: Conversation[] = [
   {
@@ -71,6 +89,7 @@ export const mockConversations: Conversation[] = [
     isHidden: false,
     updatedAt: '2 นาที',
     avatarColor: '#00D68F',
+    avatarUri: 'https://picsum.photos/seed/boom-shop-chanthaburi/240/240',
     kind: 'official',
     isPinned: true,
     pinnedAt: 1,
@@ -84,6 +103,7 @@ export const mockConversations: Conversation[] = [
     isHidden: false,
     updatedAt: 'เมื่อสักครู่',
     avatarColor: '#00A86B',
+    avatarUri: avatar('earth-tech'),
     kind: 'official',
     isPinned: true,
     pinnedAt: 2,
@@ -97,6 +117,7 @@ export const mockConversations: Conversation[] = [
     isHidden: false,
     updatedAt: '12 นาที',
     avatarColor: '#2E8CFF',
+    avatarUri: avatar('chan-showroom'),
     kind: 'official',
   },
   {
@@ -108,6 +129,7 @@ export const mockConversations: Conversation[] = [
     isHidden: false,
     updatedAt: '1 ชม.',
     avatarColor: '#F5A524',
+    avatarUri: avatar('mint-vip'),
     kind: 'friend',
   },
   {
@@ -119,6 +141,7 @@ export const mockConversations: Conversation[] = [
     isHidden: false,
     updatedAt: '20 นาที',
     avatarColor: '#FE2C55',
+    avatarUri: avatar('sky-support'),
     kind: 'official',
   },
   {
@@ -130,6 +153,7 @@ export const mockConversations: Conversation[] = [
     isHidden: false,
     updatedAt: '5 นาที',
     avatarColor: '#2E8CFF',
+    avatarUri: 'https://picsum.photos/seed/boom-group-techteam/240/240',
     kind: 'group',
     memberCount: 8,
   },
@@ -142,6 +166,7 @@ export const mockConversations: Conversation[] = [
     isHidden: false,
     updatedAt: '45 นาที',
     avatarColor: '#F5A524',
+    avatarUri: 'https://picsum.photos/seed/boom-group-vipclub/240/240',
     kind: 'group',
     memberCount: 24,
   },
@@ -154,6 +179,7 @@ export const mockConversations: Conversation[] = [
     isHidden: true,
     updatedAt: 'ซ่อน',
     avatarColor: '#C9A227',
+    avatarUri: avatar('secret-deal'),
     kind: 'friend',
   },
 ];
@@ -231,6 +257,42 @@ export const mockMessages: Record<string, ChatMessage[]> = {
       },
       createdAt: '10:03',
       readAt: null,
+    },
+    {
+      id: 'm-img-1',
+      conversationId: 'c-1',
+      senderId: 'peer',
+      kind: 'image',
+      imageUri: 'https://picsum.photos/seed/boom-chat-pack/800/1000',
+      createdAt: '10:04',
+      readAt: 'อ่านแล้ว',
+    },
+    {
+      id: 'm-img-2',
+      conversationId: 'c-1',
+      senderId: CURRENT_USER_ID,
+      kind: 'image',
+      imageUri: 'https://picsum.photos/seed/boom-chat-bike/800/1000',
+      createdAt: '10:05',
+      readAt: 'อ่านแล้ว',
+    },
+    {
+      id: 'm-img-3',
+      conversationId: 'c-1',
+      senderId: 'peer',
+      kind: 'image',
+      imageUri: 'https://picsum.photos/seed/boom-chat-shop/800/1000',
+      createdAt: '10:06',
+      readAt: null,
+    },
+    {
+      id: 'm-img-4',
+      conversationId: 'c-1',
+      senderId: CURRENT_USER_ID,
+      kind: 'image',
+      imageUri: 'https://picsum.photos/seed/boom-chat-bms/800/1000',
+      createdAt: '10:07',
+      readAt: 'ส่งแล้ว',
     },
   ],
   'c-2': [

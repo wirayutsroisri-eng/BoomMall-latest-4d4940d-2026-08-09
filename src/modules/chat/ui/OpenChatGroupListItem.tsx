@@ -45,10 +45,10 @@ const styles = StyleSheet.create({
   body: { flex: 1 },
   name: {
     fontWeight: '800',
-    color: colors.text.primary,
+    color: colors.text.inverse,
   },
   meta: {
-    color: colors.text.secondary,
+    color: 'rgba(255,255,255,0.55)',
     fontSize: 12,
     marginTop: 2,
   },
@@ -56,10 +56,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 10,
-    backgroundColor: colors.brand.ink,
+    backgroundColor: '#1C1C1E',
   },
   pillJoined: {
-    backgroundColor: colors.brand.mist,
+    backgroundColor: 'rgba(0,214,143,0.18)',
   },
   pillText: {
     color: colors.brand.primary,
@@ -67,6 +67,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   pillTextJoined: {
-    color: colors.brand.primaryDark,
+    color: colors.brand.primary,
   },
 });

@@ -1,0 +1,5 @@
+# Deprecated shim — use backend/docker-compose.yml for on-premise deploy.
+# Kept so older docs keep working: forwards to the backend compose file.
+
+include:
+  - path: ./backend/docker-compose.yml

@@ -1,16 +1,50 @@
 import { create } from 'zustand';
 import { mockFeedsData } from '../data/mockFeedsData';
+import { mockMyContent, SEED_LIKED_IDS, SEED_SAVED_IDS } from '../data/mockMyContent';
 import { mockComments } from '../data/mockComments';
 import { useVaultStore } from '@/modules/vault/state/vault-store';
 import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
-import type { CommerceTier, FeedComment, FeedItem, FeedTab } from '../domain/types';
+import { CHANTHABURI } from '@/modules/matching/domain/geo';
+import { runPostMatching } from '@/modules/matching/domain/run-post-matching';
+import {
+  DEFAULT_SEARCH_RADIUS,
+  type SearchRadiusOption,
+} from '@/modules/matching/domain/search-radius';
+import type { BoardSide, CommerceTier, FeedComment, FeedItem, FeedTab } from '../domain/types';
 
 type NewPostInput = {
   caption: string;
   price: number;
   channel: CommerceTier;
   imageUri?: string;
+  imageUris?: string[];
   videoUri?: string;
+  overlayText?: string;
+  overlayTextColor?: string;
+  overlayTransform?: {
+    x: number;
+    y: number;
+    scale: number;
+    rotation: number;
+  };
+  /** ชื่อสินค้าบนการ์ดซื้อ (ถ้าไม่ใส่ใช้แคปชัน) */
+  productName?: string;
+  /** ผูก Master จากคลังเมื่อโพสต์พร้อมขาย */
+  masterProductId?: string;
+  stock?: number;
+  gps?: { lat: number; lng: number };
+  searchRadius?: SearchRadiusOption;
+  /** Community Board marketplace side */
+  boardSide?: BoardSide;
+  /** Force lane=board even without keyword extract hit */
+  forceBoard?: boolean;
+  /**
+   * Explicit publish intent — prevents content/sell captions from leaking onto the board
+   * via keyword heuristics. Board forms pass 'board'; content passes 'content'.
+   */
+  intent?: 'content' | 'board' | 'sell';
+  /** Sound from Listen Mode “ใช้เสียงนี้” */
+  musicTitle?: string;
 };
 
 type FeedState = {
@@ -18,6 +52,7 @@ type FeedState = {
   items: FeedItem[];
   activeProductId: string | null;
   activeCommentsFeedId: string | null;
+  activeTipFeedId: string | null;
   commentsByFeedId: Record<string, FeedComment[]>;
   /** Visitor Profile bottom sheet — driven from global state so it can be re-opened
    *  from anywhere (Feed swipe/avatar tap, or [< Back] from a chat room). */
@@ -29,11 +64,14 @@ type FeedState = {
   setTab: (tab: FeedTab) => void;
   toggleLike: (id: string) => void;
   toggleSave: (id: string) => void;
-  addPost: (input: NewPostInput) => void;
+  tipClip: (id: string, amount: number) => void;
+  addPost: (input: NewPostInput) => string;
   openProductSheet: (productId: string) => void;
   closeProductSheet: () => void;
   openComments: (feedId: string) => void;
   closeComments: () => void;
+  openTip: (feedId: string) => void;
+  closeTip: () => void;
   addComment: (feedId: string, text: string, author?: string, authorInitial?: string) => void;
   toggleCommentLike: (feedId: string, commentId: string) => void;
   openCreatorProfile: (handle: string, feedId?: string) => void;
@@ -47,11 +85,34 @@ const commentsByFeedId = mockComments.reduce<Record<string, FeedComment[]>>((acc
 
 let commentSeq = 1000;
 
+function seedTips(id: string, likes: number) {
+  // ยอดเหรียญจำลอง — สัดส่วนจากไลก์ ให้กริด/แถบขวามีตัวเลขทันที
+  let h = 0;
+  for (let i = 0; i < id.length; i += 1) h = (h * 33 + id.charCodeAt(i)) >>> 0;
+  return Math.max(12, Math.floor(likes * 0.08) + (h % 240));
+}
+
+/** Seed engagement: บางคลิปถูกกดถูกใจ/บันทึกไว้แล้ว เพื่อให้แท็บโปรไฟล์มีคอนเทนต์ */
+const seedItems: FeedItem[] = [
+  ...mockFeedsData.map((item) => ({
+    ...item,
+    liked: item.liked ?? SEED_LIKED_IDS.has(item.id),
+    saved: item.saved ?? SEED_SAVED_IDS.has(item.id),
+    tips: item.tips ?? seedTips(item.id, item.likes),
+  })),
+  // โพสต์ของโปรไฟล์เรา — ต่อท้ายเพื่อไม่รบกวนลำดับ For You เดิม
+  ...mockMyContent.map((item) => ({
+    ...item,
+    tips: item.tips ?? seedTips(item.id, item.likes),
+  })),
+];
+
 export const useFeedStore = create<FeedState>((set) => ({
   tab: 'foryou',
-  items: mockFeedsData,
+  items: seedItems,
   activeProductId: null,
   activeCommentsFeedId: null,
+  activeTipFeedId: null,
   commentsByFeedId,
   activeCreatorHandle: null,
   activeCreatorFeedId: null,
@@ -89,48 +150,108 @@ export const useFeedStore = create<FeedState>((set) => ({
         items: state.items.map((i) => (i.id === id ? { ...i, saved: nextSaved } : i)),
       };
     }),
+  tipClip: (id, amount) =>
+    set((state) => ({
+      items: state.items.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              tips: (item.tips ?? 0) + amount,
+              myTipTotal: (item.myTipTotal ?? 0) + amount,
+            }
+          : item,
+      ),
+    })),
   addPost: (input) => {
     const profile = useLoyaltyStore.getState().profile;
     const id = `feed-user-${Date.now()}`;
+    const imageUris =
+      input.imageUris?.filter(Boolean) ??
+      (input.imageUri ? [input.imageUri] : undefined);
+    const gps = input.gps ?? CHANTHABURI;
+    const searchRadius = input.searchRadius ?? DEFAULT_SEARCH_RADIUS;
+    const caption = input.caption || 'โพสต์ใหม่จาก BoomMall';
+    const author = profile.displayName;
+    const authorHandle = profile.handle.replace(/^@/, '');
+    // Only board intent (or explicit forceBoard/boardSide) lands on เว็บบอร์ด.
+    // Content / sell never auto-classify via keywords — keeps contexts separate.
+    const intent = input.intent;
+    const isJobPost =
+      intent === 'board' ||
+      Boolean(input.forceBoard) ||
+      (intent == null && Boolean(input.boardSide));
+    const boardSide: BoardSide | undefined = isJobPost
+      ? input.boardSide ?? 'demand'
+      : undefined;
     const newItem: FeedItem = {
       id,
-      author: profile.displayName,
-      authorHandle: profile.handle.replace(/^@/, ''),
-      caption: input.caption || 'โพสต์ใหม่จาก BoomMall',
+      author,
+      authorHandle,
+      lane: isJobPost ? 'board' : 'foryou',
+      boardSide,
+      caption,
       location: 'จันทบุรี',
+      gps,
+      searchRadius,
       likes: 0,
       comments: 0,
       shares: 0,
+      tips: 0,
       isLive: false,
-      musicTitle: 'Original Sound — BoomMall',
+      musicTitle: input.musicTitle?.trim() || 'Original Sound — BoomMall',
       gradient: ['#0B3D2E', '#1A7A55'],
-      imageUri: input.imageUri,
+      imageUri: imageUris?.[0] ?? input.imageUri,
+      imageUris,
       videoUri: input.videoUri,
+      overlayText: input.overlayText?.trim() || undefined,
+      overlayTextColor: input.overlayTextColor,
+      overlayTransform: input.overlayTransform,
       isUserPost: true,
       product: {
-        id: `p-user-${Date.now()}`,
-        name: input.caption || 'สินค้าใหม่',
+        id: input.masterProductId ?? `p-user-${Date.now()}`,
+        name: input.productName?.trim() || input.caption || 'สินค้าใหม่',
         shopName: profile.displayName,
         tier: input.channel,
         basePrice: input.price || 0,
         currency: 'THB',
-        tags: [input.channel, 'New'],
+        tags: [
+          input.channel,
+          input.masterProductId ? 'Shop' : 'New',
+          ...(isJobPost ? ['เว็บบอร์ด', 'บริการ', boardSide === 'supply' ? 'รับงาน' : 'หาช่าง'] : []),
+        ],
         variants: [
           {
             id: 'v1',
             label: 'มาตรฐาน',
             price: input.price || 0,
-            stock: 10,
+            stock: input.stock ?? 10,
           },
         ],
       },
     };
     set((state) => ({ items: [newItem, ...state.items] }));
+
+    // Matching only for board demand posts
+    if (isJobPost && boardSide === 'demand') {
+      runPostMatching({
+        feedId: id,
+        caption,
+        author,
+        authorHandle,
+        gps,
+        searchRadius,
+        boardSide,
+      });
+    }
+
+    return id;
   },
   openProductSheet: (productId) => set({ activeProductId: productId }),
   closeProductSheet: () => set({ activeProductId: null }),
   openComments: (feedId) => set({ activeCommentsFeedId: feedId }),
   closeComments: () => set({ activeCommentsFeedId: null }),
+  openTip: (feedId) => set({ activeTipFeedId: feedId }),
+  closeTip: () => set({ activeTipFeedId: null }),
   addComment: (feedId, text, author = 'คุณ', authorInitial = 'ค') =>
     set((state) => {
       commentSeq += 1;

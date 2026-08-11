@@ -1,0 +1,188 @@
+// Boom Coin — Double-entry ledger (PostgreSQL)
+// Balances are projections only. Never mutate wallet balance without ledger entries.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WalletKind {
+  USER
+  SELLER
+  TREASURY
+  REWARD_POOL
+  SYSTEM_MINT
+}
+
+enum WalletStatus {
+  NORMAL
+  LIMITED
+  REVIEW
+  FROZEN
+}
+
+enum AccountBucket {
+  AVAILABLE
+  PENDING
+  LOCKED
+}
+
+enum TxType {
+  INITIAL_MINT
+  SELLER_TOPUP_MINT
+  TRANSFER
+  CONTENT_SUPPORT
+  REWARD_PAYOUT
+  REFUND
+  REVERSAL
+}
+
+enum TxStatus {
+  PENDING
+  COMMITTED
+  FAILED
+  REVERSED
+  CANCELLED
+}
+
+enum EntrySide {
+  DEBIT
+  CREDIT
+}
+
+enum TopUpStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+/// System-wide supply counters (single row id = 1)
+model SystemSupply {
+  id                 Int      @id @default(1)
+  /// All coins ever minted into the closed loop
+  totalMinted        BigInt   @default(0)
+  /// THB received from approved seller top-ups
+  totalRevenueThb    BigInt   @default(0)
+  updatedAt          DateTime @updatedAt
+}
+
+model Wallet {
+  id          String       @id @default(cuid())
+  kind        WalletKind
+  /// External owner (userId / sellerId). System wallets use codes like PLATFORM_TREASURY
+  ownerRef    String
+  displayName String
+  status      WalletStatus @default(NORMAL)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  accounts WalletAccount[]
+
+  topUpsAsSeller SellerTopUpRequest[] @relation("SellerWallet")
+
+  @@unique([kind, ownerRef])
+  @@index([kind])
+}
+
+/// Balance projection — updated only inside ledger commit transactions
+model WalletAccount {
+  id        String        @id @default(cuid())
+  walletId  String
+  bucket    AccountBucket @default(AVAILABLE)
+  /// Projection of committed ledger entries (integer Boom Coin)
+  balance   BigInt        @default(0)
+  version   Int           @default(0)
+  updatedAt DateTime      @updatedAt
+
+  wallet  Wallet        @relation(fields: [walletId], references: [id])
+  entries LedgerEntry[]
+
+  @@unique([walletId, bucket])
+}
+
+/// Transaction header (immutable after COMMITTED)
+model WalletTransaction {
+  id              String   @id @default(cuid())
+  requestId       String   @unique
+  idempotencyKey  String   @unique
+  type            TxType
+  status          TxStatus @default(PENDING)
+  /// Gross coin amount moved / minted
+  amount          BigInt
+  referenceId     String?
+  metadataJson    Json     @default("{}")
+  previousHash    String
+  recordHash      String
+  createdAt       DateTime @default(now())
+  confirmedAt     DateTime?
+
+  entries LedgerEntry[]
+  topUp   SellerTopUpRequest?
+
+  @@index([type, status])
+  @@index([createdAt])
+}
+
+/// Double-entry line — for each tx, sum(DEBIT) == sum(CREDIT)
+model LedgerEntry {
+  id              String    @id @default(cuid())
+  transactionId   String
+  walletAccountId String
+  side            EntrySide
+  amount          BigInt
+  createdAt       DateTime  @default(now())
+
+  transaction   WalletTransaction @relation(fields: [transactionId], references: [id])
+  walletAccount WalletAccount     @relation(fields: [walletAccountId], references: [id])
+
+  @@index([walletAccountId])
+  @@index([transactionId])
+}
+
+model IdempotencyRecord {
+  key           String   @id
+  transactionId String   @unique
+  responseJson  Json
+  createdAt     DateTime @default(now())
+}
+
+model SellerTopUpRequest {
+  id                String      @id @default(cuid())
+  sellerWalletId    String
+  /// THB amount transferred to company bank account
+  amountThb         BigInt
+  /// Boom Coin to mint on approve (1 THB = 1 Coin)
+  amountCoin        BigInt
+  proofUrl          String
+  proofNote         String?
+  status            TopUpStatus @default(PENDING)
+  submittedBy       String
+  reviewedBy        String?
+  reviewNote        String?
+  idempotencyKey    String?     @unique
+  walletTransactionId String?   @unique
+  createdAt         DateTime    @default(now())
+  reviewedAt        DateTime?
+
+  sellerWallet      Wallet             @relation("SellerWallet", fields: [sellerWalletId], references: [id])
+  walletTransaction WalletTransaction? @relation(fields: [walletTransactionId], references: [id])
+
+  @@index([status, createdAt])
+}
+
+model AdminAuditLog {
+  id         String   @id @default(cuid())
+  actor      String
+  action     String
+  entityType String
+  entityId   String
+  detailJson Json     @default("{}")
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+}

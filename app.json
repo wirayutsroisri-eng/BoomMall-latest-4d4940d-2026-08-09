@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "BoomMall",
-    "slug": "boommall-super-app",
+    "slug": "wirayut",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -11,14 +11,44 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.boommall.superapp",
+      "usesAppleSignIn": true,
       "infoPlist": {
-        "NSFaceIDUsageDescription": "BoomMall ใช้ Face ID เพื่อปลดล็อก Boom Vault อย่างปลอดภัย",
-        "NSCameraUsageDescription": "BoomMall ใช้กล้องสำหรับวิดีโอคอลและสร้างโพสต์",
-        "NSMicrophoneUsageDescription": "BoomMall ใช้ไมโครโฟนสำหรับวอยซ์คอลและไลฟ์",
-        "NSPhotoLibraryUsageDescription": "BoomMall ใช้คลังภาพเพื่อแนบรูปในแชตและโพสต์คอนเทนต์",
+        "NSFaceIDUsageDescription": "BoomMall ใช้ Face ID เพื่อปลดล็อก Boom Vault และยืนยันตัวตนอย่างปลอดภัย",
+        "NSCameraUsageDescription": "BoomMall ใช้กล้องเพื่อถ่ายรูปสินค้า โพสต์คอนเทนต์ และแนบรูปในแชต",
+        "NSMicrophoneUsageDescription": "BoomMall ใช้ไมโครโฟนเพื่อบันทึกวอยซ์โน้ตในแชตและคลิปเสียงประกอบคอนเทนต์",
+        "NSPhotoLibraryUsageDescription": "BoomMall ใช้คลังภาพเพื่อแนบรูปในแชต โพสต์คอนเทนต์ และเลือกรูปสินค้า",
+        "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [
-          "audio",
-          "voip"
+          "audio"
+        ]
+      },
+      "privacyManifests": {
+        "NSPrivacyAccessedAPITypes": [
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
+            "NSPrivacyAccessedAPITypeReasons": [
+              "CA92.1"
+            ]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+            "NSPrivacyAccessedAPITypeReasons": [
+              "C617.1",
+              "3B52.1"
+            ]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryDiskSpace",
+            "NSPrivacyAccessedAPITypeReasons": [
+              "E174.1"
+            ]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
+            "NSPrivacyAccessedAPITypeReasons": [
+              "35C5.1"
+            ]
+          }
         ]
       }
     },
@@ -30,7 +60,21 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "package": "com.boommall.superapp",
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.WAKE_LOCK",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -39,23 +83,48 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
+      "expo-apple-authentication",
       [
         "expo-local-authentication",
         {
-          "faceIDPermission": "BoomMall ใช้ Face ID เพื่อปลดล็อก Boom Vault อย่างปลอดภัย"
+          "faceIDPermission": "BoomMall ใช้ Face ID เพื่อปลดล็อก Boom Vault และยืนยันตัวตนอย่างปลอดภัย"
         }
       ],
       "expo-sqlite",
       [
         "expo-image-picker",
         {
-          "photosPermission": "BoomMall ใช้คลังภาพเพื่อแนบรูปในแชตและโพสต์คอนเทนต์"
+          "photosPermission": "BoomMall ใช้คลังภาพเพื่อแนบรูปในแชต โพสต์คอนเทนต์ และเลือกรูปสินค้า"
         }
       ],
-      "expo-audio"
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "BoomMall ใช้คลังภาพเพื่อเลือกหลายรูป/วิดีโอสำหรับโพสต์และสินค้า",
+          "savePhotosPermission": "BoomMall บันทึกรูปที่สร้างลงคลังภาพเมื่อคุณอนุญาต",
+          "granularPermissions": [
+            "photo",
+            "video"
+          ]
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "enableBackgroundPlayback": true,
+          "microphonePermission": "BoomMall ใช้ไมโครโฟนเพื่อบันทึกวอยซ์โน้ตในแชตและคลิปเสียงประกอบคอนเทนต์"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "2bc92448-2796-4632-bbe8-def51f4da8f6"
+      }
+    },
+    "owner": "wirayuts-team"
   }
 }

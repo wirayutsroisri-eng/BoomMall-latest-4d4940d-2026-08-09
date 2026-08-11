@@ -1,0 +1,9 @@
+node_modules
+dist
+.env
+*.log
+var/backups/
+data/
+deploy/certs/*
+!deploy/certs/.gitignore
+!deploy/certs/.gitkeep

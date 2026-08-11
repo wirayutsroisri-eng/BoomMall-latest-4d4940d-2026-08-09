@@ -1,10 +1,10 @@
 import React from 'react';
 import {
-  Dimensions,
   Image,
   Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
   type StyleProp,
   type ViewStyle,
@@ -17,8 +17,12 @@ import { colors } from '@/shared/theme/colors';
 const COLUMNS = 3;
 /** Tight gutters — Instagram / showroom density from reference */
 const GRID_GAP = 1.5;
-const screenWidth = Dimensions.get('window').width;
-const cellWidth = (screenWidth - GRID_GAP * (COLUMNS - 1)) / COLUMNS;
+/**
+ * BoomMall profile thumbnail cell = 3:4 (e.g. 900×1200 / 1080×1440).
+ * Source video/poster stays 9:16 (e.g. 1080×1920); Image uses resizeMode="cover"
+ * to center-crop into the 3:4 window.
+ */
+const THUMB_ASPECT = 3 / 4;
 
 function formatViews(n: number) {
   if (n >= 1_000_000) {
@@ -38,6 +42,8 @@ type Props = {
   items: FeedItem[];
   /** `content` = clips/posts · `showroom` = full product tiles with name + price */
   mode?: ContentGridMode;
+  /** ปักหมุดคลิปแถวบน (โหมด content) — ค่าเริ่มต้น 0 */
+  pinnedCount?: number;
   emptyIcon?: keyof typeof Ionicons.glyphMap;
   emptyText: string;
   onPressItem?: (item: FeedItem) => void;
@@ -45,17 +51,25 @@ type Props = {
 };
 
 /**
- * Edge-to-edge 3-col showroom / content grid — square cover media, caption text,
- * product price, and video play affordance (LINE OA / Instagram density).
+ * Edge-to-edge 3-col showroom / content grid.
+ * Thumbnail window is 3:4; 9:16 source media is cover-cropped (not stretched).
  */
 export function ContentGrid({
   items,
   mode = 'content',
+  pinnedCount = 0,
   emptyIcon = 'videocam-outline',
   emptyText,
   onPressItem,
   style,
 }: Props) {
+  const { width: windowWidth } = useWindowDimensions();
+  const cellWidth = Math.max(
+    1,
+    (windowWidth - GRID_GAP * (COLUMNS - 1)) / COLUMNS,
+  );
+  const cellHeight = cellWidth / THUMB_ASPECT;
+
   if (items.length === 0) {
     return (
       <View style={styles.empty}>
@@ -67,8 +81,9 @@ export function ContentGrid({
 
   return (
     <View style={[styles.grid, style]}>
-      {items.map((item) => {
+      {items.map((item, index) => {
         const isVideo = Boolean(item.videoUri);
+        const isPinned = mode === 'content' && index < pinnedCount;
         const caption =
           mode === 'showroom'
             ? item.product.name
@@ -95,62 +110,62 @@ export function ContentGrid({
               <View style={styles.liveBadge}>
                 <Text style={styles.liveText}>LIVE</Text>
               </View>
+            ) : isPinned ? (
+              <View style={styles.pinnedBadge}>
+                <Text style={styles.pinnedText}>ปักหมุดแล้ว</Text>
+              </View>
             ) : mode === 'showroom' ? (
               <View style={styles.tierBadge}>
                 <Text style={styles.tierText}>{item.product.tier}</Text>
               </View>
+            ) : null}
+
+            {mode === 'content' ? (
+              <View style={styles.viewsCorner} pointerEvents="none">
+                <Ionicons name="play" size={11} color="#fff" />
+                <Text style={styles.views}>{formatViews(item.likes)}</Text>
+              </View>
             ) : (
-              <View style={styles.tapHint}>
-                <Text style={styles.tapHintText}>แตะเพื่อเปิด</Text>
+              <View style={styles.bottomMeta}>
+                <View style={styles.pricePill}>
+                  <Text style={styles.pricePillText}>
+                    ฿{item.product.basePrice.toLocaleString('th-TH')}
+                  </Text>
+                </View>
+                <Text style={styles.caption} numberOfLines={2}>
+                  {caption}
+                </Text>
+                <Text style={styles.shopLine} numberOfLines={1}>
+                  {item.product.shopName}
+                </Text>
               </View>
             )}
 
-            {isVideo ? (
+            {mode === 'content' ? (
+              <View style={styles.captionCorner} pointerEvents="none">
+                <Text style={styles.caption} numberOfLines={2}>
+                  {caption}
+                </Text>
+              </View>
+            ) : null}
+
+            {isVideo && mode === 'showroom' ? (
               <View style={styles.playCenter} pointerEvents="none">
                 <View style={styles.playCircle}>
                   <Ionicons name="play" size={22} color="#fff" style={{ marginLeft: 2 }} />
                 </View>
               </View>
             ) : null}
-
-            <View style={styles.bottomMeta}>
-              {mode === 'content' ? (
-                <View style={styles.postPill}>
-                  <Ionicons name="play" size={10} color="#fff" />
-                  <Text style={styles.postPillText}>โพสต์</Text>
-                </View>
-              ) : (
-                <View style={styles.pricePill}>
-                  <Text style={styles.pricePillText}>
-                    ฿{item.product.basePrice.toLocaleString('th-TH')}
-                  </Text>
-                </View>
-              )}
-
-              <Text style={styles.caption} numberOfLines={2}>
-                {caption}
-              </Text>
-
-              {mode === 'content' ? (
-                <View style={styles.viewsRow}>
-                  <Ionicons name="eye-outline" size={11} color="rgba(255,255,255,0.9)" />
-                  <Text style={styles.views}>{formatViews(item.likes)}</Text>
-                  {isVideo ? <Text style={styles.viewHint}>แตะเพื่อดู</Text> : null}
-                </View>
-              ) : (
-                <Text style={styles.shopLine} numberOfLines={1}>
-                  {item.product.shopName}
-                </Text>
-              )}
-            </View>
           </>
         );
+
+        const cellStyle = [styles.cell, { width: cellWidth, height: cellHeight }];
 
         if (onPressItem) {
           return (
             <Pressable
               key={item.id}
-              style={styles.cell}
+              style={cellStyle}
               onPress={() => onPressItem(item)}
               accessibilityLabel={
                 mode === 'showroom'
@@ -164,7 +179,7 @@ export function ContentGrid({
         }
 
         return (
-          <View key={item.id} style={styles.cell}>
+          <View key={item.id} style={cellStyle}>
             {body}
           </View>
         );
@@ -181,8 +196,6 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   cell: {
-    width: cellWidth,
-    aspectRatio: 1,
     borderRadius: 0,
     overflow: 'hidden',
     backgroundColor: colors.brand.ink,
@@ -222,22 +235,40 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '800',
   },
-  tapHint: {
+  pinnedBadge: {
     position: 'absolute',
     top: 6,
-    right: 6,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    left: 6,
+    backgroundColor: colors.accent.live,
     paddingHorizontal: 6,
-    paddingVertical: 3,
+    paddingVertical: 2,
     borderRadius: 4,
   },
-  tapHintText: {
+  pinnedText: {
     color: '#fff',
     fontSize: 9,
-    fontWeight: '700',
+    fontWeight: '900',
+  },
+  viewsCorner: {
+    position: 'absolute',
+    left: 6,
+    bottom: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  captionCorner: {
+    position: 'absolute',
+    left: 6,
+    right: 6,
+    bottom: 24,
   },
   playCenter: {
-    ...StyleSheet.absoluteFill,
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -257,21 +288,6 @@ const styles = StyleSheet.create({
     right: 6,
     bottom: 6,
     gap: 3,
-  },
-  postPill: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    backgroundColor: 'rgba(0,0,0,0.62)',
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 5,
-  },
-  postPillText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '800',
   },
   pricePill: {
     alignSelf: 'flex-start',
@@ -294,26 +310,13 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
   },
-  viewsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
   views: {
-    color: 'rgba(255,255,255,0.92)',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  viewHint: {
-    marginLeft: 'auto',
-    color: 'rgba(255,255,255,0.85)',
-    fontSize: 9,
-    fontWeight: '700',
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: 4,
-    overflow: 'hidden',
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '800',
+    textShadowColor: 'rgba(0,0,0,0.65)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   shopLine: {
     color: 'rgba(255,255,255,0.8)',

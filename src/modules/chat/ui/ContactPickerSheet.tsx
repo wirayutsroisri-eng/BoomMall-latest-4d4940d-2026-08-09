@@ -1,8 +1,10 @@
 import React from 'react';
 import { FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import type { Conversation } from '@/modules/chat/domain/types';
 import { Avatar } from '@/shared/components/Avatar';
+import { DragDownDismiss } from '@/shared/components/DragDownDismiss';
 import { colors } from '@/shared/theme/colors';
 
 type Mode = 'call' | 'quotation';
@@ -27,64 +29,74 @@ export function ContactPickerSheet({
 }: Props) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-          <View style={styles.grabber} />
-          <Text style={styles.title}>
-            {mode === 'call' ? 'เลือกผู้ติดต่อเพื่อเริ่มการโทร' : 'เลือกผู้ติดต่อเพื่อออกใบเสนอราคา'}
-          </Text>
-          <FlatList
-            data={contacts}
-            keyExtractor={(c) => c.id}
-            style={styles.list}
-            renderItem={({ item }) => (
-              <View style={styles.row}>
-                <Avatar initial={item.peerName.slice(0, 1)} backgroundColor={item.avatarColor} size={44} radius={14} />
-                <Text style={styles.name} numberOfLines={1}>{item.peerName}</Text>
-                {mode === 'call' ? (
-                  <View style={styles.callBtns}>
+      <GestureHandlerRootView style={styles.flex}>
+        <View style={styles.backdrop}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="ปิด" />
+          <DragDownDismiss onDismiss={onClose} style={styles.sheet}>
+            <View style={styles.grabber} />
+            <Text style={styles.title}>
+              {mode === 'call' ? 'เลือกผู้ติดต่อเพื่อเริ่มการโทร' : 'เลือกผู้ติดต่อเพื่อออกใบเสนอราคา'}
+            </Text>
+            <FlatList
+              data={contacts}
+              keyExtractor={(c) => c.id}
+              style={styles.list}
+              renderItem={({ item }) => (
+                <View style={styles.row}>
+                  <Avatar
+                    uri={item.avatarUri}
+                    initial={item.peerName.slice(0, 1)}
+                    backgroundColor={item.avatarColor}
+                    size={44}
+                    radius={14}
+                  />
+                  <Text style={styles.name} numberOfLines={1}>{item.peerName}</Text>
+                  {mode === 'call' ? (
+                    <View style={styles.callBtns}>
+                      <Pressable
+                        style={styles.callBtn}
+                        onPress={() => {
+                          onClose();
+                          onPickForCall?.(item.peerName, 'voice');
+                        }}
+                      >
+                        <Ionicons name="call" size={16} color={colors.brand.ink} />
+                      </Pressable>
+                      <Pressable
+                        style={[styles.callBtn, styles.videoBtn]}
+                        onPress={() => {
+                          onClose();
+                          onPickForCall?.(item.peerName, 'video');
+                        }}
+                      >
+                        <Ionicons name="videocam" size={16} color={colors.text.inverse} />
+                      </Pressable>
+                    </View>
+                  ) : (
                     <Pressable
-                      style={styles.callBtn}
+                      style={styles.quoteBtn}
                       onPress={() => {
                         onClose();
-                        onPickForCall?.(item.peerName, 'voice');
+                        onPickForQuotation?.(item.id);
                       }}
                     >
-                      <Ionicons name="call" size={16} color={colors.brand.ink} />
+                      <Ionicons name="receipt" size={14} color={colors.brand.ink} />
+                      <Text style={styles.quoteBtnText}>ออกใบเสนอราคา</Text>
                     </Pressable>
-                    <Pressable
-                      style={[styles.callBtn, styles.videoBtn]}
-                      onPress={() => {
-                        onClose();
-                        onPickForCall?.(item.peerName, 'video');
-                      }}
-                    >
-                      <Ionicons name="videocam" size={16} color={colors.text.inverse} />
-                    </Pressable>
-                  </View>
-                ) : (
-                  <Pressable
-                    style={styles.quoteBtn}
-                    onPress={() => {
-                      onClose();
-                      onPickForQuotation?.(item.id);
-                    }}
-                  >
-                    <Ionicons name="receipt" size={14} color={colors.brand.ink} />
-                    <Text style={styles.quoteBtnText}>ออกใบเสนอราคา</Text>
-                  </Pressable>
-                )}
-              </View>
-            )}
-            ItemSeparatorComponent={() => <View style={styles.sep} />}
-          />
-        </Pressable>
-      </Pressable>
+                  )}
+                </View>
+              )}
+              ItemSeparatorComponent={() => <View style={styles.sep} />}
+            />
+          </DragDownDismiss>
+        </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(7,20,15,0.4)',

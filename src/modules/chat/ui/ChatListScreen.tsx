@@ -2,19 +2,13 @@ import React, { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
   FlatList,
-  LayoutChangeEvent,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import Animated, {
-  useAnimatedScrollHandler,
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
-} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -34,11 +28,10 @@ import { ChatItemActionSheet } from './ChatItemActionSheet';
 import { sortPinnedByRecent } from '@/modules/chat/data/chatActions';
 import { ActiveNotesBar } from './ActiveNotesBar';
 import { colors } from '@/shared/theme/colors';
+import { ENABLE_CALLS } from '@/shared/compliance/appStoreGates';
+import { useModerationStore } from '@/modules/safety/state/moderation-store';
 
 type FilterKey = 'all' | 'pinned' | ConversationKind | 'openchat';
-
-const HEADER_SPRING = { damping: 20, stiffness: 220, mass: 0.5 };
-const SCROLL_DIRECTION_THRESHOLD = 6;
 
 const FILTERS: Array<{ key: FilterKey; label: string }> = [
   { key: 'all', label: 'ทั้งหมด' },
@@ -69,56 +62,15 @@ export function ChatListScreen() {
   const deleteConversation = useChatStore((s) => s.deleteConversation);
   const groups = useOpenChatStore((s) => s.groups);
   const startCall = useCallStore((s) => s.startCall);
-
-  // Full natural height of the header block (title row + search + chips), measured continuously
-  // from the un-clipped inner content so it stays accurate even while the outer wrap is collapsing.
-  const headerHeight = useSharedValue(0);
-  const headerProgress = useSharedValue(1); // 1 = fully shown, 0 = fully collapsed
-  const lastScrollY = useSharedValue(0);
-
-  const onHeaderLayout = useCallback(
-    (e: LayoutChangeEvent) => {
-      headerHeight.value = e.nativeEvent.layout.height;
-    },
-    [headerHeight],
-  );
-
-  // Outer wrap clips the header out of the layout flow so the list below reflows to fill the space.
-  const headerOuterAnimatedStyle = useAnimatedStyle(() => ({
-    height: headerHeight.value === 0 ? undefined : headerHeight.value * headerProgress.value,
-  }));
-
-  // Inner content slides fully up and fades out in lockstep with the outer height collapse, so the
-  // whole header block (search bar + Active Notes + filter chips) disappears completely against the
-  // top edge with nothing left on screen, letting the chat list fill 100% of the viewport.
-  const headerInnerAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: headerProgress.value,
-    transform: [{ translateY: (headerProgress.value - 1) * headerHeight.value }],
-  }));
-
-  const onListScroll = useAnimatedScrollHandler({
-    onScroll: (event) => {
-      'worklet';
-      const y = event.contentOffset.y;
-      const diff = y - lastScrollY.value;
-      if (y <= 0) {
-        // ลากดึงจนสุดด้านบน — แสดง Header กลับมาเต็ม 100%
-        headerProgress.value = withSpring(1, HEADER_SPRING);
-      } else if (diff > SCROLL_DIRECTION_THRESHOLD) {
-        // สกรอลล์เลื่อนลง (ดูรายการถัดไป) — ยุบซ่อน Header ขึ้นด้านบนพร้อม Fade Out
-        headerProgress.value = withSpring(0, HEADER_SPRING);
-      } else if (diff < -SCROLL_DIRECTION_THRESHOLD) {
-        // สกรอลล์เลื่อนขึ้น — เลื่อน Header กลับลงมาพร้อม Fade In
-        headerProgress.value = withSpring(1, HEADER_SPRING);
-      }
-      lastScrollY.value = y;
-    },
-  });
+  const blockedUserIds = useModerationStore((s) => s.blockedUserIds);
 
   const visibleConversations = useMemo(() => {
-    const base = conversations.filter(
-      (c) => (hiddenUnlocked || !c.isHidden) && !c.isArchived,
-    );
+    const blocked = new Set(blockedUserIds.map((id) => id.toLowerCase()));
+    const base = conversations.filter((c) => {
+      if (!(hiddenUnlocked || !c.isHidden) || c.isArchived) return false;
+      const handle = (c.peerHandle ?? '').replace(/^@/, '').toLowerCase();
+      return !blocked.has(handle) && !blocked.has((c.peerHandle ?? '').toLowerCase());
+    });
     const q = query.trim().toLowerCase();
     if (!q || q === HIDDEN_CHAT_SECRET) return base;
     return base.filter(
@@ -126,7 +78,7 @@ export function ChatListScreen() {
         c.peerName.toLowerCase().includes(q) ||
         c.lastMessage.toLowerCase().includes(q),
     );
-  }, [conversations, hiddenUnlocked, query]);
+  }, [conversations, hiddenUnlocked, query, blockedUserIds]);
 
   const filteredConversations = useMemo(() => {
     if (filter === 'openchat') return [];
@@ -155,6 +107,10 @@ export function ChatListScreen() {
   };
 
   const handleStartCall = (peerName: string, type: 'voice' | 'video') => {
+    if (!ENABLE_CALLS) {
+      Alert.alert('การโทรยังไม่พร้อม', 'ยังไม่มีระบบโทรศัพท์ในเวอร์ชันนี้');
+      return;
+    }
     startCall(peerName, type);
   };
 
@@ -189,70 +145,81 @@ export function ChatListScreen() {
     ]);
   };
 
+  /** ค้นหา + โมเมนต์ + แท็บปักหมุด — ชิ้นเดียวเลื่อนขึ้นไปกับรายการแชต */
+  const listHeader = useCallback(
+    () => (
+      <View style={styles.listHeader}>
+        <View style={styles.topBar}>
+          <View style={styles.searchRow}>
+            <Ionicons name="search" size={18} color="rgba(255,255,255,0.45)" />
+            <TextInput
+              style={styles.search}
+              placeholder="ค้นหา หรือพิมพ์รหัสลับ Hidden Chats"
+              placeholderTextColor="rgba(255,255,255,0.4)"
+              value={query}
+              onChangeText={onChangeQuery}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            {hiddenUnlocked ? (
+              <Pressable onPress={lockHiddenChats}>
+                <Text style={styles.lockHidden}>ซ่อน</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          <Pressable
+            style={styles.addBtn}
+            hitSlop={12}
+            onPress={() => setMenuOpen(true)}
+            accessibilityLabel="เพิ่ม"
+          >
+            <Ionicons name="add" size={36} color="#FFFFFF" style={styles.addGlow} />
+          </Pressable>
+        </View>
+
+        {hiddenUnlocked ? (
+          <View style={styles.hiddenBanner}>
+            <Ionicons name="eye-off" size={14} color={colors.accent.vault} />
+            <Text style={styles.hiddenBannerText}>แสดง Hidden Chats แล้ว</Text>
+          </View>
+        ) : null}
+
+        <ActiveNotesBar />
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.chipsRow}
+          contentContainerStyle={styles.chipsContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          {FILTERS.map((f) => (
+            <Pressable
+              key={f.key}
+              style={[styles.chip, filter === f.key && styles.chipActive]}
+              onPress={() => setFilter(f.key)}
+            >
+              <Text style={[styles.chipText, filter === f.key && styles.chipTextActive]}>
+                {f.label}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </View>
+    ),
+    [filter, hiddenUnlocked, lockHiddenChats, query],
+  );
+
   return (
     <View style={[styles.root, { paddingTop: insets.top + 4 }]}>
-      <Animated.View style={[styles.headerCollapseOuter, headerOuterAnimatedStyle]}>
-        <Animated.View onLayout={onHeaderLayout} style={headerInnerAnimatedStyle}>
-          <View style={styles.topBar}>
-            <View style={styles.searchRow}>
-              <Ionicons name="search" size={18} color={colors.text.muted} />
-              <TextInput
-                style={styles.search}
-                placeholder="ค้นหา หรือพิมพ์รหัสลับ Hidden Chats"
-                placeholderTextColor={colors.text.muted}
-                value={query}
-                onChangeText={onChangeQuery}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              {hiddenUnlocked ? (
-                <Pressable onPress={lockHiddenChats}>
-                  <Text style={styles.lockHidden}>ซ่อน</Text>
-                </Pressable>
-              ) : null}
-            </View>
-            <Pressable style={styles.addBtn} hitSlop={8} onPress={() => setMenuOpen(true)}>
-              <Ionicons name="add" size={24} color={colors.brand.ink} />
-            </Pressable>
-          </View>
-
-          {hiddenUnlocked ? (
-            <View style={styles.hiddenBanner}>
-              <Ionicons name="eye-off" size={14} color={colors.accent.vault} />
-              <Text style={styles.hiddenBannerText}>แสดง Hidden Chats แล้ว</Text>
-            </View>
-          ) : null}
-
-          <ActiveNotesBar />
-
-          <FlatList
-            data={FILTERS}
-            keyExtractor={(f) => f.key}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.chipsRow}
-            contentContainerStyle={{ gap: 8, paddingRight: 8 }}
-            renderItem={({ item: f }) => (
-              <Pressable
-                style={[styles.chip, filter === f.key && styles.chipActive]}
-                onPress={() => setFilter(f.key)}
-              >
-                <Text style={[styles.chipText, filter === f.key && styles.chipTextActive]}>
-                  {f.label}
-                </Text>
-              </Pressable>
-            )}
-          />
-        </Animated.View>
-      </Animated.View>
-
-      <Animated.FlatList<Conversation | OpenChatGroup>
+      <FlatList<Conversation | OpenChatGroup>
         data={listData}
         keyExtractor={(item) => item.id}
+        ListHeaderComponent={listHeader}
+        stickyHeaderIndices={[]}
         contentContainerStyle={styles.list}
-        onScroll={onListScroll}
-        scrollEventThrottle={16}
         ItemSeparatorComponent={() => <View style={styles.sep} />}
+        keyboardShouldPersistTaps="handled"
         renderItem={({ item }) =>
           'peerName' in item ? (
             <ChatListItem item={item} onLongPress={setActionTarget} />
@@ -262,7 +229,7 @@ export function ChatListScreen() {
         }
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Ionicons name="chatbubbles-outline" size={36} color={colors.text.muted} />
+            <Ionicons name="chatbubbles-outline" size={36} color="rgba(255,255,255,0.35)" />
             <Text style={styles.emptyText}>ไม่มีแชตในหมวดนี้</Text>
           </View>
         }
@@ -303,41 +270,45 @@ export function ChatListScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: colors.surface.canvas,
+    backgroundColor: '#000000',
     paddingHorizontal: 16,
   },
-  headerCollapseOuter: {
-    overflow: 'hidden',
+  listHeader: {
+    paddingBottom: 2,
   },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 8,
+    marginBottom: 10,
   },
   searchRow: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: colors.surface.card,
+    backgroundColor: '#1C1C1E',
     borderRadius: 14,
     paddingHorizontal: 12,
     borderWidth: 1,
-    borderColor: colors.border.soft,
+    borderColor: colors.border.onDark,
   },
   search: {
     flex: 1,
     height: 44,
-    color: colors.text.primary,
+    color: colors.text.inverse,
   },
   addBtn: {
     width: 44,
     height: 44,
-    borderRadius: 14,
-    backgroundColor: colors.brand.primary,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  addGlow: {
+    textShadowColor: 'rgba(255,255,255,0.55)',
+    textShadowRadius: 6,
+    textShadowOffset: { width: 0, height: 0 },
   },
   lockHidden: {
     color: colors.accent.vault,
@@ -356,34 +327,38 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   chipsRow: {
-    marginBottom: 6,
+    marginBottom: 8,
+  },
+  chipsContent: {
+    gap: 8,
+    paddingRight: 8,
   },
   chip: {
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 16,
-    backgroundColor: colors.surface.card,
+    backgroundColor: '#1C1C1E',
     borderWidth: 1,
-    borderColor: colors.border.soft,
+    borderColor: colors.border.onDark,
   },
   chipActive: {
-    backgroundColor: colors.brand.ink,
-    borderColor: colors.brand.ink,
+    backgroundColor: '#FFFFFF',
+    borderColor: '#FFFFFF',
   },
   chipText: {
     fontWeight: '700',
     fontSize: 12,
-    color: colors.text.secondary,
+    color: 'rgba(255,255,255,0.72)',
   },
   chipTextActive: {
-    color: colors.brand.primary,
+    color: colors.brand.ink,
   },
   list: {
     paddingBottom: 120,
   },
   sep: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.border.soft,
+    backgroundColor: colors.border.onDark,
   },
   empty: {
     alignItems: 'center',
@@ -391,7 +366,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   emptyText: {
-    color: colors.text.muted,
+    color: 'rgba(255,255,255,0.45)',
     fontSize: 13,
   },
 });

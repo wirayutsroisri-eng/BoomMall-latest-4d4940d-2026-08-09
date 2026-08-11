@@ -1,85 +1,142 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSequence,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import { colors } from '@/shared/theme/colors';
+import { CoinIcon } from './CoinIcon';
 import { SpinningDisc } from './SpinningDisc';
+import { formatBoomCoinCount } from '@/modules/wallet/domain/boom-coin';
 
 type Props = {
   authorInitial: string;
-  likes: number;
+  tips: number;
   comments: number;
   shares: number;
-  liked?: boolean;
+  tipped?: boolean;
   saved?: boolean;
+  /** TikTok: กำลังติดตามแล้ว → ซ่อนปุ่ม + */
+  following?: boolean;
   onAvatar?: () => void;
-  onLike: () => void;
+  /** TikTok: แตะ + ใต้รูป = follow ทันที */
+  onFollow?: () => void;
+  /** กดทีละ 1 เหรียญ — ไม่เปิดชีตเลือกจำนวน (ซ่อนถ้าไม่ส่ง) */
+  onTip?: () => void;
   onComment: () => void;
   onVaultSave: () => void;
   onShare: () => void;
-  onQuickBuy: () => void;
-  onCall: () => void;
+  onCall?: () => void;
+  onReport?: () => void;
+  /** Open YouTube-style Listen Mode for this clip's sound */
+  onMusic?: () => void;
+  musicActive?: boolean;
 };
 
 function formatCount(n: number) {
-  if (n >= 100000) return `${(n / 1000).toFixed(0)}k`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return String(n);
+  return formatBoomCoinCount(n);
 }
 
 export function RightActionBar({
   authorInitial,
-  likes,
+  tips,
   comments,
   shares,
-  liked,
+  tipped,
   saved,
+  following,
   onAvatar,
-  onLike,
+  onFollow,
+  onTip,
   onComment,
   onVaultSave,
   onShare,
-  onQuickBuy,
   onCall,
+  onReport,
+  onMusic,
+  musicActive,
 }: Props) {
-  const scale = useSharedValue(1);
-  const likeStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  const tipScale = useSharedValue(1);
+  const tipStyle = useAnimatedStyle(() => ({ transform: [{ scale: tipScale.value }] }));
+  const badgeScale = useSharedValue(following ? 0 : 1);
+  const badgeStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: badgeScale.value }],
+    opacity: badgeScale.value,
+  }));
 
-  const handleLike = () => {
-    scale.value = withSpring(1.35, { damping: 6, stiffness: 260 }, () => {
-      scale.value = withSpring(1, { damping: 10 });
+  useEffect(() => {
+    if (following) {
+      badgeScale.value = withSequence(
+        withSpring(1.25, { damping: 8, stiffness: 280 }),
+        withTiming(0, { duration: 220 }),
+      );
+    } else {
+      badgeScale.value = withSpring(1, { damping: 12, stiffness: 220 });
+    }
+  }, [following, badgeScale]);
+
+  const handleTip = () => {
+    if (!onTip) return;
+    tipScale.value = withSpring(1.35, { damping: 6, stiffness: 260 }, () => {
+      tipScale.value = withSpring(1, { damping: 10 });
     });
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    onLike();
+    onTip();
+  };
+
+  const handleFollowBadge = () => {
+    if (following) return;
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    onFollow?.();
   };
 
   return (
     <View style={styles.wrap} pointerEvents="box-none">
-      <Pressable
-        onPress={onAvatar}
-        onLongPress={() => {
-          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          onCall();
-        }}
-        style={styles.avatarWrap}
-        hitSlop={6}
-      >
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{authorInitial}</Text>
-        </View>
-        <View style={styles.followBadge}>
-          <Ionicons name="add" size={12} color={colors.text.inverse} />
-        </View>
-      </Pressable>
+      <View style={styles.avatarWrap}>
+        <Pressable
+          onPress={onAvatar}
+          onLongPress={() => {
+            if (!onCall) return;
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            onCall();
+          }}
+          hitSlop={6}
+        >
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{authorInitial}</Text>
+          </View>
+        </Pressable>
+        <Pressable
+          onPress={handleFollowBadge}
+          hitSlop={8}
+          style={styles.followBadgeHit}
+          accessibilityLabel="ติดตาม"
+          pointerEvents={following ? 'none' : 'auto'}
+        >
+          <Animated.View style={[styles.followBadge, badgeStyle]}>
+            <Ionicons
+              name={following ? 'checkmark' : 'add'}
+              size={12}
+              color={colors.text.inverse}
+            />
+          </Animated.View>
+        </Pressable>
+      </View>
 
-      <Action
-        icon={liked ? 'heart' : 'heart-outline'}
-        label={formatCount(likes)}
-        color={liked ? colors.accent.live : colors.text.inverse}
-        onPress={handleLike}
-        animatedStyle={likeStyle}
-      />
+      {onTip ? (
+        <Pressable onPress={handleTip} style={styles.action} hitSlop={4} accessibilityLabel="เหรียญ">
+          <Animated.View style={tipStyle}>
+            <CoinIcon size={28} empty active={Boolean(tipped)} />
+          </Animated.View>
+          <Text style={[styles.label, tipped && styles.tipLabelActive]}>{formatCount(tips)}</Text>
+        </Pressable>
+      ) : null}
+
       <Action icon="chatbubble-ellipses" label={formatCount(comments)} onPress={onComment} />
       <Action
         icon={saved ? 'bookmark' : 'bookmark-outline'}
@@ -88,22 +145,13 @@ export function RightActionBar({
         onPress={onVaultSave}
       />
       <Action icon="arrow-redo-outline" label={formatCount(shares)} onPress={onShare} />
+      {onReport ? (
+        <Action icon="flag-outline" label="รายงาน" onPress={onReport} />
+      ) : null}
 
-      <Pressable
-        onPress={() => {
-          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-          onQuickBuy();
-        }}
-        style={styles.action}
-        hitSlop={4}
-      >
-        <View style={styles.buyCircle}>
-          <Ionicons name="bag-handle" size={19} color={colors.brand.ink} />
-        </View>
-        <Text style={styles.label}>ซื้อ</Text>
-      </Pressable>
-
-      <SpinningDisc />
+      <View style={styles.discSlot}>
+        <SpinningDisc spinning={musicActive !== false} onPress={onMusic} />
+      </View>
     </View>
   );
 }
@@ -131,18 +179,25 @@ function Action({
   );
 }
 
+const ACTION_GAP = 12;
+const ICON_LABEL_GAP = 4;
+const ACTION_SLOT = 52;
+
 const styles = StyleSheet.create({
   wrap: {
     position: 'absolute',
     right: 8,
     bottom: 18,
     alignItems: 'center',
-    gap: 10,
+    gap: ACTION_GAP,
     zIndex: 15,
   },
   avatarWrap: {
-    marginBottom: 2,
+    width: 40,
+    height: ACTION_SLOT,
     alignItems: 'center',
+    justifyContent: 'flex-start',
+    marginBottom: 0,
   },
   avatar: {
     width: 40,
@@ -159,22 +214,28 @@ const styles = StyleSheet.create({
     color: colors.brand.ink,
     fontSize: 15,
   },
-  followBadge: {
+  followBadgeHit: {
     position: 'absolute',
-    bottom: -8,
+    bottom: 0,
     alignSelf: 'center',
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: colors.accent.live,
+    zIndex: 2,
+  },
+  followBadge: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.brand.pink,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1.5,
     borderColor: colors.text.inverse,
   },
   action: {
+    width: 48,
+    height: ACTION_SLOT,
     alignItems: 'center',
-    gap: 3,
+    justifyContent: 'flex-start',
+    gap: ICON_LABEL_GAP,
   },
   iconShadow: {
     textShadowColor: 'rgba(0,0,0,0.45)',
@@ -185,19 +246,18 @@ const styles = StyleSheet.create({
     color: colors.text.inverse,
     fontSize: 11,
     fontWeight: '700',
+    lineHeight: 14,
     textShadowColor: 'rgba(0,0,0,0.5)',
     textShadowRadius: 4,
   },
-  buyCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.brand.primary,
+  tipLabelActive: {
+    color: colors.accent.warning,
+  },
+  discSlot: {
+    width: 48,
+    height: ACTION_SLOT,
     alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: colors.brand.primary,
-    shadowOpacity: 0.6,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 0 },
+    justifyContent: 'flex-start',
+    paddingTop: 2,
   },
 });

@@ -78,6 +78,7 @@ export function ChatItemActionSheet({
           <View style={styles.grabber} />
           <View style={styles.header}>
             <Avatar
+              uri={conversation.avatarUri}
               initial={conversation.peerName.slice(0, 1)}
               backgroundColor={conversation.avatarColor}
               size={38}

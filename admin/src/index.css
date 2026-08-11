@@ -1,0 +1,80 @@
+@import 'tailwindcss';
+
+:root {
+  --ink: #0b1f17;
+  --forest: #122820;
+  --mint: #00d68f;
+  --sand: #e8f2ec;
+  --panel: #f4faf6;
+  --danger: #e11d48;
+  --warn: #d97706;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: 'IBM Plex Sans Thai', system-ui, sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(0, 214, 143, 0.18), transparent 55%),
+    radial-gradient(900px 500px at 100% 0%, rgba(18, 40, 32, 0.12), transparent 50%),
+    linear-gradient(180deg, #eef7f2 0%, #f7faf8 40%, #eef2f0 100%);
+}
+
+.font-display {
+  font-family: Syne, 'IBM Plex Sans Thai', sans-serif;
+}
+
+.handbook-prose h3 {
+  margin-top: 0.25rem;
+}
+
+.handbook-prose p {
+  margin: 0;
+}
+
+/* ——— Print / PDF (Save as PDF from browser print dialog) ——— */
+@media print {
+  @page {
+    size: A4;
+    margin: 16mm 14mm;
+  }
+
+  html,
+  body,
+  #root {
+    min-height: 0 !important;
+    background: white !important;
+  }
+
+  body {
+    color: #000 !important;
+    background: white !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .handbook-root {
+    max-width: none !important;
+  }
+
+  .handbook-section {
+    box-shadow: none !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  a {
+    color: inherit !important;
+    text-decoration: none !important;
+  }
+}

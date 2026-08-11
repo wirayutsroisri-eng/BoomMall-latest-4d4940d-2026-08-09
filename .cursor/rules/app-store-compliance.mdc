@@ -1,0 +1,35 @@
+---
+description: Iron rule — App Store compliance checklist before shipping iOS features
+alwaysApply: true
+---
+
+# App Store compliance (กฎเหล็ก)
+
+ก่อนเพิ่มหรือ ship ฟีเจอร์บน iOS ต้องผ่าน checklist นี้ มิฉะนั้นมีความเสี่ยงถูกปฏิเสธจาก App Store
+
+## ห้าม ship
+
+1. **Demo / mock ที่ดูเหมือนของจริง** — อย่าใส่ UI ที่กดแล้วแค่ `Alert` “รอบถัดไป / จำลอง / สำเร็จ” โดยไม่มี backend จริง (Guideline 2.1 / 2.3.1)
+2. **Digital goods / Boom Coin / tip / top-up โดยไม่มี IAP** — สกุลเงินหรือไอเท็มดิจิทัลต้องผ่าน StoreKit เว้นแต่ถอดการซื้อออกจาก iOS ทั้งก้อน (3.1.1)
+3. **อ้างชำระเงินสำเร็จโดยไม่มี PSP** — card / PromptPay / bank ต้อง integrate จริง หรืออย่า claim สำเร็จ (3.1 / 2.3.1)
+4. **UGC โดยไม่มี report + block + moderation** — แชต คอมเมนต์ โพสต์ บอร์ด อัปโหลดเพลง (1.2)
+5. **บัญชีโดยไม่มีลบบัญชีในแอป** (5.1.1v)
+6. **`UIBackgroundModes: voip` โดยไม่มี VoIP จริง** — ลบจนกว่ามี CallKit/PushKit/WebRTC (2.5.4)
+7. **อัปโหลดเพลง/คอนเทนต์ลิขสิทธิ์โดยไม่มีสิทธิ์หรือ takedown** (5.2.3)
+8. **Permission usage string ที่อ้างฟีเจอร์ที่ยังไม่มี** (คอล / ไลฟ์ ฯลฯ) (5.1.1)
+9. **Third-party login โดยไม่มี Sign in with Apple** (4.8)
+10. **Tracking / ads โดยไม่มี ATT** (5.1.2)
+
+## ต้องมีก่อนรีวิว
+
+- Privacy Policy + Terms ลิงก์ในแอปและ App Store Connect
+- App Privacy Nutrition Labels ตรงกับ binary (หลัง `expo prebuild` ตรวจ PrivacyInfo)
+- Encryption export compliance ใน Connect / `ITSAppUsesNonExemptEncryption` ตามจริง
+- Age rating ตาม UGC (อย่าเลือก Kids ถ้ามีแชต/โพสต์เปิด)
+- Review Notes อธิบาย demo account, closed-loop coin (ถ้ามี), background audio
+
+## เมื่อแก้โค้ดที่เกี่ยวข้อง
+
+- ตัด entry point “coming soon” ออกจาก production UI แทนการปล่อยปุ่มแล้ว Alert
+- เปลี่ยน `app.json` permission / background modes ให้สะท้อนเฉพาะฟีเจอร์ที่ ship จริงใน build นั้น
+- อ้างอิง audit ล่าสุดใน canvas `app-store-risk-audit.canvas.tsx` เมื่อรีวิวความเสี่ยง
