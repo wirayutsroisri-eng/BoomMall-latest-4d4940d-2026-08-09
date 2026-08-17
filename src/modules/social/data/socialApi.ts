@@ -41,6 +41,25 @@ export function apiUpsertProfile(input: {
   return req('POST', '/api/v1/auth/profiles', input);
 }
 
+export async function apiGetProfile(userId: string): Promise<{
+  displayName?: string | null;
+  handle?: string | null;
+  bio?: string | null;
+  avatarUrl?: string | null;
+  coverUrl?: string | null;
+} | null> {
+  const json = await req('GET', `/api/v1/auth/profiles/${encodeURIComponent(userId)}`);
+  const data = json && typeof json === 'object' ? (json as { data?: Record<string, unknown> }).data : null;
+  if (!data || typeof data !== 'object') return null;
+  return {
+    displayName: typeof data.displayName === 'string' ? data.displayName : null,
+    handle: typeof data.handle === 'string' ? data.handle : null,
+    bio: typeof data.bio === 'string' ? data.bio : null,
+    avatarUrl: typeof data.avatarUrl === 'string' ? data.avatarUrl : null,
+    coverUrl: typeof data.coverUrl === 'string' ? data.coverUrl : null,
+  };
+}
+
 export async function apiDeleteAccount() {
   const base = getApiBase();
   if (!base) throw new Error('ยังไม่ได้ตั้งค่าเซิร์ฟเวอร์ — ไม่สามารถลบบัญชีบนเซิร์ฟเวอร์ได้');

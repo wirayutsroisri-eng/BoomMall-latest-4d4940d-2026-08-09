@@ -3,7 +3,6 @@ import {
   Image,
   Text,
   View,
-  type ImageStyle,
   type StyleProp,
   type TextStyle,
   type ViewStyle,
@@ -20,7 +19,7 @@ type Props = {
   backgroundColor?: string;
   borderColor?: string;
   borderWidth?: number;
-  style?: StyleProp<ViewStyle | ImageStyle>;
+  style?: StyleProp<ViewStyle>;
   textStyle?: StyleProp<TextStyle>;
 };
 
@@ -55,11 +54,9 @@ export function Avatar({
 
   if (uri) {
     return (
-      <Image
-        source={{ uri }}
-        style={[shared, style as StyleProp<ImageStyle>]}
-        resizeMode="cover"
-      />
+      <View style={[shared, { overflow: 'hidden' }, style as StyleProp<ViewStyle>]}>
+        <Image source={{ uri }} style={{ width: size, height: size }} resizeMode="cover" />
+      </View>
     );
   }
 

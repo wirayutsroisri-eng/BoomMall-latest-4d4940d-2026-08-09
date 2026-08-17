@@ -13,7 +13,7 @@ export {
   EULA_MARKETPLACE,
   EULA_PRIVACY,
 } from './ProfileService';
-export { exchangeSocialLogin, registerEmail, loginEmail } from './AuthService';
+export { exchangeSocialLogin, registerEmail, loginEmail, requestPhoneOtp, verifyPhoneOtp } from './AuthService';
 export { signAppJwt, verifyAppJwt, authDomainJwtStatus } from './JwtService';
 export { verifyAppleIdentityToken } from './AppleAuth';
 export {

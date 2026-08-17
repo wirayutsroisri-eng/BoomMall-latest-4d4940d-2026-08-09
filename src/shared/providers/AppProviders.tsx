@@ -10,6 +10,7 @@ import { useAuthStore } from '@/modules/auth/state/auth-store';
 import { seedActivityFromApp } from '@/modules/account/state/seedActivity';
 import { useFollowStore } from '@/modules/social/state/follow-store';
 import { useChatStore } from '@/modules/chat/state/chat-store';
+import { useFeedStore } from '@/modules/feed/state/feed-store';
 import { subscribeChatReminderTaps } from '@/modules/chat/data/chatReminder';
 import { startChatRealtime, isChatSocketConnected } from '@/modules/chat/data/chatSocket';
 import { syncModerationContentBlocks } from '@/modules/safety/syncModerationContentBlocks';
@@ -20,6 +21,13 @@ import {
   pushCommerceProduct,
 } from '@/modules/commerce/data/commerceSync';
 import { AppPromptHost } from '@/shared/components/AppPrompt';
+import { PhotoLibraryHost } from '@/shared/media/PhotoLibraryHost';
+import { CreateStudioHost } from '@/modules/create/ui/CreateStudioHost';
+import { AvatarPhotoHost } from '@/modules/profile/ui/AvatarPhotoHost';
+import {
+  hydrateOwnProfileFromServer,
+  syncLocalProfilePhotosIfNeeded,
+} from '@/modules/profile/data/syncOwnProfile';
 
 type Props = {
   children: React.ReactNode;
@@ -44,6 +52,10 @@ export function AppProviders({ children }: Props) {
     void hydrateAuth().then(() => {
       void pullCommerceCatalog();
       void useFollowStore.getState().hydrateFromServer();
+      void useFeedStore.getState().hydrateFromServer();
+      void hydrateOwnProfileFromServer().then(() => {
+        void syncLocalProfilePhotosIfNeeded();
+      });
       void useChatStore.getState().hydrateInbox().finally(() => {
         seedActivityFromApp();
       });
@@ -88,6 +100,9 @@ export function AppProviders({ children }: Props) {
       <BottomSheetModalProvider>
         {children}
         <AppPromptHost />
+        <PhotoLibraryHost />
+        <CreateStudioHost />
+        <AvatarPhotoHost />
       </BottomSheetModalProvider>
     </GestureHandlerRootView>
   );

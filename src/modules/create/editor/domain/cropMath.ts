@@ -5,7 +5,7 @@ export type CropRect = {
   height: number;
 };
 
-export type AspectPreset = 'original' | 'free' | '3:4' | '9:16' | '1:1' | '4:3';
+export type AspectPreset = 'original' | 'free' | '3:4' | '9:16' | '1:1' | '4:3' | '16:9';
 
 export function aspectValue(preset: AspectPreset, imageRatio: number): number | null {
   switch (preset) {
@@ -21,6 +21,8 @@ export function aspectValue(preset: AspectPreset, imageRatio: number): number | 
       return 1;
     case '4:3':
       return 4 / 3;
+    case '16:9':
+      return 16 / 9;
     default:
       return null;
   }

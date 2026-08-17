@@ -74,7 +74,7 @@ export function MainTabBar({ state, descriptors, navigation }: BottomTabBarProps
               style={styles.item}
               hitSlop={8}
             >
-              <Ionicons name="camera-outline" size={38} color="#fff" />
+              <Ionicons name="camera-outline" size={42} color="#fff" />
               <Text style={[styles.label, styles.createLabelSpacer]}>.</Text>
             </Pressable>
           );
@@ -108,7 +108,7 @@ export function MainTabBar({ state, descriptors, navigation }: BottomTabBarProps
               <Avatar
                 uri={profile.avatarUri}
                 initial={profile.displayName.slice(0, 1)}
-                size={26}
+                size={28}
                 radius={8}
                 borderWidth={focused ? 1.5 : 0}
                 borderColor={colors.text.inverse}
@@ -117,7 +117,7 @@ export function MainTabBar({ state, descriptors, navigation }: BottomTabBarProps
               <View>
                 <Ionicons
                   name={iconName}
-                  size={26}
+                  size={28}
                   color={focused ? colors.text.inverse : 'rgba(255,255,255,0.5)'}
                 />
                 {route.name === 'chat' && chatUnread > 0 ? (
@@ -158,9 +158,10 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   label: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.5)',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.55)',
   },
   createLabelSpacer: {
     opacity: 0,
@@ -183,7 +184,7 @@ const styles = StyleSheet.create({
   },
   unreadBadgeText: {
     color: '#fff',
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: '800',
   },
 });

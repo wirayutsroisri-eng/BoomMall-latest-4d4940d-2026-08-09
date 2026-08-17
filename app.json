@@ -7,6 +7,9 @@
     "icon": "./assets/icon.png",
     "scheme": "boommall",
     "userInterfaceStyle": "automatic",
+    "locales": {
+      "th": "./locales/th.json"
+    },
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
@@ -16,6 +19,9 @@
       "infoPlist": {
         "CFBundleDisplayName": "BoomMall",
         "CFBundleName": "BoomMall",
+        "CFBundleDevelopmentRegion": "th",
+        "CFBundleAllowMixedLocalizations": true,
+        "CFBundleLocalizations": ["th", "en"],
         "NSFaceIDUsageDescription": "BoomMall ใช้ Face ID เพื่อปลดล็อก Boom Vault และยืนยันตัวตนอย่างปลอดภัย",
         "NSCameraUsageDescription": "BoomMall ใช้กล้องเพื่อถ่ายรูปสินค้า สแกนบาร์โค้ดคลัง โพสต์คอนเทนต์ และแนบรูปในแชต",
         "NSMicrophoneUsageDescription": "BoomMall ใช้ไมโครโฟนเพื่อบันทึกวอยซ์โน้ตในแชตและคลิปเสียงประกอบคอนเทนต์",
@@ -33,7 +39,10 @@
           "line",
           "fb-messenger",
           "whatsapp",
-          "fbapi"
+          "fbapi",
+          "fb-messenger-share-api",
+          "fbauth2",
+          "fbshareextension"
         ]
       },
       "privacyManifests": {
@@ -121,6 +130,15 @@
         }
       ],
       "expo-sqlite",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "BoomMall ใช้กล้องเพื่อถ่ายรูปสินค้า โพสต์คอนเทนต์ และแนบรูปในแชต",
+          "microphonePermission": "BoomMall ใช้ไมโครโฟนเพื่อบันทึกวอยซ์โน้ตในแชตและคลิปเสียงประกอบคอนเทนต์",
+          "recordAudioAndroid": true,
+          "barcodeScannerEnabled": false
+        }
+      ],
       [
         "expo-image-picker",
         {

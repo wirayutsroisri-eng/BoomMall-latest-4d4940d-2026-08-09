@@ -93,9 +93,9 @@ export const TERMS_DOC: LegalDoc = {
       headingEn: '2. Accounts',
       headingTh: '2. บัญชี',
       bodyEn:
-        'You may sign in with Sign in with Apple, Google (when enabled), or email and password. You are responsible for activity on your account. You may delete the account in Settings at any time.',
+        'You may sign in with Sign in with Apple, Google, Facebook, a Thai mobile number (SMS OTP), or email and password. You are responsible for activity on your account. You may delete the account in Settings at any time.',
       bodyTh:
-        'คุณเข้าสู่ระบบด้วย Sign in with Apple, Google (เมื่อเปิดใช้) หรืออีเมลและรหัสผ่าน คุณรับผิดชอบกิจกรรมในบัญชี และลบบัญชีได้ตลอดเวลาในตั้งค่า',
+        'คุณเข้าสู่ระบบด้วย Sign in with Apple, Google, Facebook, เบอร์มือถือ (รหัส SMS) หรืออีเมลและรหัสผ่าน คุณรับผิดชอบกิจกรรมในบัญชี และลบบัญชีได้ตลอดเวลาในตั้งค่า',
     },
     {
       headingEn: '3. User-generated content',

@@ -75,7 +75,7 @@ export function RightActionBar({
       {onTip ? (
         <Pressable onPress={handleTip} style={styles.action} hitSlop={4} accessibilityLabel="เหรียญ">
           <Animated.View style={tipStyle}>
-            <CoinIcon size={28} empty active={Boolean(tipped)} />
+            <CoinIcon size={32} empty active={Boolean(tipped)} />
           </Animated.View>
           <Text style={[styles.label, tipped && styles.tipLabelActive]}>{formatCount(tips)}</Text>
         </Pressable>
@@ -86,7 +86,7 @@ export function RightActionBar({
           <Animated.View style={likeStyle}>
             <Ionicons
               name={liked ? 'heart' : 'heart-outline'}
-              size={28}
+              size={32}
               color={liked ? colors.brand.pink : colors.text.inverse}
               style={styles.iconShadow}
             />
@@ -109,9 +109,11 @@ export function RightActionBar({
         />
       ) : null}
 
-      <View style={styles.discSlot}>
-        <SpinningDisc spinning={musicActive !== false} onPress={onMusic} />
-      </View>
+      {onMusic ? (
+        <View style={styles.discSlot}>
+          <SpinningDisc spinning={Boolean(musicActive)} onPress={onMusic} />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -132,16 +134,16 @@ function Action({
   return (
     <Pressable onPress={onPress} style={styles.action} hitSlop={4}>
       <Animated.View style={animatedStyle}>
-        <Ionicons name={icon} size={28} color={color} style={styles.iconShadow} />
+        <Ionicons name={icon} size={32} color={color} style={styles.iconShadow} />
       </Animated.View>
       <Text style={styles.label}>{label}</Text>
     </Pressable>
   );
 }
 
-const ACTION_GAP = 12;
+const ACTION_GAP = 14;
 const ICON_LABEL_GAP = 4;
-const ACTION_SLOT = 52;
+const ACTION_SLOT = 58;
 
 const styles = StyleSheet.create({
   wrap: {
@@ -166,9 +168,9 @@ const styles = StyleSheet.create({
   },
   label: {
     color: colors.text.inverse,
-    fontSize: 11,
-    fontWeight: '700',
-    lineHeight: 14,
+    fontSize: 13,
+    fontWeight: '800',
+    lineHeight: 16,
     textShadowColor: 'rgba(0,0,0,0.5)',
     textShadowRadius: 4,
   },

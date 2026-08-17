@@ -57,13 +57,6 @@ function formatCompact(n: number) {
   return String(n);
 }
 
-/** Deterministic pseudo social-stats from the handle, so numbers stay stable across renders. */
-function hashString(s: string) {
-  let h = 0;
-  for (let i = 0; i < s.length; i += 1) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return h;
-}
-
 const TABS: Array<{ key: VisitorTab; icon: keyof typeof Ionicons.glyphMap }> = [
   { key: 'store', icon: 'grid-outline' },
   { key: 'orders', icon: 'bag-handle-outline' },
@@ -184,31 +177,21 @@ function CreatorProfileBody({
   const shopName = contextItem?.product.shopName ?? first?.product.shopName ?? displayName;
   const tier = contextItem?.product.tier ?? first?.product.tier ?? 'B2C';
   const categoryTags = contextItem?.product.tags ?? first?.product.tags ?? [];
-  const categoryText = categoryTags.length > 0 ? categoryTags.join(' · ') : `${tier} · ${shopName}`;
   const accent = contextItem?.gradient?.[0] ?? first?.gradient?.[0] ?? colors.brand.primary;
 
-  /** กริดคลิป/โชว์รูม — โพสต์จริง + คอนเทนต์จำลองเติมให้ครบแบบโปรไฟล์ TikTok */
+  /** กริดคลิป/โชว์รูม — โพสต์จริงของ handle นี้เท่านั้น */
   const creatorItems = useMemo(
     () => buildCreatorPortfolio(handle, displayName, shopName, realCreatorItems),
     [handle, displayName, shopName, realCreatorItems],
   );
 
-  const seed = useMemo(() => hashString(handle), [handle]);
-  const followingCount = 20 + (seed % 300);
-  const baseFollowers = 800 + (seed % 68000);
-  /** TikTok: เลขผู้ติดตามขยับทันทีเมื่อกด Follow */
-  const followersCount = baseFollowers + (following ? 1 : 0);
+  const followingCount = 0;
+  const followersCount = following ? 1 : 0;
   const productsCount = useMemo(
-    () =>
-      Math.max(
-        12,
-        creatorItems.filter((i) => (i.product?.basePrice ?? 0) > 0).length || 12,
-      ),
+    () => creatorItems.filter((i) => (i.product?.basePrice ?? 0) > 0).length,
     [creatorItems],
   );
-  const bioText =
-    contextItem?.caption?.trim() ||
-    `ร้าน/ช่างจาก ${shopName} พร้อมให้บริการลูกค้าทั่วจันทบุรีผ่าน BoomMall`;
+  const bioText = contextItem?.caption?.trim() || '';
 
   const messageCreator = () => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -315,16 +298,12 @@ function CreatorProfileBody({
 
       <View style={styles.statsRow}>
         <View style={styles.statCell}>
-          <Text style={styles.statValue}>{formatCompact(followingCount)}</Text>
-          <Text style={styles.statLabel}>กำลังติดตาม</Text>
-        </View>
-        <View style={styles.statCell}>
           <Text style={styles.statValue}>{formatCompact(followersCount)}</Text>
           <Text style={styles.statLabel}>ผู้ติดตาม</Text>
         </View>
         <View style={styles.statCell}>
-          <Text style={styles.statValue}>{formatCompact(followingCount + followersCount)}</Text>
-          <Text style={styles.statLabel}>ชุมชน</Text>
+          <Text style={styles.statValue}>{formatCompact(followingCount)}</Text>
+          <Text style={styles.statLabel}>กำลังติดตาม</Text>
         </View>
         <View style={styles.statCell}>
           <Text style={styles.statValue}>{formatCompact(productsCount)}</Text>
@@ -376,10 +355,12 @@ function CreatorProfileBody({
         </Pressable>
       </View>
 
-      <Text style={styles.categoryText} numberOfLines={1}>
-        {categoryText} · {tier}
-      </Text>
-      <Text style={styles.bio}>{bioText}</Text>
+      {categoryTags.length > 0 ? (
+        <Text style={styles.categoryText} numberOfLines={1}>
+          {categoryTags.join(' · ')}
+        </Text>
+      ) : null}
+      {bioText ? <Text style={styles.bio}>{bioText}</Text> : null}
 
       <View style={styles.tabBar}>
         {TABS.map((t) => {
@@ -401,7 +382,7 @@ function CreatorProfileBody({
         <ContentGrid
           mode="content"
           items={creatorItems}
-          pinnedCount={3}
+          pinnedCount={0}
           emptyText="ยังไม่มีคลิปจากผู้สร้างรายนี้"
           onPressItem={(item) => {
             void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

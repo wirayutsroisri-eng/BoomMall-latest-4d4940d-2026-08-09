@@ -15,12 +15,12 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
 import { DEFAULT_OVERLAY_TRANSFORM } from '@/modules/create/domain/overlay';
+import { persistCreateMedia } from '@/modules/create/data/persistCreateMedia';
+import { pickDevicePhotos } from '@/shared/media/photoLibraryStore';
 import { useCreateDraftStore } from '@/modules/create/state/create-draft-store';
+import { sanitizeMusicTitle } from '@/modules/feed/domain/feedMusic';
 import { LockedOverlayText } from '@/modules/create/ui/LockedOverlayText';
-import {
-  MediaGalleryPicker,
-  type PickedGalleryItem,
-} from '@/shared/media/MediaGalleryPicker';
+import { ProductVideoThumb } from '@/modules/store/ui/sell/ProductVideoThumb';
 import { colors } from '@/shared/theme/colors';
 import { useAuthStore } from '@/modules/auth/state/auth-store';
 import { useModerationStore } from '@/modules/safety/state/moderation-store';
@@ -87,7 +87,6 @@ export function ContentPublishScreen() {
   const [location, setLocation] = useState<string | null>(null);
   const [privacy] = useState('ทุกคนสามารถดูโพสต์นี้ได้');
   const [linkLabel, setLinkLabel] = useState<string | null>(null);
-  const [galleryOpen, setGalleryOpen] = useState(false);
 
   const coverUri = mediaUris[0] ?? null;
   const mediaType =
@@ -95,17 +94,36 @@ export function ContentPublishScreen() {
   const remainingSlots = Math.max(0, 6 - mediaUris.length);
 
   const closeAll = () => {
+    useFeedStore.getState().setTab('foryou');
     if (router.canDismiss()) router.dismissAll();
-    else router.back();
+    router.navigate('/(tabs)');
   };
 
-  const onGallerySend = (items: PickedGalleryItem[]) => {
-    setGalleryOpen(false);
-    if (!items.length) return;
-    setMediaUris((prev) =>
-      [...prev, ...items.map((a) => a.uri)].slice(0, 6),
-    );
-    void Haptics.selectionAsync();
+  const addFromLibrary = async () => {
+    if (remainingSlots <= 0) return;
+    try {
+      const items = await pickDevicePhotos({
+        selectionLimit: remainingSlots,
+        videos: mediaType === 'video',
+        videosOnly: mediaType === 'video',
+        title: 'เพิ่มสื่อ',
+        sendLabel: 'เพิ่ม',
+      });
+      if (!items.length) return;
+      const next: string[] = [];
+      for (const item of items) {
+        next.push(
+          await persistCreateMedia(
+            item.uri,
+            item.mediaType === 'video' ? 'video' : 'image',
+          ),
+        );
+      }
+      setMediaUris((prev) => [...prev, ...next].slice(0, 6));
+      void Haptics.selectionAsync();
+    } catch (e) {
+      Alert.alert('เปิดแกลเลอรีไม่ได้', e instanceof Error ? e.message : 'ลองอีกครั้ง');
+    }
   };
 
   const publish = (asDraft: boolean) => {
@@ -124,12 +142,13 @@ export function ContentPublishScreen() {
       return;
     }
 
+    const musicTitle = sanitizeMusicTitle(draft.music);
     const captionParts = [
       title.trim(),
       description.trim(),
       location ? `📍 ${location}` : null,
       linkLabel ? `🔗 ${linkLabel}` : null,
-      draft.music ? `🎵 ${draft.music}` : null,
+      musicTitle ? `🎵 ${musicTitle}` : null,
     ].filter(Boolean);
     const caption = captionParts.join('\n') || 'โพสต์ใหม่จาก BoomMall';
 
@@ -140,7 +159,7 @@ export function ContentPublishScreen() {
       imageUri: mediaType === 'image' ? coverUri : undefined,
       imageUris: mediaType === 'image' ? mediaUris : undefined,
       videoUri: mediaType === 'video' ? coverUri : undefined,
-      musicTitle: draft.music || undefined,
+      musicTitle: musicTitle || undefined,
       intent: 'content',
       // ภาพ bake แล้วไม่ส่ง overlay — วิดีโอ/legacy ยังใช้ live overlay
       ...(showLiveOverlay
@@ -165,8 +184,6 @@ export function ContentPublishScreen() {
           'รอตรวจสอบ',
           'โพสต์มีคำที่เสี่ยง — เข้าคิว Pending Review ก่อนขึ้นฟีดหลัก',
         );
-      } else {
-        Alert.alert('โพสต์สำเร็จ', 'คอนเทนต์ขึ้นบนฟีดแล้ว (ไม่ปนเว็บบอร์ด)');
       }
     })();
 
@@ -196,7 +213,17 @@ export function ContentPublishScreen() {
         >
           {mediaUris.map((uri, index) => (
             <View key={`${uri}-${index}`} style={styles.coverTile}>
-              <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+              {mediaType === 'video' ? (
+                <ProductVideoThumb
+                  uri={uri}
+                  autoPlay={index === 0}
+                  muted
+                  interactive={false}
+                  style={StyleSheet.absoluteFill}
+                />
+              ) : (
+                <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+              )}
               {index === 0 && showLiveOverlay ? (
                 <LockedOverlayText
                   text={overlayText}
@@ -213,7 +240,7 @@ export function ContentPublishScreen() {
             </View>
           ))}
           {mediaUris.length < 6 ? (
-            <Pressable style={styles.addTile} onPress={() => setGalleryOpen(true)}>
+            <Pressable style={styles.addTile} onPress={() => void addFromLibrary()}>
               <Ionicons name="add" size={32} color={colors.text.primary} />
             </Pressable>
           ) : null}
@@ -342,17 +369,6 @@ export function ContentPublishScreen() {
           <Text style={styles.postText}>โพสต์</Text>
         </Pressable>
       </View>
-
-      <MediaGalleryPicker
-        visible={galleryOpen}
-        onClose={() => setGalleryOpen(false)}
-        onSend={onGallerySend}
-        initialMode={mediaType === 'video' ? 'video' : 'photo'}
-        allowModeSwitch
-        selectionLimit={Math.max(1, remainingSlots)}
-        sendLabel="ส่ง"
-        title="ล่าสุด"
-      />
     </View>
   );
 }

@@ -50,8 +50,19 @@ export async function requireUserOrDevHeader(
   try {
     const token = bearerToken(req);
     if (token) {
-      req.user = await verifyAppJwt(token);
-      return next();
+      try {
+        req.user = await verifyAppJwt(token);
+        return next();
+      } catch (err) {
+        const allowDev =
+          process.env.ALLOW_DEV_AUTH === '1' || process.env.NODE_ENV !== 'production';
+        const legacy = req.header('x-user-id')?.trim();
+        if (allowDev && legacy) {
+          req.user = { sub: legacy, id: legacy, role: 'BUYER' };
+          return next();
+        }
+        throw err;
+      }
     }
     const allowDev =
       process.env.ALLOW_DEV_AUTH === '1' || process.env.NODE_ENV !== 'production';

@@ -34,9 +34,13 @@ export type VipProfile = {
   displayName: string;
   handle: string;
   bio: string;
+  websiteUrl?: string;
   avatarUri?: string | null;
   /** Facebook Page–style cover banner shown behind the overlapping avatar. */
   coverUri?: string | null;
+  /** ISO time of last display-name change — TikTok-style 7-day cooldown */
+  displayNameChangedAt?: string | null;
+  handleChangedAt?: string | null;
   loyaltyTier: 'Bronze' | 'Silver' | 'Gold' | 'Boom VIP';
   points: number;
   technicianBadge: string;

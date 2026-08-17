@@ -37,16 +37,18 @@ export function FeedHeader({ tab, onChangeTab, onPressLive, onPressSearch, onPre
         pointerEvents="none"
       />
       <View style={styles.row}>
-        <View style={[styles.sideAbs, styles.sideLeft]} pointerEvents="box-none">
+        <View style={styles.sideLeft}>
           {onPressLive ? (
             <Pressable onPress={onPressLive} style={styles.iconBtn} hitSlop={8} accessibilityLabel="ไลฟ์">
               <Ionicons
                 name="radio-outline"
-                size={20}
+                size={22}
                 color={onBoard ? colors.text.primary : colors.text.inverse}
               />
             </Pressable>
-          ) : null}
+          ) : (
+            <View style={styles.iconBtn} />
+          )}
         </View>
 
         <View style={styles.tabs}>
@@ -55,6 +57,7 @@ export function FeedHeader({ tab, onChangeTab, onPressLive, onPressSearch, onPre
             return (
               <Pressable key={t.key} onPress={() => onChangeTab(t.key)} style={styles.tab} hitSlop={4}>
                 <Text
+                  numberOfLines={1}
                   style={[
                     styles.tabText,
                     onBoard && styles.tabTextOnBoard,
@@ -71,11 +74,11 @@ export function FeedHeader({ tab, onChangeTab, onPressLive, onPressSearch, onPre
           })}
         </View>
 
-        <View style={[styles.sideAbs, styles.sideRight]}>
+        <View style={styles.sideRight}>
           <Pressable onPress={onPressSearch} style={styles.iconBtn} hitSlop={8} accessibilityLabel="ค้นหา">
             <Ionicons
               name="search"
-              size={20}
+              size={22}
               color={onBoard ? colors.text.primary : colors.text.inverse}
             />
           </Pressable>
@@ -83,11 +86,13 @@ export function FeedHeader({ tab, onChangeTab, onPressLive, onPressSearch, onPre
             <Pressable onPress={onPressMore} style={styles.iconBtn} hitSlop={8} accessibilityLabel="ตัวเลือกเพิ่มเติม">
               <Ionicons
                 name="ellipsis-horizontal"
-                size={20}
+                size={22}
                 color={onBoard ? colors.text.primary : colors.text.inverse}
               />
             </Pressable>
-          ) : null}
+          ) : (
+            <View style={styles.iconBtn} />
+          )}
         </View>
       </View>
     </View>
@@ -105,35 +110,41 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     paddingVertical: 6,
+    paddingHorizontal: 4,
   },
-  sideAbs: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
+  sideLeft: {
+    width: 40,
     flexDirection: 'row',
     alignItems: 'center',
-    zIndex: 2,
   },
-  sideLeft: { left: 2 },
-  sideRight: { right: 2 },
-  tabs: {
+  sideRight: {
+    width: 76,
     flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  tabs: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 8,
+    minWidth: 0,
   },
   tab: {
+    flexShrink: 1,
     alignItems: 'center',
-    paddingHorizontal: 1,
-    paddingBottom: 7,
+    paddingHorizontal: 2,
+    paddingBottom: 8,
   },
   tabText: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 12,
-    fontWeight: '700',
-    textShadowColor: 'rgba(0,0,0,0.4)',
-    textShadowRadius: 3,
+    color: 'rgba(255,255,255,0.88)',
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: -0.3,
+    textShadowColor: 'rgba(0,0,0,0.45)',
+    textShadowRadius: 4,
   },
   tabTextOnBoard: {
     color: 'rgba(10,22,17,0.55)',
@@ -141,30 +152,28 @@ const styles = StyleSheet.create({
   },
   tabTextActive: {
     color: colors.text.inverse,
-    fontWeight: '800',
-    fontSize: 13,
+    fontWeight: '900',
+    fontSize: 15,
   },
   tabTextActiveOnBoard: {
     color: colors.text.primary,
     fontWeight: '900',
-    fontSize: 13,
+    fontSize: 15,
   },
   underline: {
     position: 'absolute',
     bottom: 0,
-    left: '50%',
-    height: 2,
-    width: 16,
-    marginLeft: -8,
+    height: 3,
+    width: 18,
     backgroundColor: colors.text.inverse,
-    borderRadius: 1,
+    borderRadius: 1.5,
   },
   underlineOnBoard: {
     backgroundColor: colors.brand.primaryDark,
   },
   iconBtn: {
-    width: 30,
-    height: 34,
+    width: 38,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
   },

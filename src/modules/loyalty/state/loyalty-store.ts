@@ -7,7 +7,19 @@ type LoyaltyState = {
   profile: VipProfile;
   warranties: DigitalWarranty[];
   updateProfile: (
-    patch: Partial<Pick<VipProfile, 'displayName' | 'handle' | 'bio' | 'avatarUri' | 'coverUri'>>,
+    patch: Partial<
+      Pick<
+        VipProfile,
+        | 'displayName'
+        | 'handle'
+        | 'bio'
+        | 'websiteUrl'
+        | 'avatarUri'
+        | 'coverUri'
+        | 'displayNameChangedAt'
+        | 'handleChangedAt'
+      >
+    >,
   ) => void;
   /** Apple 5.1.1(v) — wipe local account profile */
   deleteAccount: () => void;
@@ -17,6 +29,7 @@ const DEFAULT_PROFILE: VipProfile = {
   displayName: 'ผู้ใช้ BoomMall',
   handle: '@boommall_user',
   bio: '',
+  websiteUrl: '',
   avatarUri: null,
   coverUri: null,
   loyaltyTier: 'Bronze',
@@ -28,47 +41,25 @@ const DEFAULT_PROFILE: VipProfile = {
   likesCount: 0,
 };
 
+function asFreshProfile(prev?: Partial<VipProfile> | null): VipProfile {
+  return {
+    ...DEFAULT_PROFILE,
+    displayName: prev?.displayName?.trim() || DEFAULT_PROFILE.displayName,
+    handle: prev?.handle?.trim() || DEFAULT_PROFILE.handle,
+    bio: prev?.bio ?? '',
+    websiteUrl: prev?.websiteUrl ?? '',
+    avatarUri: prev?.avatarUri ?? null,
+    coverUri: prev?.coverUri ?? null,
+    displayNameChangedAt: prev?.displayNameChangedAt ?? null,
+    handleChangedAt: prev?.handleChangedAt ?? null,
+  };
+}
+
 export const useLoyaltyStore = create<LoyaltyState>()(
   persist(
     (set) => ({
-      profile: {
-        displayName: 'Boom Rider',
-        handle: '@boom_chanthaburi',
-        bio: 'รักการซ่อม รักการแต่ง 🔧⚡ ส่งตรงจากจันทบุรี ทักแชตได้ตลอดครับ',
-        avatarUri: null,
-        coverUri: null,
-        loyaltyTier: 'Boom VIP',
-        points: 12840,
-        technicianBadge: 'ช่างทองคำ · Boom EV Certified',
-        shopVerified: true,
-        followingCount: 128,
-        followersCount: 45600,
-        likesCount: 892000,
-      },
-      warranties: [
-        {
-          id: 'w-1',
-          productName: 'LiFePO4 60V 32Ah Smart BMS Pack',
-          serialNo: 'BEV-CTI-60-32-00421',
-          shopName: 'Boom EV Shop Chanthaburi',
-          shopVerified: true,
-          technicianRank: 'ช่างเอิร์ธ · ยศช่างทองคำ',
-          issuedAt: '2026-05-12',
-          expiresAt: '2029-05-12',
-          coverage: 'เซลล์ + BMS + ติดตั้ง (ไม่รวมอุบัติเหตุ)',
-        },
-        {
-          id: 'w-2',
-          productName: 'CNC Front Brake Master',
-          serialNo: 'BEV-CNC-BRK-1188',
-          shopName: 'Boom EV Shop Chanthaburi',
-          shopVerified: true,
-          technicianRank: 'ช่างมิ้นท์ · ยศช่างเงิน',
-          issuedAt: '2026-07-01',
-          expiresAt: '2027-07-01',
-          coverage: 'รอยรั่ว/ซีล · เปลี่ยนอะไหล่ที่ร้าน',
-        },
-      ],
+      profile: { ...DEFAULT_PROFILE },
+      warranties: [],
       updateProfile: (patch) =>
         set((state) => ({ profile: { ...state.profile, ...patch } })),
       deleteAccount: () =>
@@ -79,8 +70,13 @@ export const useLoyaltyStore = create<LoyaltyState>()(
     }),
     {
       name: 'boommall-profile-storage',
+      version: 3,
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({ profile: state.profile }),
+      migrate: (persisted) => {
+        const prev = persisted as { profile?: Partial<VipProfile> } | undefined;
+        return { profile: asFreshProfile(prev?.profile) };
+      },
     },
   ),
 );

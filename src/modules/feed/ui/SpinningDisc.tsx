@@ -16,7 +16,7 @@ type Props = {
 };
 
 /** TikTok-style disc — tap to open BoomMall Listen Mode (long-form music). */
-export function SpinningDisc({ spinning = true, onPress }: Props) {
+export function SpinningDisc({ spinning = false, onPress }: Props) {
   const rotation = useSharedValue(0);
 
   useEffect(() => {

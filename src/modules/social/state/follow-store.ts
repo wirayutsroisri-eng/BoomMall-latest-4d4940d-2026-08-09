@@ -25,7 +25,6 @@ type FollowState = {
 
 /**
  * Shared follow graph — ฟีด + โปรไฟล์ใช้สถานะเดียวกัน
- * seed บัญชีเพื่อนร้านไว้ให้แท็บกำลังติดตามมีคอนเทนต์ทันที
  */
 export const useFollowStore = create<FollowState>((set, get) => ({
   following: seedFollowing(),

@@ -101,10 +101,7 @@ export function BuyerPaymentMethodsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 40 }}>
-        <Text style={styles.lead}>
-          สมัครช่องทางไว้ที่นี่เพื่อจ่ายเข้าบัญชี BoomMall เงินไม่โอนตรงร้าน
-          แพลตฟอร์มหัก GP แล้วค่อยเข้าสมุดบัญชีผู้ขาย
-        </Text>
+        <Text style={styles.lead}>เพิ่มช่องทางชำระเงินเพื่อความสะดวกในการสั่งซื้อสินค้า</Text>
 
         {KINDS.map((kind) => {
           const meta = BUYER_PAYMENT_META[kind];

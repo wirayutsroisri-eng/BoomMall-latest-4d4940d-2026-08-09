@@ -22,7 +22,6 @@ import { useModerationStore } from '@/modules/safety/state/moderation-store';
 import { exchangeSocialLogin, useAuthStore } from '@/modules/auth/state/auth-store';
 import { useActivityStore } from '@/modules/account/state/activity-store';
 import { useMusicLibraryStore } from '@/modules/music/state/music-library-store';
-import { promptText } from '@/shared/components/AppPrompt';
 import { confirmDeleteAccount } from '@/modules/account/services/deleteAccountFlow';
 import { openLegalDocument } from '@/shared/legal/openLegal';
 import { colors } from '@/shared/theme/colors';
@@ -32,7 +31,6 @@ export function AccountSettingsScreen() {
   const insets = useSafeAreaInsets();
   const profile = useLoyaltyStore((s) => s.profile);
   const profileId = useBoomWalletStore((s) => s.profileId);
-  const enablePin = useBoomWalletStore((s) => s.enablePin);
   const setSession = useAuthStore((s) => s.setSession);
   const user = useAuthStore((s) => s.user);
   const reports = useModerationStore((s) => s.reports);
@@ -60,30 +58,11 @@ export function AccountSettingsScreen() {
     if (user?.provider === 'apple') return 'Sign in with Apple';
     if (user?.provider === 'google') return 'Google';
     if (user?.provider === 'facebook') return 'Facebook';
+    if (user?.provider === 'phone') return 'เบอร์โทรศัพท์';
     if (user?.provider === 'email') return 'อีเมล';
     if (user) return user.provider;
     return 'ยังไม่ได้เข้าสู่ระบบ';
   }, [appleUser, user]);
-
-  const setPin = () => {
-    void promptText({
-      title: 'ตั้ง Wallet PIN',
-      message: 'PIN 6 หลัก — เก็บแบบ hash เท่านั้น',
-      keyboardType: 'number-pad',
-      secureTextEntry: true,
-      maxLength: 6,
-      okLabel: 'บันทึก',
-    }).then((pin) => {
-      if (pin == null) return;
-      if (!/^\d{6}$/.test(pin)) {
-        Alert.alert('PIN ไม่ถูกต้อง', 'ต้องเป็นตัวเลข 6 หลัก');
-        return;
-      }
-      enablePin(pin);
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('ตั้ง PIN แล้ว', 'ใช้ยืนยันก่อนโอน/จ่าย Coin');
-    });
-  };
 
   const onAppleSignIn = async () => {
     try {
@@ -110,7 +89,7 @@ export function AccountSettingsScreen() {
       await AsyncStorage.setItem('boommall-apple-user-id', cred.user);
       setAppleUser(cred.user);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('เข้าสู่ระบบด้วย Apple แล้ว', 'เซิร์ฟเวอร์ตรวจโทเคนกับ Apple แล้วออกเซสชันให้บัญชีนี้');
+      Alert.alert('เข้าสู่ระบบด้วย Apple แล้ว', 'บัญชีนี้เชื่อมกับ Sign in with Apple แล้ว');
     } catch (e: unknown) {
       const err = e as { code?: string };
       if (err?.code === 'ERR_REQUEST_CANCELED') return;
@@ -146,12 +125,6 @@ export function AccountSettingsScreen() {
 
         <SettingsSection title="บัญชี" />
         <SettingsRow
-          icon="card-outline"
-          title="ช่องทางชำระเงิน"
-          subtitle="TrueMoney · พร้อมเพย์ · บัตร · บัญชีธนาคาร"
-          onPress={() => router.push('/settings/payments')}
-        />
-        <SettingsRow
           icon="phone-portrait-outline"
           title="อุปกรณ์ที่เข้าสู่ระบบ"
           subtitle={deviceCount ? `${deviceCount} เครื่องที่ใช้งานอยู่` : 'ยังไม่มีอุปกรณ์'}
@@ -169,14 +142,14 @@ export function AccountSettingsScreen() {
             <Text style={styles.hint}>
               {user?.provider === 'apple' || appleUser
                 ? 'บัญชีนี้เข้าสู่ระบบด้วย Sign in with Apple แล้ว'
-                : 'กดเพื่อเข้าสู่ระบบด้วย Apple — เซิร์ฟเวอร์ตรวจโทเคนก่อนออกเซสชัน'}
+                : 'กดเพื่อเข้าสู่ระบบด้วย Apple'}
             </Text>
           </View>
         ) : (
           <SettingsRow
             icon="logo-apple"
             title="Sign in with Apple"
-            subtitle="พร้อมบนอุปกรณ์ iOS ที่รองรับหลัง native build"
+            subtitle="ใช้อุปกรณ์ iOS ที่รองรับ Sign in with Apple"
           />
         )}
 
@@ -190,18 +163,12 @@ export function AccountSettingsScreen() {
 
         <SettingsSection title="ความเป็นส่วนตัวและความปลอดภัย" />
         <SettingsRow
-          icon="keypad-outline"
-          title="Wallet PIN 6 หลัก"
-          subtitle="hash แล้วเก็บ — ห้าม plain text"
-          onPress={setPin}
-        />
-        <SettingsRow
           icon="finger-print-outline"
           title="Biometric"
           subtitle={
             biometric
-              ? 'ลายนิ้ว / Face ID พร้อมใช้งานบนเครื่องนี้'
-              : 'biometric ยังไม่พร้อม — ใช้ PIN ได้'
+              ? 'ลายนิ้วมือ / Face ID พร้อมใช้งานบนเครื่องนี้'
+              : 'เครื่องนี้ยังไม่รองรับ Face ID หรือลายนิ้วมือ'
           }
         />
         <SettingsRow
@@ -215,30 +182,23 @@ export function AccountSettingsScreen() {
         <SettingsRow
           icon="document-text-outline"
           title="นโยบายความเป็นส่วนตัว"
-          subtitle="เปิดลิงก์ HTTPS ในเบราว์เซอร์"
+          subtitle="อ่านนโยบายความเป็นส่วนตัว"
           onPress={() => void openLegalDocument('privacy')}
         />
         <SettingsRow
           icon="reader-outline"
-          title="ข้อกำหนดการใช้บริการ (EULA)"
-          subtitle="เปิดลิงก์ HTTPS ในเบราว์เซอร์"
+          title="ข้อกำหนดการใช้บริการ"
+          subtitle="อ่านข้อกำหนดการใช้บริการ"
           onPress={() => void openLegalDocument('terms')}
         />
 
         <SettingsSection title="โซนอันตราย" />
-        <SettingsRow
-          icon="trash-outline"
-          title="ลบบัญชีและข้อมูลทั้งหมด"
-          subtitle="Delete Account — Guideline 5.1.1v"
-          danger
-          onPress={onDeleteAccount}
-        />
         <Pressable style={styles.deleteBtn} onPress={onDeleteAccount} accessibilityRole="button">
           <Ionicons name="trash-outline" size={18} color="#fff" />
           <Text style={styles.deleteText}>ลบบัญชีและข้อมูลทั้งหมด</Text>
         </Pressable>
         <Text style={styles.hint}>
-          ตามแนวทาง Apple — ต้องลบบัญชีในแอปได้เอง ข้อมูลโปรไฟล์ โพสต์ และการล็อกอินจะถูกลบถาวร
+          เมื่อลบบัญชี ข้อมูลโปรไฟล์ โพสต์ และการล็อกอินจะถูกลบถาวร
         </Text>
       </ScrollView>
     </View>

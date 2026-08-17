@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Modal, StyleSheet, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSharedValue } from 'react-native-reanimated';
 import { DragDownDismiss } from '@/shared/components/DragDownDismiss';
 import { colors } from '@/shared/theme/colors';
 import { safePush } from '@/shared/navigation/safeNavigate';
@@ -16,18 +17,19 @@ type Props = {
 };
 
 /**
- * Mandatory social login for UGC (App Store 4.8 + 1.2).
- * Apple is always offered on iOS when Google/LINE are present.
+ * Mandatory login for UGC (App Store 4.8 + 1.2).
+ * Apple is always offered on iOS when Google/Facebook/phone are present.
  */
 export function SocialLoginGate({
   visible,
   onClose,
   onAuthenticated,
   title = 'เข้าสู่ระบบเพื่อใช้งาน',
-  message = 'ต้องเข้าสู่ระบบด้วยบัญชีโซเชียลก่อนใช้ฟีด แชต โพสต์ หรือตลาด',
+  message = 'เข้าสู่ระบบด้วย Apple, Google, Facebook หรือเบอร์โทรก่อนใช้ฟีด แชต โพสต์ หรือตลาด',
 }: Props) {
   const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<AuthFormMode>('login');
+  const scrollY = useSharedValue(0);
 
   const close = () => {
     setMode('login');
@@ -36,41 +38,57 @@ export function SocialLoginGate({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
-      <View
-        style={[
-          styles.overlay,
-          { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 16 },
-        ]}
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <DragDownDismiss
-          onDismiss={close}
-          enabled={Boolean(onClose)}
-          showDim
-          rootInModal
-          style={styles.sheet}
+        <View
+          style={[
+            styles.overlay,
+            { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 16 },
+          ]}
         >
-          <AuthForm
-            mode={mode}
-            title={title}
-            message={message}
-            onAuthenticated={onAuthenticated}
-            onClose={close}
-            onSwitchMode={(next) => {
-              if (next === 'register') {
-                close();
-                safePush('/register');
-                return;
-              }
-              setMode(next);
-            }}
-          />
-        </DragDownDismiss>
-      </View>
+          <DragDownDismiss
+            onDismiss={close}
+            enabled={Boolean(onClose)}
+            showDim
+            rootInModal
+            scrollY={scrollY}
+            style={styles.sheet}
+          >
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              onScroll={(e) => {
+                scrollY.value = e.nativeEvent.contentOffset.y;
+              }}
+              scrollEventThrottle={16}
+            >
+              <AuthForm
+                mode={mode}
+                title={title}
+                message={message}
+                onAuthenticated={onAuthenticated}
+                onClose={close}
+                onSwitchMode={(next) => {
+                  if (next === 'register') {
+                    close();
+                    safePush('/register');
+                    return;
+                  }
+                  setMode(next);
+                }}
+              />
+            </ScrollView>
+          </DragDownDismiss>
+        </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.55)',
@@ -82,6 +100,6 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     paddingHorizontal: 20,
     paddingTop: 18,
-    gap: 12,
+    maxHeight: '92%',
   },
 });

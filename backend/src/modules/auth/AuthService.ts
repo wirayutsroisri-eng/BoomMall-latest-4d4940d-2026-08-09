@@ -8,6 +8,7 @@ import { AppError } from '../../lib/errors';
 import { verifyAppleIdentityToken } from './AppleAuth';
 import { verifyGoogleIdentityToken } from './GoogleAuth';
 import { verifyFacebookAccessToken } from './FacebookAuth';
+import { consumePhoneOtp, maskPhone, requestPhoneOtp as issuePhoneOtp } from './PhoneAuth';
 import { signAppJwt } from './JwtService';
 import { getProfileByEmail, upsertProfile } from './ProfileService';
 import { ensureAppleReviewAccount, isAppleReviewEmail } from './appleReviewAccount';
@@ -207,6 +208,48 @@ export async function registerEmail(input: {
     provider: 'email',
     shopId: profile.shopId,
   });
+}
+
+export async function requestPhoneOtp(input: { phone: string; ipHint?: string }) {
+  return issuePhoneOtp(input);
+}
+
+export async function verifyPhoneOtp(input: { phone: string; code: string }) {
+  const e164 = consumePhoneOtp(input);
+  const userId = `phone_${e164}`.slice(0, 64);
+  const existing = getUser(userId);
+  if (existing?.status === 'banned' || existing?.status === 'soft_banned') {
+    throw new AppError('FORBIDDEN', 'Account suspended', 403);
+  }
+  if (existing?.status === 'hard_deleted') {
+    throw new AppError('FORBIDDEN', 'Account deleted', 403);
+  }
+
+  const last4 = e164.slice(-4);
+  const displayName = existing?.displayName || `ผู้ใช้ ${last4}`;
+  const handle = existing?.handle || `p${e164.replace(/\D/g, '').slice(-9)}`;
+  const user = upsertUser({
+    id: userId,
+    displayName,
+    handle,
+    social: { phone: e164 },
+  });
+  const profile = await upsertProfile({
+    userId,
+    displayName: user.displayName,
+    handle: user.handle ?? handle,
+    role: 'BUYER',
+  });
+  await linkIdentity(userId, 'phone', e164);
+
+  return issueSession({
+    userId,
+    displayName: profile.displayName ?? user.displayName,
+    handle: profile.handle,
+    role: profile.role,
+    provider: 'phone',
+    shopId: profile.shopId,
+  }).then((session) => ({ ...session, phoneMasked: maskPhone(e164) }));
 }
 
 export async function loginEmail(input: { email: string; password: string }) {

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   FlatList,
   StyleSheet,
+  Text,
   useWindowDimensions,
   View,
   type LayoutChangeEvent,
@@ -22,6 +23,7 @@ import { useInventoryStore } from '@/modules/commerce/state/inventory-store';
 import { resolveShopMaster } from '@/modules/shop/domain/product-display';
 import { SellerNotifyBanner } from '@/modules/store/ui/SellerNotifyBanner';
 import { useFollowStore } from '@/modules/social/state/follow-store';
+import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
 import { FeedHeader } from './FeedHeader';
 import { FeedReelCard } from './FeedReelCard';
 import { FeedLongPressSheet } from './FeedLongPressSheet';
@@ -59,6 +61,7 @@ export function HomeFeedScreen() {
   const tab = useFeedStore((s) => s.tab);
   const allItems = useFeedStore((s) => s.items);
   const followingMap = useFollowStore((s) => s.following);
+  const myHandle = useLoyaltyStore((s) => s.profile.handle);
   const setTab = useFeedStore((s) => s.setTab);
   const toggleLike = useFeedStore((s) => s.toggleLike);
   const toggleSave = useFeedStore((s) => s.toggleSave);
@@ -108,7 +111,7 @@ export function HomeFeedScreen() {
     const suppressed = new Set([...hiddenContentIds, ...removedContentIds]);
     const map = {} as Record<FeedTab, FeedItem[]>;
     for (const t of TAB_ORDER) {
-      const lane = selectFeedByTab(allItems, t, followingMap, CHANTHABURI, 10).filter((item) => {
+      const lane = selectFeedByTab(allItems, t, followingMap, CHANTHABURI, 10, myHandle).filter((item) => {
         if (suppressed.has(item.id)) return false;
         const handle = item.authorHandle.replace(/^@/, '').toLowerCase();
         return !blocked.has(handle) && !blocked.has(item.authorHandle.toLowerCase());
@@ -116,7 +119,7 @@ export function HomeFeedScreen() {
       map[t] = t === 'foryou' ? pinPromotedFeedItems(lane, promotedIds) : lane;
     }
     return map;
-  }, [allItems, followingMap, blockedUserIds, hiddenContentIds, removedContentIds, promotedIds]);
+  }, [allItems, followingMap, myHandle, blockedUserIds, hiddenContentIds, removedContentIds, promotedIds]);
 
   const items = feedsByTab[reelTab] ?? [];
   const boardItems = feedsByTab.board ?? [];
@@ -328,22 +331,30 @@ export function HomeFeedScreen() {
             if (laneTab === 'board') {
               return (
                 <View key={laneTab} style={{ width: screenWidth, flex: 1 }}>
-                  <CommunityBoardList
-                    items={boardItems}
-                    topInset={insets.top}
-                    onOpenPost={openCommentsSheet}
-                    pagerX={pagerX}
-                    screenWidth={screenWidth}
-                    tabCount={TAB_ORDER.length}
-                    onCommitTabIndex={commitTabIndex}
-                  />
+                  {feedFocused && Math.abs(0 - tabIndex) <= 1 ? (
+                    <CommunityBoardList
+                      items={boardItems}
+                      topInset={insets.top}
+                      onOpenPost={openCommentsSheet}
+                      pagerX={pagerX}
+                      screenWidth={screenWidth}
+                      tabCount={TAB_ORDER.length}
+                      onCommitTabIndex={commitTabIndex}
+                    />
+                  ) : null}
                 </View>
               );
             }
             const laneItems = feedsByTab[laneTab] ?? [];
             return (
               <View key={laneTab} style={{ width: screenWidth, flex: 1 }}>
-                {viewportHeight > 0 ? (
+                {feedFocused && viewportHeight > 0 && Math.abs(TAB_ORDER.indexOf(laneTab) - tabIndex) <= 1 ? (
+                  laneItems.length === 0 ? (
+                    <View style={[styles.emptyLane, { paddingTop: insets.top + 88 }]}>
+                      <Text style={styles.emptyTitle}>ยังไม่มีโพสต์</Text>
+                      <Text style={styles.emptySub}>แตะกล้องด้านล่างเพื่อถ่ายแล้วโพสต์ลงฟีด</Text>
+                    </View>
+                  ) : (
                   <FlatList
                     ref={(node) => {
                       listRefs.current[laneTab] = node;
@@ -358,8 +369,8 @@ export function HomeFeedScreen() {
                     snapToInterval={viewportHeight}
                     snapToAlignment="start"
                     disableIntervalMomentum
-                    windowSize={laneTab === tab ? 3 : 1}
-                    maxToRenderPerBatch={laneTab === tab ? 2 : 1}
+                    windowSize={laneTab === tab ? 2 : 1}
+                    maxToRenderPerBatch={1}
                     initialNumToRender={1}
                     removeClippedSubviews
                     getItemLayout={(_, index) => ({
@@ -370,6 +381,7 @@ export function HomeFeedScreen() {
                     onViewableItemsChanged={onViewableItemsChangedByLane[laneTab]}
                     viewabilityConfig={viewabilityConfig}
                   />
+                  )
                 ) : null}
               </View>
             );
@@ -491,5 +503,23 @@ const styles = StyleSheet.create({
   },
   feedClipBoard: {
     backgroundColor: colors.surface.canvas,
+  },
+  emptyLane: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  emptyTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  emptySub: {
+    marginTop: 8,
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 15,
+    textAlign: 'center',
+    lineHeight: 22,
   },
 });

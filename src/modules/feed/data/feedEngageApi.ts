@@ -1,4 +1,5 @@
 import { authHeaders, getApiBase } from '@/modules/auth/state/auth-store';
+import type { SocialPostDto } from './mapSocialPost';
 
 async function post(path: string, body: unknown) {
   const base = getApiBase();
@@ -32,7 +33,7 @@ export function syncFeedShare(contentId: string) {
   return post('/api/v1/feed/signals', { kind: 'share', contentId });
 }
 
-export function publishSocialPost(input: {
+export async function publishSocialPost(input: {
   body: string;
   media?: unknown;
   lat?: number;
@@ -41,13 +42,17 @@ export function publishSocialPost(input: {
   tags?: string[];
   linkUrl?: string;
   lane?: string;
-}) {
-  return post('/api/v1/feed/posts', input);
+}): Promise<SocialPostDto | null> {
+  const json = (await post('/api/v1/feed/posts', input)) as { data?: SocialPostDto } | null;
+  return json?.data ?? null;
 }
 
-export function fetchFeedPosts(tab?: string, geo?: { lat: number; lng: number; radiusKm?: number }) {
+export async function fetchFeedPosts(
+  tab?: string,
+  geo?: { lat: number; lng: number; radiusKm?: number },
+): Promise<SocialPostDto[]> {
   const base = getApiBase();
-  if (!base) return Promise.resolve(null);
+  if (!base) return [];
   const q = new URLSearchParams();
   if (tab) q.set('tab', tab);
   if (geo) {
@@ -55,10 +60,14 @@ export function fetchFeedPosts(tab?: string, geo?: { lat: number; lng: number; r
     q.set('lng', String(geo.lng));
     if (geo.radiusKm) q.set('radiusKm', String(geo.radiusKm));
   }
-  const headers = authHeaders();
-  return fetch(`${base}/api/v1/feed/posts?${q.toString()}`, { headers })
-    .then((r) => (r.ok ? r.json() : null))
-    .catch(() => null);
+  try {
+    const res = await fetch(`${base}/api/v1/feed/posts?${q.toString()}`, { headers: authHeaders() });
+    if (!res.ok) return [];
+    const json = (await res.json()) as { data?: SocialPostDto[] };
+    return Array.isArray(json?.data) ? json.data : [];
+  } catch {
+    return [];
+  }
 }
 
 export function syncFeedComment(postId: string, text: string, parentId?: string) {

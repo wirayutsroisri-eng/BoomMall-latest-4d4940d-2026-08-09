@@ -6,7 +6,7 @@ export type ReportKind = 'user' | 'content' | 'message' | 'comment';
 export type ReportStatus = 'open' | 'reviewed' | 'actioned' | 'dismissed';
 export type ContentModerationStatus = 'hidden' | 'removed' | 'pending_review';
 export type UserAccountStatus = 'active' | 'soft_banned' | 'banned' | 'hard_deleted';
-export type SocialProvider = 'apple' | 'google' | 'line' | 'facebook';
+export type SocialProvider = 'apple' | 'google' | 'line' | 'facebook' | 'phone';
 
 export type ModerationReport = {
   id: string;

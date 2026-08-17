@@ -1,7 +1,7 @@
 import { Alert } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { useCreateDraftStore } from '@/modules/create/state/create-draft-store';
-import { safePush } from '@/shared/navigation/safeNavigate';
+import { openCreateCamera } from '@/shared/navigation/safeNavigate';
 import type { MusicTrack } from '../domain/types';
 
 /**
@@ -25,7 +25,7 @@ export function useThisSound(track: MusicTrack) {
     {
       text: 'ไปสร้างเลย',
       onPress: () => {
-        safePush('/create-modal');
+        openCreateCamera();
       },
     },
   ]);

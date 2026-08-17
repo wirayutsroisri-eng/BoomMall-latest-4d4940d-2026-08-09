@@ -3,8 +3,9 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { ENABLE_OFFLINE_LOCAL_SESSION } from '@/shared/compliance/appStoreGates';
+import { apiFetch, resolveApiBase } from '@/shared/api/apiBase';
 
-export type SocialProvider = 'apple' | 'google' | 'line' | 'facebook' | 'email';
+export type SocialProvider = 'apple' | 'google' | 'line' | 'facebook' | 'email' | 'phone';
 
 export type AuthUser = {
   id: string;
@@ -90,7 +91,16 @@ export const useAuthStore = create<AuthState>()(
 );
 
 export function getApiBase() {
-  return process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '') ?? '';
+  return resolveApiBase();
+}
+
+async function readApiJson(res: Response): Promise<Record<string, unknown>> {
+  return (await res.json().catch(() => ({}))) as Record<string, unknown>;
+}
+
+function apiError(json: Record<string, unknown>, status: number) {
+  const err = json.error as { message?: string } | undefined;
+  return new Error(err?.message ?? `ไม่สำเร็จ (${status})`);
 }
 
 /** Bearer JWT in store builds. `x-user-id` is LAN-only and ignored in production. */
@@ -99,7 +109,9 @@ export function authHeaders(extra?: Record<string, string>): Record<string, stri
   const userId = useAuthStore.getState().user?.id;
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...extra };
   if (token) headers.Authorization = `Bearer ${token}`;
-  if (ENABLE_OFFLINE_LOCAL_SESSION && userId) headers['x-user-id'] = userId;
+  if (userId && ((typeof __DEV__ !== 'undefined' && __DEV__) || ENABLE_OFFLINE_LOCAL_SESSION)) {
+    headers['x-user-id'] = userId;
+  }
   return headers;
 }
 
@@ -146,19 +158,15 @@ export async function exchangeSocialLogin(input: {
     };
   }
 
-  const res = await fetch(`${base}/api/v1/moderation/auth/social`, {
+  const res = await apiFetch(`${base}/api/v1/auth/login/social`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok || json.ok === false) {
-    throw new Error(json?.error?.message ?? `Login failed (${res.status})`);
-  }
-  return {
-    sessionToken: json.data.sessionToken as string,
-    user: json.data.user as AuthUser,
-  };
+  const json = await readApiJson(res);
+  if (!res.ok || json.ok === false) throw apiError(json, res.status);
+  const data = json.data as { sessionToken: string; user: AuthUser };
+  return { sessionToken: data.sessionToken, user: data.user };
 }
 
 export async function exchangeEmailLogin(input: {
@@ -181,7 +189,7 @@ export async function exchangeEmailLogin(input: {
     return { sessionToken: `local.${utf8ToBase64(user.id)}`, user };
   }
   const path = input.mode === 'register' ? '/api/v1/auth/register' : '/api/v1/auth/login';
-  const res = await fetch(`${base}${path}`, {
+  const res = await apiFetch(`${base}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -190,12 +198,55 @@ export async function exchangeEmailLogin(input: {
       displayName: input.displayName,
     }),
   });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok || json.ok === false) {
-    throw new Error(json?.error?.message ?? `Login failed (${res.status})`);
+  const json = await readApiJson(res);
+  if (!res.ok || json.ok === false) throw apiError(json, res.status);
+  const data = json.data as { sessionToken: string; user: AuthUser };
+  return { sessionToken: data.sessionToken, user: data.user };
+}
+
+export type PhoneOtpRequestResult = {
+  sent: boolean;
+  phoneMasked: string;
+  expiresInSec: number;
+  resendInSec: number;
+  channel: 'twilio' | 'http' | 'dev';
+  debugCode?: string;
+};
+
+function requireApiBase() {
+  const base = getApiBase();
+  if (!base) {
+    throw new Error(
+      'ยังไม่ได้ตั้งค่าเซิร์ฟเวอร์ — ใส่ EXPO_PUBLIC_API_URL เป็น IP ของคอมพิวเตอร์ เช่น http://192.168.1.10:4000 (เครื่องจริงห้ามใช้ localhost)',
+    );
   }
-  return {
-    sessionToken: json.data.sessionToken as string,
-    user: json.data.user as AuthUser,
-  };
+  return base;
+}
+
+export async function requestPhoneOtp(phone: string): Promise<PhoneOtpRequestResult> {
+  const base = requireApiBase();
+  const res = await apiFetch(`${base}/api/v1/auth/otp/request`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone }),
+  });
+  const json = await readApiJson(res);
+  if (!res.ok || json.ok === false) throw apiError(json, res.status);
+  return json.data as PhoneOtpRequestResult;
+}
+
+export async function verifyPhoneOtp(input: {
+  phone: string;
+  code: string;
+}): Promise<{ sessionToken: string; user: AuthUser }> {
+  const base = requireApiBase();
+  const res = await apiFetch(`${base}/api/v1/auth/otp/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone: input.phone, code: input.code }),
+  });
+  const json = await readApiJson(res);
+  if (!res.ok || json.ok === false) throw apiError(json, res.status);
+  const data = json.data as { sessionToken: string; user: AuthUser };
+  return { sessionToken: data.sessionToken, user: data.user };
 }

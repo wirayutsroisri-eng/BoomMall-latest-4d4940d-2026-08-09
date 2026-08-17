@@ -20,8 +20,10 @@ import {
   DEFAULT_OVERLAY_TRANSFORM,
   type OverlayTransform,
 } from '@/modules/create/domain/overlay';
+import { persistCreateMedia } from '@/modules/create/data/persistCreateMedia';
 import { useCreateDraftStore } from '@/modules/create/state/create-draft-store';
 import { openListenScreenNow } from '@/shared/navigation/safeNavigate';
+import { ProductVideoThumb } from '@/modules/store/ui/sell/ProductVideoThumb';
 import { LockedOverlayText } from './LockedOverlayText';
 import { LockedStickerOverlay } from './LockedStickerOverlay';
 import { MovableStickerLayer } from './MovableStickerLayer';
@@ -81,8 +83,13 @@ export function ContentPreviewScreen() {
     filter?: string;
   }>();
 
-  const uri = typeof params.uri === 'string' ? params.uri : null;
-  const mediaType = params.type === 'video' ? 'video' : 'image';
+  const draftUri = useCreateDraftStore((s) => s.uri);
+  const draftType = useCreateDraftStore((s) => s.type);
+  const uri =
+    draftUri || (typeof params.uri === 'string' ? params.uri : null);
+  const mediaType =
+    params.type === 'video' || draftType === 'video' ? 'video' : 'image';
+  const textMode = params.textMode === '1';
 
   const [tool, setTool] = useState<string | null>(
     params.textMode === '1' ? 'text' : null,
@@ -109,7 +116,7 @@ export function ContentPreviewScreen() {
   /** แตะพื้นว่างแล้ว → บีบขยายได้ทั้งจอ */
   const [stickerResizeArmed, setStickerResizeArmed] = useState(false);
   const draftMusic = useCreateDraftStore((s) => s.music);
-  const [musicTitle, setMusicTitle] = useState(draftMusic || 'Hey Chop Te...');
+  const [musicTitle, setMusicTitle] = useState(draftMusic || '');
   const [textEditing, setTextEditing] = useState(params.textMode === '1');
   const [baking, setBaking] = useState(false);
   const canvasRef = useRef<View>(null);
@@ -126,11 +133,12 @@ export function ContentPreviewScreen() {
   const setDraft = useCreateDraftStore((s) => s.setDraft);
 
   const goPublish = async () => {
-    if (!uri || baking) return;
+    if (baking) return;
+    if (!uri && mediaType === 'video') return;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     const hasDecor =
-      !!overlayText.trim() || !!sticker || filter !== 'none';
+      !!overlayText.trim() || !!sticker || filter !== 'none' || (textMode && !uri);
     // ภาพนิ่ง: bake ข้อความ/ฟิลเตอร์/สติกเกอร์ลงไฟล์ — ตำแหน่งตรงทุกหน้าอย่างเสถียรที่สุด
     let finalUri = uri;
     let baked = false;
@@ -142,11 +150,14 @@ export function ContentPreviewScreen() {
         await new Promise<void>((resolve) => {
           requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
         });
-        finalUri = await captureRef(canvasRef, {
-          format: 'jpg',
-          quality: 0.92,
-          result: 'tmpfile',
-        });
+        finalUri = await persistCreateMedia(
+          await captureRef(canvasRef, {
+            format: 'jpg',
+            quality: 0.92,
+            result: 'tmpfile',
+          }),
+          'image',
+        );
         baked = true;
       } catch {
         setBaking(false);
@@ -154,6 +165,11 @@ export function ContentPreviewScreen() {
         return;
       }
       setBaking(false);
+    }
+
+    if (!finalUri) {
+      Alert.alert('ยังไม่มีสื่อ', 'ถ่ายหรือเลือกจากแกลเลอรีก่อนโพสต์');
+      return;
     }
 
     setDraft({
@@ -166,15 +182,15 @@ export function ContentPreviewScreen() {
       overlayTransform: baked ? { ...DEFAULT_OVERLAY_TRANSFORM } : overlayTransform,
       filter: baked ? 'none' : filter,
       sticker: baked ? '' : sticker ?? '',
-      music: musicTitle,
+      music: musicTitle.trim(),
     });
     router.push({
       pathname: '/create-publish',
-      params: { uri: finalUri, type: mediaType },
+      params: { type: mediaType },
     });
   };
 
-  if (!uri) {
+  if (!uri && !textMode) {
     return (
       <View style={[styles.root, { paddingTop: insets.top + 24 }]}>
         <Text style={styles.missing}>ไม่พบสื่อ</Text>
@@ -189,7 +205,11 @@ export function ContentPreviewScreen() {
   if (textEditing) {
     return (
       <View style={styles.root}>
-        <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        {uri ? (
+          <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        ) : (
+          <View style={[StyleSheet.absoluteFill, styles.textCanvas]} />
+        )}
         <View style={styles.dim} />
 
         <View style={[styles.textTopBar, { paddingTop: insets.top + 8 }]}>
@@ -273,7 +293,19 @@ export function ContentPreviewScreen() {
     <View style={styles.root}>
       {/* เฉพาะเลเยอร์สื่อ — จับภาพส่วนนี้ตอนกดถัดไป (ไม่รวม UI chrome) */}
       <View ref={canvasRef} style={styles.canvas} collapsable={false}>
-        <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        {mediaType === 'video' && uri ? (
+          <ProductVideoThumb
+            uri={uri}
+            autoPlay
+            muted
+            interactive={false}
+            style={StyleSheet.absoluteFill}
+          />
+        ) : uri ? (
+          <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        ) : (
+          <View style={[StyleSheet.absoluteFill, styles.textCanvas]} />
+        )}
         {activeFilter.overlay ? (
           <View
             pointerEvents="none"
@@ -356,7 +388,10 @@ export function ContentPreviewScreen() {
               void Haptics.selectionAsync();
               setTool(t.key);
               if (t.key === 'text') setTextEditing(true);
-              if (t.key === 'music') setMusicTitle('Workshop Vibes — Boom');
+              if (t.key === 'music') {
+                if (!openListenScreenNow()) return;
+                return;
+              }
               if (t.key === 'effects') setFilter((f) => (f === 'none' ? 'vivid' : 'none'));
               // ตัดครอบแบบ TikTok
               if (mediaType === 'image' && t.key === 'crop') {
@@ -469,7 +504,11 @@ export function ContentPreviewScreen() {
           {FILTERS.map((f) => (
             <Pressable key={f.key} style={styles.filterItem} onPress={() => setFilter(f.key)}>
               <View style={[styles.filterSwatch, filter === f.key && styles.filterSwatchActive]}>
-                <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                {uri ? (
+                  <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                ) : (
+                  <View style={[StyleSheet.absoluteFill, styles.textCanvas]} />
+                )}
                 {f.overlay ? (
                   <View style={[StyleSheet.absoluteFill, { backgroundColor: f.overlay }]} />
                 ) : null}
@@ -518,6 +557,9 @@ const styles = StyleSheet.create({
   canvas: {
     ...StyleSheet.absoluteFill,
     backgroundColor: '#000',
+  },
+  textCanvas: {
+    backgroundColor: '#0B1F17',
   },
   missing: { color: '#fff', textAlign: 'center', fontWeight: '700' },
   dim: {

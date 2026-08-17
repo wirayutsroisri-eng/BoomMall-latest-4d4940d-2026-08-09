@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -34,9 +34,17 @@ import {
   type SkPath,
 } from '@shopify/react-native-skia';
 import { DragDownDismiss } from '@/shared/components/DragDownDismiss';
+import { CropFrameOverlay } from '@/shared/media/CropFrameOverlay';
 import { colors } from '@/shared/theme/colors';
 import { buildColorMatrix } from '@/modules/create/editor/domain/colorMatrix';
 import { saveSkiaImageToCache } from '@/modules/create/editor/domain/exportSnapshot';
+import {
+  aspectValue,
+  centeredCrop,
+  cropToImagePixels,
+  type AspectPreset,
+  type CropRect,
+} from '@/modules/create/editor/domain/cropMath';
 import {
   BRUSH_COLORS,
   DEFAULT_ADJUST,
@@ -111,17 +119,26 @@ const BRUSHES: Array<{ key: BrushKind; label: string; icon: keyof typeof Ionicon
   { key: 'eraser', label: 'ลบ', icon: 'backspace-outline' },
 ];
 
-const CROP_OPS: Array<{
-  key: 'rotate' | 'flipH' | 'flipV' | 'crop11' | 'crop43' | 'crop916';
+const TRANSFORM_OPS: Array<{
+  key: 'rotate' | 'flipH' | 'flipV';
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
 }> = [
   { key: 'rotate', icon: 'refresh-outline', label: 'หมุน 90°' },
   { key: 'flipH', icon: 'swap-horizontal-outline', label: 'พลิกซ้ายขวา' },
   { key: 'flipV', icon: 'swap-vertical-outline', label: 'พลิกบนล่าง' },
-  { key: 'crop11', icon: 'square-outline', label: '1:1' },
-  { key: 'crop43', icon: 'tablet-landscape-outline', label: '4:3' },
-  { key: 'crop916', icon: 'phone-portrait-outline', label: '9:16' },
+];
+
+const CROP_ASPECTS: Array<{
+  key: AspectPreset;
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+}> = [
+  { key: 'free', icon: 'scan-outline', label: 'อิสระ' },
+  { key: '16:9', icon: 'tablet-landscape-outline', label: '16:9' },
+  { key: '4:3', icon: 'tablet-landscape-outline', label: '4:3' },
+  { key: '1:1', icon: 'square-outline', label: '1:1' },
+  { key: '9:16', icon: 'phone-portrait-outline', label: '9:16' },
 ];
 
 /**
@@ -145,6 +162,8 @@ export function GalleryPhotoEditor({ uri: sourceUri, initialTool = 'draw', onClo
   const [textColor, setTextColor] = useState('#FFFFFF');
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [cropAspect, setCropAspect] = useState<AspectPreset>('free');
+  const [cropRect, setCropRect] = useState<CropRect | null>(null);
 
   const canvasRef = useCanvasRef();
   const skImage = useImage(uri);
@@ -174,6 +193,13 @@ export function GalleryPhotoEditor({ uri: sourceUri, initialTool = 'draw', onClo
     const h = ih * scale;
     return { x: (canvasW - w) / 2, y: (canvasH - h) / 2, w, h };
   }, [skImage, canvasW, canvasH]);
+
+  const cropRatio = aspectValue(cropAspect, imageFit.w / Math.max(1, imageFit.h));
+
+  useEffect(() => {
+    if (imageFit.w < 8 || imageFit.h < 8) return;
+    setCropRect(centeredCrop(imageFit.w, imageFit.h, cropRatio, cropRatio == null ? 0 : 0.04));
+  }, [uri, imageFit.w, imageFit.h, cropRatio]);
 
   const pan = Gesture.Pan()
     .enabled(drawing && !saving)
@@ -240,32 +266,14 @@ export function GalleryPhotoEditor({ uri: sourceUri, initialTool = 'draw', onClo
   };
 
   const runManip = useCallback(
-    async (op: (typeof CROP_OPS)[number]['key']) => {
+    async (op: (typeof TRANSFORM_OPS)[number]['key']) => {
       if (!uri || busy) return;
       setBusy(true);
       try {
-        const dims = await new Promise<{ w: number; h: number }>((resolve, reject) => {
-          RNImage.getSize(uri, (w, h) => resolve({ w, h }), reject);
-        });
         const ctx = ImageManipulator.manipulate(uri);
         if (op === 'rotate') ctx.rotate(90);
         if (op === 'flipH') ctx.flip(FlipType.Horizontal);
         if (op === 'flipV') ctx.flip(FlipType.Vertical);
-        if (op === 'crop11' || op === 'crop43' || op === 'crop916') {
-          const targetRatio = op === 'crop11' ? 1 : op === 'crop43' ? 4 / 3 : 9 / 16;
-          let cw = dims.w;
-          let ch = cw / targetRatio;
-          if (ch > dims.h) {
-            ch = dims.h;
-            cw = ch * targetRatio;
-          }
-          ctx.crop({
-            originX: Math.round((dims.w - cw) / 2),
-            originY: Math.round((dims.h - ch) / 2),
-            width: Math.round(cw),
-            height: Math.round(ch),
-          });
-        }
         const rendered = await ctx.renderAsync();
         const saved = await rendered.saveAsync({
           format: SaveFormat.JPEG,
@@ -284,6 +292,26 @@ export function GalleryPhotoEditor({ uri: sourceUri, initialTool = 'draw', onClo
     },
     [uri, busy],
   );
+
+  const bakeCrop = async (source: string) => {
+    if (!cropRect || !skImage) return source;
+    const imgW = skImage.width();
+    const imgH = skImage.height();
+    const px = cropToImagePixels(cropRect, imageFit.w, imageFit.h, imgW, imgH);
+    if (px.width >= imgW - 4 && px.height >= imgH - 4 && px.x <= 2 && px.y <= 2) {
+      return source;
+    }
+    const ctx = ImageManipulator.manipulate(source);
+    ctx.crop({
+      originX: px.x,
+      originY: px.y,
+      width: Math.max(2, px.width),
+      height: Math.max(2, px.height),
+    });
+    const rendered = await ctx.renderAsync();
+    const saved = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: 0.92 });
+    return saved.uri;
+  };
 
   const exportAndDone = async () => {
     if (!uri || saving) return;
@@ -305,6 +333,20 @@ export function GalleryPhotoEditor({ uri: sourceUri, initialTool = 'draw', onClo
         const snap = canvasRef.current?.makeImageSnapshot();
         if (!snap) throw new Error('snapshot failed');
         outUri = saveSkiaImageToCache(snap, 'chat-edit');
+        if (cropRect) {
+          const ctx = ImageManipulator.manipulate(outUri);
+          ctx.crop({
+            originX: Math.round(imageFit.x + cropRect.x),
+            originY: Math.round(imageFit.y + cropRect.y),
+            width: Math.max(2, Math.round(cropRect.width)),
+            height: Math.max(2, Math.round(cropRect.height)),
+          });
+          const rendered = await ctx.renderAsync();
+          const saved = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: 0.92 });
+          outUri = saved.uri;
+        }
+      } else {
+        outUri = await bakeCrop(uri);
       }
       onDone(outUri);
     } catch {
@@ -314,7 +356,7 @@ export function GalleryPhotoEditor({ uri: sourceUri, initialTool = 'draw', onClo
   };
 
   return (
-    <DragDownDismiss onDismiss={onClose} enabled={!drawing && !saving} showDim={false} style={styles.root}>
+    <DragDownDismiss onDismiss={onClose} enabled={!drawing && !saving && tab !== 'crop'} showDim={false} style={styles.root}>
       <KeyboardAvoidingView
         style={styles.root}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -403,6 +445,26 @@ export function GalleryPhotoEditor({ uri: sourceUri, initialTool = 'draw', onClo
             </Canvas>
             {!skImage ? (
               <RNImage source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="contain" />
+            ) : null}
+            {tab === 'crop' && cropRect && skImage ? (
+              <View
+                pointerEvents="box-none"
+                style={{
+                  position: 'absolute',
+                  left: imageFit.x,
+                  top: imageFit.y,
+                  width: imageFit.w,
+                  height: imageFit.h,
+                }}
+              >
+                <CropFrameOverlay
+                  crop={cropRect}
+                  stageW={imageFit.w}
+                  stageH={imageFit.h}
+                  ratio={cropRatio}
+                  onCommit={setCropRect}
+                />
+              </View>
             ) : null}
             {busy ? (
               <View style={styles.busyMask}>
@@ -574,19 +636,40 @@ export function GalleryPhotoEditor({ uri: sourceUri, initialTool = 'draw', onClo
           ) : null}
 
           {tab === 'crop' ? (
-            <View style={styles.toolsGrid}>
-              {CROP_OPS.map((op) => (
-                <Pressable
-                  key={op.key}
-                  style={styles.toolBtn}
-                  onPress={() => void runManip(op.key)}
-                  disabled={busy}
-                >
-                  <Ionicons name={op.icon} size={22} color="#fff" />
-                  <Text style={styles.toolLabel}>{op.label}</Text>
-                </Pressable>
-              ))}
-            </View>
+            <>
+              <Text style={styles.hint}>ลากกรอบหรือมุมเพื่อเลือกส่วนที่ต้องการ แล้วค่อยกดเสร็จ</Text>
+              <View style={styles.rowWrap}>
+                {TRANSFORM_OPS.map((op) => (
+                  <Pressable
+                    key={op.key}
+                    style={styles.chip}
+                    onPress={() => void runManip(op.key)}
+                    disabled={busy}
+                  >
+                    <Ionicons name={op.icon} size={16} color="#fff" />
+                    <Text style={styles.chipText}>{op.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+                {CROP_ASPECTS.map((op) => {
+                  const active = cropAspect === op.key;
+                  return (
+                    <Pressable
+                      key={op.key}
+                      style={[styles.chip, active && styles.chipActive]}
+                      onPress={() => {
+                        void Haptics.selectionAsync();
+                        setCropAspect(op.key);
+                      }}
+                    >
+                      <Ionicons name={op.icon} size={16} color={active ? '#111' : '#fff'} />
+                      <Text style={[styles.chipText, active && styles.chipTextActive]}>{op.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </>
           ) : null}
         </View>
       </KeyboardAvoidingView>

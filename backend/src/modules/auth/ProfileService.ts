@@ -298,6 +298,6 @@ export function authDomainStatus() {
     domain: 'auth-profile',
     eulaPolicies: [EULA_CHAT_C4, EULA_MARKETPLACE, EULA_PRIVACY],
     appleGuideline: '5.1.1 / UGC C4-aligned EULA required before chat',
-    auth: 'Apple/Google JWKS + Facebook Graph + email/password (scrypt) + JWT; Admin RBAC via API key',
+    auth: 'Apple/Google JWKS + Facebook Graph + phone SMS OTP + email/password (scrypt) + JWT; Admin RBAC via API key',
   };
 }

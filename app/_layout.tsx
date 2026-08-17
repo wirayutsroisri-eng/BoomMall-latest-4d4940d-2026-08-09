@@ -96,6 +96,22 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen
+          name="profile/edit"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
+            gestureEnabled: true,
+            fullScreenGestureEnabled: true,
+          }}
+        />
+        <Stack.Screen
+          name="profile/edit-field"
+          options={{
+            presentation: 'modal',
+            ...dismissibleModalOptions,
+          }}
+        />
+        <Stack.Screen
           name="search"
           options={{
             presentation: 'modal',

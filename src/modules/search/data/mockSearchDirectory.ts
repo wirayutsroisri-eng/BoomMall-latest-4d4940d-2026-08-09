@@ -40,27 +40,8 @@ for (const item of mockFeedsData) {
   });
 }
 
-/** Personal contacts not tied to any shop — pure Facebook-style "people you may know" */
-const FRIEND_RESULTS: SearchResult[] = [
-  {
-    id: 'friend-ploy',
-    handle: 'ploy_ev',
-    displayName: 'น้องพลอย EV Rider',
-    subtitle: 'เพื่อนที่อาจรู้จัก · จันทบุรี',
-    avatarColor: '#FE2C55',
-    kind: 'friend',
-    phone: phoneForSeed('ploy_ev'),
-  },
-  {
-    id: 'friend-tonn',
-    handle: 'tonn_mechanic',
-    displayName: 'ช่างต้น มอเตอร์ไซค์ไฟฟ้า',
-    subtitle: 'เพื่อนที่อาจรู้จัก · ช่างซ่อม EV',
-    avatarColor: '#2E8CFF',
-    kind: 'friend',
-    phone: phoneForSeed('tonn_mechanic'),
-  },
-];
+/** Personal contacts not tied to any shop — live graph only, no simulated people */
+const FRIEND_RESULTS: SearchResult[] = [];
 
 export const SEARCH_DIRECTORY: SearchResult[] = [
   ...OFFICIAL_RESULTS,

@@ -12,6 +12,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { FeedItem } from '@/modules/feed/domain/types';
+import { isPlaceholderMusicText, stripFakeMusicCaption } from '@/modules/feed/domain/feedMusic';
+import { ProductVideoThumb } from '@/modules/store/ui/sell/ProductVideoThumb';
 import { colors } from '@/shared/theme/colors';
 
 const COLUMNS = 3;
@@ -87,10 +89,19 @@ export function ContentGrid({
         const caption =
           mode === 'showroom'
             ? item.product.name
-            : item.caption?.trim() || item.product.name;
+            : stripFakeMusicCaption(item.caption) ||
+              (isPlaceholderMusicText(item.product.name) ? '' : item.product.name);
         const body = (
           <>
-            {item.imageUri ? (
+            {item.videoUri && !item.imageUri ? (
+              <ProductVideoThumb
+                uri={item.videoUri}
+                autoPlay={false}
+                muted
+                interactive={false}
+                style={StyleSheet.absoluteFill}
+              />
+            ) : item.imageUri ? (
               <Image
                 source={{ uri: item.imageUri }}
                 style={StyleSheet.absoluteFill}

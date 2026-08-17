@@ -31,8 +31,8 @@ async function main() {
   startPromotionExpiryJob(60_000);
   startEscrowAutoCompleteJob(60 * 60_000);
 
-  server.listen(env.port, () => {
-    console.log(`BoomMall API listening on :${env.port}`);
+  server.listen(env.port, env.hostBind, () => {
+    console.log(`BoomMall API listening on ${env.hostBind}:${env.port}`);
     console.log(`Domains: auth-profile | ecommerce-merchant | chat-realtime | content-feed`);
     console.log(`Chat Socket.io path: ${chat.path}`);
     console.log(

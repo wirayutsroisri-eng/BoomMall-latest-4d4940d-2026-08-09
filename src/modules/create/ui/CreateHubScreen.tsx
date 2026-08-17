@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { colors } from '@/shared/theme/colors';
-import { safeReplace } from '@/shared/navigation/safeNavigate';
+import { openCreateCamera, safeReplace } from '@/shared/navigation/safeNavigate';
 
 type CreateContext = {
   key: string;
@@ -24,9 +24,9 @@ const CONTEXTS: CreateContext[] = [
     subtitle: 'คลิปฟีด · สตอรี่ · คอนเทนต์ทั่วไป',
     icon: 'camera',
     accent: '#00D68F',
-    onPress: () => {
-      safeReplace('/create-modal');
-    },
+      onPress: () => {
+        openCreateCamera();
+      },
   },
   {
     key: 'demand',

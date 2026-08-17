@@ -2,6 +2,7 @@
  * Facebook Login — verify access token via Graph API /me.
  */
 
+import { createHmac } from 'node:crypto';
 import { AppError } from '../../lib/errors';
 
 export type VerifiedFacebookIdentity = {
@@ -43,6 +44,13 @@ export async function verifyFacebookAccessToken(
   const url = new URL('https://graph.facebook.com/me');
   url.searchParams.set('fields', 'id,name,email');
   url.searchParams.set('access_token', accessToken);
+  const appSecret = process.env.FACEBOOK_APP_SECRET?.trim();
+  if (appSecret) {
+    url.searchParams.set(
+      'appsecret_proof',
+      createHmac('sha256', appSecret).update(accessToken).digest('hex'),
+    );
+  }
 
   const res = await fetch(url);
   if (!res.ok) {

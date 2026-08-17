@@ -230,7 +230,7 @@ export const useMusicPlayerStore = create<MusicPlayerState>((set, get) => {
       if (!track) return;
       if (playing) {
         musicAudioPlayer.pause();
-        set({ playing: false });
+        set({ playing: false, miniVisible: false });
       } else {
         void ensureMusicAudioSession().then(() => {
           musicAudioPlayer.play();
@@ -242,7 +242,7 @@ export const useMusicPlayerStore = create<MusicPlayerState>((set, get) => {
 
     pause: () => {
       musicAudioPlayer.pause();
-      set({ playing: false });
+      set({ playing: false, miniVisible: false });
     },
 
     next: async () => {
@@ -259,7 +259,7 @@ export const useMusicPlayerStore = create<MusicPlayerState>((set, get) => {
           queue = await ensureAutoplayQueue(get, set);
           if (index >= queue.length - 1) {
             musicAudioPlayer.pause();
-            set({ playing: false });
+            set({ playing: false, miniVisible: false });
             return;
           }
         }

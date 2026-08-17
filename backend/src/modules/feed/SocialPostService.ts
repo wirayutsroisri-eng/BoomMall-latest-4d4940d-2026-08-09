@@ -12,6 +12,8 @@ import { AppError } from '../../lib/errors';
 export type SocialPostDto = {
   id: string;
   authorId: string;
+  authorName?: string | null;
+  authorHandle?: string | null;
   body: string;
   media: unknown;
   status: string;
@@ -167,6 +169,24 @@ export async function listSocialPosts(
       take: opts?.nearby ? Math.min(take * 4, 200) : take,
     });
     let mapped = rows.map((row) => ({ ...mapPost(row), liked: likedIds.has(row.id) }));
+    try {
+      const authorIds = [...new Set(mapped.map((p) => p.authorId))];
+      const profiles = await prisma.userProfile.findMany({
+        where: { userId: { in: authorIds } },
+        select: { userId: true, displayName: true, handle: true },
+      });
+      const byUser = new Map(profiles.map((p) => [p.userId, p]));
+      mapped = mapped.map((p) => {
+        const profile = byUser.get(p.authorId);
+        return {
+          ...p,
+          authorName: profile?.displayName ?? p.authorName,
+          authorHandle: profile?.handle ?? p.authorHandle,
+        };
+      });
+    } catch {
+      /* author snapshot in mediaJson is enough */
+    }
     if (opts?.nearby) {
       const radius = opts.nearby.radiusKm ?? 10;
       mapped = mapped
@@ -348,9 +368,13 @@ function mapPost(row: {
   lane?: string;
   createdAt: Date;
 }): SocialPostDto {
+  const media = row.mediaJson;
+  const blob = media && typeof media === 'object' && !Array.isArray(media) ? (media as Record<string, unknown>) : {};
   return {
     id: row.id,
     authorId: row.authorId,
+    authorName: typeof blob.authorName === 'string' ? blob.authorName : null,
+    authorHandle: typeof blob.authorHandle === 'string' ? blob.authorHandle : null,
     body: row.body,
     media: row.mediaJson,
     status: row.status,

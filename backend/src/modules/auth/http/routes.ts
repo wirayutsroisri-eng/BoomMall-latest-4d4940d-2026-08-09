@@ -18,7 +18,13 @@ import {
   EULA_MARKETPLACE,
   EULA_PRIVACY,
 } from '../ProfileService';
-import { exchangeSocialLogin, loginEmail, registerEmail } from '../AuthService';
+import {
+  exchangeSocialLogin,
+  loginEmail,
+  registerEmail,
+  requestPhoneOtp,
+  verifyPhoneOtp,
+} from '../AuthService';
 import { authDomainJwtStatus } from '../JwtService';
 import { followCounts, followUser, listFollowers, listFollowing, unfollowUser } from '../FollowService';
 import { adminResetPassword, adminSetUserRole, deleteOwnAccount } from '../AccountService';
@@ -52,6 +58,36 @@ authDomainRouter.post('/login/social', async (req, res, next) => {
         displayName: body.displayName ? String(body.displayName) : undefined,
         handle: body.handle ? String(body.handle) : undefined,
         identityToken: body.identityToken ? String(body.identityToken) : undefined,
+      }),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+authDomainRouter.post('/otp/request', async (req, res, next) => {
+  try {
+    const body = req.body ?? {};
+    res.json({
+      ok: true,
+      data: await requestPhoneOtp({
+        phone: String(body.phone ?? ''),
+        ipHint: req.ip,
+      }),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+authDomainRouter.post('/otp/verify', async (req, res, next) => {
+  try {
+    const body = req.body ?? {};
+    res.json({
+      ok: true,
+      data: await verifyPhoneOtp({
+        phone: String(body.phone ?? ''),
+        code: String(body.code ?? body.otp ?? ''),
       }),
     });
   } catch (e) {

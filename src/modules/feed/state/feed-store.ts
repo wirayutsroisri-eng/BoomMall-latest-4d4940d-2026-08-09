@@ -1,12 +1,16 @@
 import { create } from 'zustand';
-import { mockFeedsData } from '../data/mockFeedsData';
-import { mockMyContent, SEED_LIKED_IDS, SEED_SAVED_IDS } from '../data/mockMyContent';
-import { mockComments } from '../data/mockComments';
+import { createJSONStorage, persist } from 'zustand/middleware';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useVaultStore } from '@/modules/vault/state/vault-store';
 import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
+import { useAuthStore } from '@/modules/auth/state/auth-store';
 import { CHANTHABURI } from '@/modules/matching/domain/geo';
 import { runPostMatching } from '@/modules/matching/domain/run-post-matching';
-import { publishSocialPost, syncFeedComment } from '@/modules/feed/data/feedEngageApi';
+import { fetchFeedPosts, publishSocialPost, syncFeedComment } from '@/modules/feed/data/feedEngageApi';
+import { mergeFeedItems, socialPostToFeedItem } from '@/modules/feed/data/mapSocialPost';
+import { sanitizeMusicTitle, stripFakeMusicCaption } from '@/modules/feed/domain/feedMusic';
+import { isLiveUgcFeedItem, keepPersistedFeedItems } from '@/modules/feed/domain/isLiveUgcFeedItem';
+import { uploadFeedMedia } from '@/modules/feed/data/uploadFeedMedia';
 import {
   DEFAULT_SEARCH_RADIUS,
   type SearchRadiusOption,
@@ -70,6 +74,7 @@ type FeedState = {
   toggleSave: (id: string) => void;
   tipClip: (id: string, amount: number) => void;
   addPost: (input: NewPostInput) => string;
+  renameOwnPosts: (displayName: string) => void;
   openProductSheet: (productId: string) => void;
   closeProductSheet: () => void;
   openComments: (feedId: string) => void;
@@ -80,44 +85,20 @@ type FeedState = {
   toggleCommentLike: (feedId: string, commentId: string) => void;
   openCreatorProfile: (handle: string, feedId?: string) => void;
   closeCreatorProfile: () => void;
+  hydrateFromServer: () => Promise<void>;
 };
-
-const commentsByFeedId = mockComments.reduce<Record<string, FeedComment[]>>((acc, c) => {
-  acc[c.feedId] = [...(acc[c.feedId] ?? []), c];
-  return acc;
-}, {});
 
 let commentSeq = 1000;
 
-function seedTips(id: string, likes: number) {
-  // ยอดเหรียญจำลอง — สัดส่วนจากไลก์ ให้กริด/แถบขวามีตัวเลขทันที
-  let h = 0;
-  for (let i = 0; i < id.length; i += 1) h = (h * 33 + id.charCodeAt(i)) >>> 0;
-  return Math.max(12, Math.floor(likes * 0.08) + (h % 240));
-}
-
-/** Seed engagement: บางคลิปถูกกดถูกใจ/บันทึกไว้แล้ว เพื่อให้แท็บโปรไฟล์มีคอนเทนต์ */
-const seedItems: FeedItem[] = [
-  ...mockFeedsData.map((item) => ({
-    ...item,
-    liked: item.liked ?? SEED_LIKED_IDS.has(item.id),
-    saved: item.saved ?? SEED_SAVED_IDS.has(item.id),
-    tips: item.tips ?? seedTips(item.id, item.likes),
-  })),
-  // โพสต์ของโปรไฟล์เรา — ต่อท้ายเพื่อไม่รบกวนลำดับ For You เดิม
-  ...mockMyContent.map((item) => ({
-    ...item,
-    tips: item.tips ?? seedTips(item.id, item.likes),
-  })),
-];
-
-export const useFeedStore = create<FeedState>((set) => ({
+export const useFeedStore = create<FeedState>()(
+  persist(
+    (set, get) => ({
   tab: 'foryou',
-  items: seedItems,
+  items: [],
   activeProductId: null,
   activeCommentsFeedId: null,
   activeTipFeedId: null,
-  commentsByFeedId,
+  commentsByFeedId: {},
   activeCreatorHandle: null,
   activeCreatorFeedId: null,
   creatorProfileNonce: 0,
@@ -208,7 +189,7 @@ export const useFeedStore = create<FeedState>((set) => ({
       shares: 0,
       tips: 0,
       isLive: false,
-      musicTitle: input.musicTitle?.trim() || 'Original Sound — BoomMall',
+      musicTitle: input.musicTitle?.trim() || '',
       gradient: ['#0B3D2E', '#1A7A55'],
       imageUri: imageUris?.[0] ?? input.imageUri,
       imageWidth: input.imageWidth,
@@ -243,15 +224,52 @@ export const useFeedStore = create<FeedState>((set) => ({
     };
     set((state) => ({ items: [newItem, ...state.items] }));
 
-    void publishSocialPost({
-      body: caption,
-      media: imageUris ?? (input.imageUri ? [input.imageUri] : []),
-      lat: gps.lat,
-      lng: gps.lng,
-      locationLabel: newItem.location,
-      tags: newItem.product.tags,
-      lane: newItem.lane,
-    });
+    void (async () => {
+      const uploaded = await uploadFeedMedia({
+        imageUris,
+        videoUri: input.videoUri,
+      });
+      const saved = await publishSocialPost({
+        body: caption,
+        media: {
+          images: uploaded.imageUris,
+          video: uploaded.videoUri,
+          musicTitle: newItem.musicTitle,
+          overlayText: newItem.overlayText,
+          overlayTextColor: newItem.overlayTextColor,
+          overlayTransform: newItem.overlayTransform,
+          authorName: author,
+          authorHandle,
+        },
+        lat: gps.lat,
+        lng: gps.lng,
+        locationLabel: newItem.location,
+        tags: newItem.product.tags,
+        lane: newItem.lane,
+      });
+      const auth = useAuthStore.getState().user;
+      set((state) => ({
+        items: state.items.map((item) => {
+          if (item.id !== id) return item;
+          const next = saved
+            ? {
+                ...item,
+                ...socialPostToFeedItem(saved, {
+                  myUserId: auth?.id,
+                  myHandle: authorHandle,
+                }),
+                isUserPost: true,
+              }
+            : item;
+          return {
+            ...next,
+            imageUri: uploaded.imageUris[0] ?? next.imageUri,
+            imageUris: uploaded.imageUris.length ? uploaded.imageUris : next.imageUris,
+            videoUri: uploaded.videoUri ?? next.videoUri,
+          };
+        }),
+      }));
+    })();
 
     // Matching only for board demand posts
     if (isJobPost && boardSide === 'demand') {
@@ -267,6 +285,17 @@ export const useFeedStore = create<FeedState>((set) => ({
     }
 
     return id;
+  },
+  renameOwnPosts: (displayName) => {
+    const name = displayName.trim();
+    if (!name) return;
+    set((state) => ({
+      items: state.items.map((item) =>
+        item.isUserPost
+          ? { ...item, author: name, product: { ...item.product, shopName: name } }
+          : item,
+      ),
+    }));
   },
   openProductSheet: (productId) => set({ activeProductId: productId }),
   closeProductSheet: () => set({ activeProductId: null }),
@@ -316,4 +345,47 @@ export const useFeedStore = create<FeedState>((set) => ({
       creatorProfileNonce: state.creatorProfileNonce + 1,
     })),
   closeCreatorProfile: () => set({ activeCreatorHandle: null, activeCreatorFeedId: null }),
-}));
+  hydrateFromServer: async () => {
+    const rows = await fetchFeedPosts();
+    const auth = useAuthStore.getState().user;
+    const profileName = useLoyaltyStore.getState().profile.displayName.trim();
+    const remote = rows
+      .map((row) => {
+        const item = socialPostToFeedItem(row, { myUserId: auth?.id, myHandle: auth?.handle });
+        return {
+          ...item,
+          musicTitle: sanitizeMusicTitle(item.musicTitle),
+          author: item.isUserPost && profileName ? profileName : item.author,
+        };
+      })
+      .filter(isLiveUgcFeedItem);
+    const local = keepPersistedFeedItems(get().items);
+    if (!remote.length && local.length === get().items.length) return;
+    set({ items: mergeFeedItems(remote, local) });
+  },
+    }),
+    {
+      name: 'boommall-feed-v4',
+      storage: createJSONStorage(() => AsyncStorage),
+      partialize: (s) => ({ items: keepPersistedFeedItems(s.items).slice(0, 80) }),
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<FeedState>;
+        const profileName = useLoyaltyStore.getState().profile.displayName.trim();
+        const items = keepPersistedFeedItems(p.items ?? []).map((item) => ({
+          ...item,
+          musicTitle: sanitizeMusicTitle(item.musicTitle),
+          caption: stripFakeMusicCaption(item.caption),
+          author: item.isUserPost && profileName ? profileName : item.author,
+        }));
+        return { ...current, ...p, items };
+      },
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        const items = keepPersistedFeedItems(state.items);
+        if (items.length !== state.items.length) {
+          useFeedStore.setState({ items });
+        }
+      },
+    },
+  ),
+);

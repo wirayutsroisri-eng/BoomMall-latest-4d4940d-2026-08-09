@@ -37,7 +37,7 @@ export function MusicMiniPlayer() {
     // Keep session wired; status listener already attached in store.
   }, []);
 
-  if (!track || !miniVisible || expanded || onListenRoute) return null;
+  if (!track || !playing || !miniVisible || expanded || onListenRoute) return null;
 
   return (
     <Animated.View

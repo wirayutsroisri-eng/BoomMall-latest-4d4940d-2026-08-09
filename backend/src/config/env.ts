@@ -23,6 +23,8 @@ function optInt(name: string, fallback: number): number {
 
 export type AppEnv = {
   port: number;
+  /** Listen address — 0.0.0.0 so a physical iPhone on LAN can reach the API */
+  hostBind: string;
   adminApiKey: string;
   corsOrigin: string[];
   initialTreasuryMint: bigint;
@@ -109,6 +111,7 @@ export function loadEnv(): AppEnv {
 
   cached = {
     port: optInt('PORT', 4000),
+    hostBind: process.env.API_HOST_BIND?.trim() || '0.0.0.0',
     adminApiKey: required('ADMIN_API_KEY'),
     corsOrigin: (process.env.CORS_ORIGIN ?? '')
       .split(',')

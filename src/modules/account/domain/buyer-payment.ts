@@ -29,7 +29,7 @@ export const BUYER_PAYMENT_META: Record<
 > = {
   truemoney: {
     title: 'TrueMoney Wallet',
-    hint: 'เบอร์โทรที่ผูกวอลเล็ต — จ่ายเข้า BoomMall ไม่ใช่โอนร้านตรง',
+    hint: 'ระบุเบอร์โทรศัพท์ที่ลงทะเบียนกับ TrueMoney Wallet',
     icon: 'phone-portrait-outline',
     needsDetails: true,
     methodId: 'truemoney',
