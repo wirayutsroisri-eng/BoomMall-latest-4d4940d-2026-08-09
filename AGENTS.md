@@ -2,6 +2,11 @@
 
 Read the exact versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing any code.
 
+# Iron rule: confirm before delete
+
+Any control that deletes or permanently removes user data must ask first (`Alert.alert` ยกเลิก + ลบ). Never delete on the first tap.
+See `.cursor/rules/confirm-before-delete.mdc`.
+
 # Iron rule: drag-down to dismiss
 
 Every closable screen / modal / sheet must support drag-down to close (not only an X button).

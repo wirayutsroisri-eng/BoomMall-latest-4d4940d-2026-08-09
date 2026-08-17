@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,6 +15,7 @@ import Animated, {
 import { useChatStore } from '@/modules/chat/state/chat-store';
 import { SEARCH_DIRECTORY } from '@/modules/search/data/mockSearchDirectory';
 import { colors } from '@/shared/theme/colors';
+import { ENABLE_SIMULATED_CAMERA_TOOLS } from '@/shared/compliance/appStoreGates';
 
 const FRAME_SIZE = 240;
 
@@ -67,15 +68,25 @@ export function QrScanScreen() {
     }, 220);
   };
 
-  /** Simulator has no camera hardware — this cycles through the mock directory so the
-   *  "successful scan → add friend → open chat" flow can be fully demoed on-device. */
+  const goAddFriend = () => {
+    if (router.canDismiss()) router.dismiss();
+    router.push('/(tabs)/chat/add-friend');
+  };
+
+  /** Dev-only: Simulator has no camera. Hidden in App Store compliance mode. */
   const simulateScan = () => {
+    if (!ENABLE_SIMULATED_CAMERA_TOOLS) return;
     const candidates = SEARCH_DIRECTORY.filter(
       (r) => !conversations.some((c) => normalizeHandle(c.peerHandle) === r.handle),
     );
     const pool = candidates.length > 0 ? candidates : SEARCH_DIRECTORY;
+    if (pool.length === 0) {
+      Alert.alert('ยังไม่มีรายชื่อ', 'พิมพ์ชื่อผู้ใช้หรือเพิ่มเพื่อนแทนการจำลองสแกน');
+      return;
+    }
     const target = pool[cycleRef.current % pool.length];
     cycleRef.current += 1;
+    if (!target) return;
     handleScanned(target.handle, target.displayName);
   };
 
@@ -102,20 +113,31 @@ export function QrScanScreen() {
           <Animated.View style={[styles.scanLine, scanLineStyle]} />
         </View>
         <Text style={styles.hint}>จ่อกล้องไปที่ QR Code ของเพื่อนหรือร้านค้า</Text>
-        <Text style={styles.hintSub}>เพิ่มเพื่อนและเริ่มแชตได้ทันทีที่สแกนสำเร็จ</Text>
+        <Text style={styles.hintSub}>
+          {ENABLE_SIMULATED_CAMERA_TOOLS
+            ? 'เพิ่มเพื่อนและเริ่มแชตได้ทันทีที่สแกนสำเร็จ'
+            : 'ยังไม่มีกล้องสแกนในเวอร์ชันนี้ — เพิ่มเพื่อนด้วยชื่อผู้ใช้แทน'}
+        </Text>
       </View>
 
       <View style={[styles.bottomPanel, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-        <Pressable
-          style={[styles.simulateBtn, resolving && styles.simulateBtnBusy]}
-          onPress={simulateScan}
-          disabled={resolving}
-        >
-          <Ionicons name="scan" size={18} color={colors.brand.ink} />
-          <Text style={styles.simulateBtnText}>
-            {resolving ? 'กำลังเพิ่มเพื่อน...' : 'จำลองสแกนสำเร็จ (Simulator)'}
-          </Text>
-        </Pressable>
+        {ENABLE_SIMULATED_CAMERA_TOOLS ? (
+          <Pressable
+            style={[styles.simulateBtn, resolving && styles.simulateBtnBusy]}
+            onPress={simulateScan}
+            disabled={resolving}
+          >
+            <Ionicons name="scan" size={18} color={colors.brand.ink} />
+            <Text style={styles.simulateBtnText}>
+              {resolving ? 'กำลังเพิ่มเพื่อน...' : 'จำลองสแกนสำเร็จ (Simulator)'}
+            </Text>
+          </Pressable>
+        ) : (
+          <Pressable style={styles.simulateBtn} onPress={goAddFriend}>
+            <Ionicons name="person-add" size={18} color={colors.brand.ink} />
+            <Text style={styles.simulateBtnText}>เพิ่มเพื่อน</Text>
+          </Pressable>
+        )}
 
         <View style={styles.divider}>
           <View style={styles.dividerLine} />
@@ -123,7 +145,7 @@ export function QrScanScreen() {
           <View style={styles.dividerLine} />
         </View>
 
-        <Pressable style={styles.manualBtn} onPress={() => router.back()}>
+        <Pressable style={styles.manualBtn} onPress={goAddFriend}>
           <Ionicons name="at" size={16} color="#fff" />
           <Text style={styles.manualBtnText}>พิมพ์ชื่อผู้ใช้ / ไอดีแทน</Text>
         </Pressable>

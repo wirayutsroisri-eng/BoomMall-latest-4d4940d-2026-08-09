@@ -1,26 +1,27 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAdminAuth } from './AdminAuthContext';
 import { LoginScreen } from './LoginScreen';
+import { canAccessPath, homeForSession } from './access';
 
-/** Gate: only authenticated ADMIN may enter the portal (incl. handbook). */
+/** Gate: any valid desk code may enter Admin OS; pages filter by nav. */
 export function RequireAdmin({ children }: { children: React.ReactNode }) {
-  const { ready, isAdmin, session } = useAdminAuth();
+  const { ready, signedIn, session } = useAdminAuth();
   const location = useLocation();
 
   if (!ready) {
     return (
       <div className="flex min-h-screen items-center justify-center text-sm text-[#122820]/70">
-        กำลังตรวจสอบสิทธิ์ ADMIN…
+        กำลังตรวจสอบสิทธิ์…
       </div>
     );
   }
 
-  if (!session || !isAdmin) {
+  if (!signedIn || !session) {
     return <LoginScreen redirectTo={location.pathname} />;
   }
 
-  if (location.pathname.includes('handbook') && !session.permissions.handbook) {
-    return <Navigate to="/" replace />;
+  if (!canAccessPath(session, location.pathname)) {
+    return <Navigate to={homeForSession(session)} replace />;
   }
 
   return <>{children}</>;

@@ -19,6 +19,8 @@ import type { WarehouseRole } from '@/modules/warehouse/domain/types';
 import { useInventoryStore } from '@/modules/commerce/state/inventory-store';
 import { BASE_CATEGORIES } from '@/modules/store/state/categories-store';
 import { colors } from '@/shared/theme/colors';
+import { ENABLE_FAKE_LIVE_AND_DEMO_ACCEPT } from '@/shared/compliance/appStoreGates';
+import { promptText } from '@/shared/components/AppPrompt';
 
 const ASSIGNABLE_ROLES: WarehouseRole[] = ['ADMIN', 'INVENTORY_MANAGER', 'SELLER', 'VIEWER'];
 
@@ -297,30 +299,32 @@ export function WarehouseSharingScreen() {
                         <Text style={styles.personName}>{profile?.name ?? inv.toShopId}</Text>
                         <Text style={styles.meta}>เชิญเป็น {ROLE_LABEL[inv.role]}</Text>
                       </View>
-                      <Pressable
-                        style={styles.demoBtn}
-                        onPress={() =>
-                          Alert.alert(
-                            'จำลองฝั่งผู้รับ (เดโม)',
-                            `${profile?.name} จะตอบคำเชิญอย่างไร?`,
-                            [
-                              {
-                                text: 'ตอบรับ',
-                                onPress: () =>
-                                  feedback(respondToInvitation(inv.id, inv.toShopId, true)),
-                              },
-                              {
-                                text: 'ปฏิเสธ',
-                                onPress: () =>
-                                  feedback(respondToInvitation(inv.id, inv.toShopId, false)),
-                              },
-                              { text: 'ยกเลิก', style: 'cancel' },
-                            ],
-                          )
-                        }
-                      >
-                        <Text style={styles.demoBtnText}>จำลองการตอบรับ</Text>
-                      </Pressable>
+                      {ENABLE_FAKE_LIVE_AND_DEMO_ACCEPT ? (
+                        <Pressable
+                          style={styles.demoBtn}
+                          onPress={() =>
+                            Alert.alert(
+                              'จำลองฝั่งผู้รับ (เดโม)',
+                              `${profile?.name} จะตอบคำเชิญอย่างไร?`,
+                              [
+                                {
+                                  text: 'ตอบรับ',
+                                  onPress: () =>
+                                    feedback(respondToInvitation(inv.id, inv.toShopId, true)),
+                                },
+                                {
+                                  text: 'ปฏิเสธ',
+                                  onPress: () =>
+                                    feedback(respondToInvitation(inv.id, inv.toShopId, false)),
+                                },
+                                { text: 'ยกเลิก', style: 'cancel' },
+                              ],
+                            )
+                          }
+                        >
+                          <Text style={styles.demoBtnText}>จำลองการตอบรับ</Text>
+                        </Pressable>
+                      ) : null}
                     </View>
                   );
                 })}
@@ -487,14 +491,15 @@ export function WarehouseSharingScreen() {
                 <Pressable
                   style={[styles.requestBtn, pending && { opacity: 0.5 }]}
                   disabled={pending}
-                  onPress={() =>
-                    Alert.prompt(
-                      `ขอใช้ ${w.name}`,
-                      'ฝากข้อความถึงเจ้าของคลัง (ไม่บังคับ)',
-                      (text) => feedback(sendAccessRequest(w.id, text?.trim() || undefined)),
-                      'plain-text',
-                    )
-                  }
+                  onPress={() => {
+                    void promptText({
+                      title: `ขอใช้ ${w.name}`,
+                      message: 'ฝากข้อความถึงเจ้าของคลัง (ไม่บังคับ)',
+                    }).then((text) => {
+                      if (text == null) return;
+                      feedback(sendAccessRequest(w.id, text.trim() || undefined));
+                    });
+                  }}
                 >
                   <Text style={styles.requestBtnText}>
                     {pending ? 'รออนุมัติ' : 'ขอใช้คลัง'}

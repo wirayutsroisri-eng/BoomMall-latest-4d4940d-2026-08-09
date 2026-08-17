@@ -23,7 +23,7 @@ type CartState = {
   toggleLine: (variantId: string, warehouseId: WarehouseId) => void;
   toggleShop: (variantIds: string[], selected: boolean) => void;
   toggleAll: (selected: boolean) => void;
-  /** Commit only selected lines; release reservations on unselected leftovers */
+  /** Deduct warehouse stock only when the order is placed */
   checkoutSelected: () => { ok: boolean; message: string; total: number; count: number };
   checkout: () => { ok: boolean; message: string; total: number };
   clear: () => void;
@@ -31,30 +31,39 @@ type CartState = {
   subtotal: () => number;
   selectedCount: () => number;
   selectedSubtotal: () => number;
+  qtyOf: (variantId: string) => number;
 };
+
+function remainingStock(variantId: string, warehouseId: WarehouseId, alreadyInCart: number) {
+  const available = useInventoryStore.getState().available(variantId, warehouseId);
+  return Math.max(0, available - alreadyInCart);
+}
 
 export const useCartStore = create<CartState>((set, get) => ({
   lines: [],
 
+  qtyOf: (variantId) =>
+    get()
+      .lines.filter((l) => l.variantId === variantId)
+      .reduce((n, l) => n + l.qty, 0),
+
   addToCart: ({ variantId, warehouseId, qty, unitPrice }) => {
-    const inventory = useInventoryStore.getState();
-    const result = inventory.reserveStock(variantId, warehouseId, qty);
-    if (!result.ok) {
+    if (!Number.isFinite(qty) || qty < 1) {
+      return { ok: false, message: 'จำนวนไม่ถูกต้อง' };
+    }
+    const existing = get().lines.find(
+      (l) => l.variantId === variantId && l.warehouseId === warehouseId,
+    );
+    const already = existing?.qty ?? 0;
+    const left = remainingStock(variantId, warehouseId, already);
+    if (qty > left) {
       return {
         ok: false,
-        message:
-          result.reason === 'INSUFFICIENT'
-            ? 'สต็อกไม่พอ (Real-time sync)'
-            : result.reason === 'STALE_REVISION'
-              ? 'สต็อกถูกอัปเดต — ลองอีกครั้ง (thread-safe)'
-              : 'ไม่พบสต็อกคลังนี้',
+        message: left <= 0 ? 'สต็อกไม่พอ หรืออยู่ในตะกร้าครบแล้ว' : `สต็อกไม่พอ · เหลือใส่ได้อีก ${left} ชิ้น`,
       };
     }
 
     set((state) => {
-      const existing = state.lines.find(
-        (l) => l.variantId === variantId && l.warehouseId === warehouseId,
-      );
       if (existing) {
         return {
           lines: state.lines.map((l) =>
@@ -72,11 +81,11 @@ export const useCartStore = create<CartState>((set, get) => ({
       };
     });
 
-    return { ok: true, message: `จองสต็อกแล้ว · คงเหลือ ${result.available}` };
+    const available = useInventoryStore.getState().available(variantId, warehouseId);
+    return { ok: true, message: `ใส่ตะกร้าแล้ว · มีสินค้า ${available} ชิ้น` };
   },
 
   setQty: (variantId, warehouseId, qty) => {
-    const inventory = useInventoryStore.getState();
     const line = get().lines.find(
       (l) => l.variantId === variantId && l.warehouseId === warehouseId,
     );
@@ -85,18 +94,9 @@ export const useCartStore = create<CartState>((set, get) => ({
       get().removeLine(variantId, warehouseId);
       return { ok: true, message: 'ลบออกจากตะกร้าแล้ว' };
     }
-    const delta = qty - line.qty;
-    if (delta === 0) return { ok: true, message: 'ไม่เปลี่ยนแปลง' };
-    if (delta > 0) {
-      const result = inventory.reserveStock(variantId, warehouseId, delta);
-      if (!result.ok) {
-        return {
-          ok: false,
-          message: result.reason === 'INSUFFICIENT' ? 'สต็อกไม่พอ' : 'อัปเดตจำนวนไม่สำเร็จ',
-        };
-      }
-    } else {
-      inventory.releaseReservation(variantId, warehouseId, -delta);
+    const available = useInventoryStore.getState().available(variantId, warehouseId);
+    if (qty > available) {
+      return { ok: false, message: `สต็อกไม่พอ · มีสินค้า ${available} ชิ้น` };
     }
     set((state) => ({
       lines: state.lines.map((l) =>
@@ -107,11 +107,6 @@ export const useCartStore = create<CartState>((set, get) => ({
   },
 
   removeLine: (variantId, warehouseId) => {
-    const inventory = useInventoryStore.getState();
-    const line = get().lines.find(
-      (l) => l.variantId === variantId && l.warehouseId === warehouseId,
-    );
-    if (line) inventory.releaseReservation(variantId, warehouseId, line.qty);
     set((state) => ({
       lines: state.lines.filter(
         (l) => !(l.variantId === variantId && l.warehouseId === warehouseId),
@@ -150,7 +145,7 @@ export const useCartStore = create<CartState>((set, get) => ({
 
     let total = 0;
     for (const line of selected) {
-      const result = inventory.commitSale(line.variantId, line.warehouseId, line.qty);
+      const result = inventory.sellAvailable(line.variantId, line.warehouseId, line.qty);
       if (!result.ok) {
         return {
           ok: false,
@@ -162,16 +157,11 @@ export const useCartStore = create<CartState>((set, get) => ({
       total += line.unitPrice * line.qty;
     }
 
-    // Release reservations for unselected leftover lines
     const leftover = lines.filter((l) => l.selected === false);
-    for (const line of leftover) {
-      inventory.releaseReservation(line.variantId, line.warehouseId, line.qty);
-    }
-
-    set({ lines: [] });
+    set({ lines: leftover });
     return {
       ok: true,
-      message: 'สั่งซื้อสำเร็จ · สต็อกซิงก์แล้ว',
+      message: 'สั่งซื้อสำเร็จ · ตัดสต็อกจากคลังแล้ว',
       total,
       count: selected.reduce((n, l) => n + l.qty, 0),
     };
@@ -182,13 +172,7 @@ export const useCartStore = create<CartState>((set, get) => ({
     return { ok: result.ok, message: result.message, total: result.total };
   },
 
-  clear: () => {
-    const inventory = useInventoryStore.getState();
-    for (const line of get().lines) {
-      inventory.releaseReservation(line.variantId, line.warehouseId, line.qty);
-    }
-    set({ lines: [] });
-  },
+  clear: () => set({ lines: [] }),
 
   lineCount: () => get().lines.reduce((n, l) => n + l.qty, 0),
   subtotal: () => get().lines.reduce((n, l) => n + l.qty * l.unitPrice, 0),

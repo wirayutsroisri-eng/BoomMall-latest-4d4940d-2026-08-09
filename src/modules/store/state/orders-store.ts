@@ -130,22 +130,182 @@ const seedMyOrders: MyOrder[] = [
   },
 ];
 
+const SEED_NOW = Date.now();
+
 const seedIncomingOrders: IncomingOrder[] = [
+  {
+    id: 'io-kit',
+    masterSkuId: 'ms-ext-02',
+    buyerId: 'buyer-kit-chanthaburi',
+    customerName: 'ช่างเอก คอนเวอร์ชัน',
+    customerAvatarColor: '#2E8CFF',
+    productTitle: 'Hub Motor ล้อ 14"',
+    qty: 5,
+    amount: 20390,
+    currency: 'THB',
+    status: 'paid',
+    placedAt: '12 นาทีที่แล้ว',
+    placedAtIso: new Date(SEED_NOW - 12 * 60_000).toISOString(),
+    shippingSpeed: 'standard',
+    imageUri: 'https://picsum.photos/seed/boom-motor-hub/720/720',
+    recipientPhone: '0815550199',
+    shippingAddress: '88/12 ถ.ตรีรัตน์ ต.วัดใหม่ อ.เมืองจันทบุรี จ.จันทบุรี 22000',
+    paymentMethod: 'PAID',
+    sku: 'BEV-MTR-3000',
+    variantLabel: '3000W',
+    lines: [
+      {
+        productId: 'ms-motor',
+        title: 'Hub Motor ล้อ 14"',
+        option: '3000W',
+        qty: 1,
+        sku: 'BEV-MTR-3000',
+        unitPrice: 6900,
+        imageUri: 'https://picsum.photos/seed/boom-motor-hub/720/720',
+      },
+      {
+        productId: 'ms-motor',
+        title: 'Hub Motor ล้อ 14"',
+        option: '2000W',
+        qty: 1,
+        sku: 'BEV-MTR-2000',
+        unitPrice: 5900,
+        imageUri: 'https://picsum.photos/seed/boom-motor-hub/720/720',
+      },
+      {
+        productId: 'ms-ctrl',
+        title: 'ตัวควบคุม FOC',
+        option: '680',
+        qty: 1,
+        sku: 'BEV-CTL-680',
+        unitPrice: 3200,
+        imageUri: 'https://picsum.photos/seed/boom-ctrl/720/720',
+      },
+      {
+        productId: 'ms-ctrl',
+        title: 'ตัวควบคุม FOC',
+        option: '1200',
+        qty: 1,
+        sku: 'BEV-CTL-1200',
+        unitPrice: 3800,
+        imageUri: 'https://picsum.photos/seed/boom-ctrl/720/720',
+      },
+      {
+        productId: 'ms-thr',
+        title: 'คันเร่ง Hall Sensor',
+        option: 'มาตรฐาน',
+        qty: 1,
+        sku: 'EVP-THR-STD',
+        unitPrice: 590,
+        imageUri: 'https://picsum.photos/seed/boom-throttle/720/720',
+      },
+    ],
+  },
   {
     id: 'io-1',
     masterSkuId: 'ms-05',
-    customerName: 'ลูกค้า VIP — คุณมิ้นท์',
+    buyerId: 'buyer-weerayut',
+    customerName: 'นายวีรยุทธ สร้อยศรี',
     customerAvatarColor: '#F5A524',
     productTitle: '60V 32Ah Smart BMS Pack',
     qty: 1,
     amount: 18900,
     currency: 'THB',
     status: 'paid',
-    placedAt: '12 นาทีที่แล้ว',
+    placedAt: '3 ชม. ที่แล้ว',
+    placedAtIso: new Date(SEED_NOW - 3.2 * 3600_000).toISOString(),
+    shippingSpeed: 'express',
+    imageUri: 'https://picsum.photos/seed/boom-shop-ms-05/720/720',
+    recipientPhone: '(+66) 99 926 6218',
+    shippingAddress: '29/247 ม.7 ต.จันทนิมิต อ.เมืองจันทบุรี จ.จันทบุรี 22000',
+    paymentMethod: 'COD',
+    sku: 'BAT-60-32',
+    variantLabel: 'สีดำ · 60V/32Ah',
+    lines: [
+      {
+        title: '60V 32Ah Smart BMS Pack',
+        option: 'สีดำ · 60V/32Ah',
+        qty: 1,
+        sku: 'BAT-60-32',
+        unitPrice: 18900,
+        imageUri: 'https://picsum.photos/seed/boom-shop-ms-05/720/720',
+      },
+    ],
+  },
+  {
+    id: 'io-1b',
+    masterSkuId: 'ms-06',
+    buyerId: 'buyer-weerayut',
+    customerName: 'วีรยุทธ สร้อยศรี',
+    customerAvatarColor: '#F5A524',
+    productTitle: 'CNC Front Brake Master',
+    qty: 2,
+    amount: 2380,
+    currency: 'THB',
+    status: 'paid',
+    placedAt: '18 นาทีที่แล้ว',
+    placedAtIso: new Date(SEED_NOW - 18 * 60_000).toISOString(),
+    shippingSpeed: 'standard',
+    imageUri: 'https://picsum.photos/seed/boom-shop-ms-06/720/720',
+    recipientPhone: '0999266218',
+    shippingAddress: '29/247 ม.7 จันทนิมิต เมืองจันทบุรี จันทบุรี 22000',
+    paymentMethod: 'COD',
+    sku: 'BRK-CNC-01',
+    variantLabel: 'อะลูมิเนียม · สีเงิน',
+    lines: [
+      {
+        title: 'CNC Front Brake Master',
+        option: 'อะลูมิเนียม · สีเงิน',
+        qty: 2,
+        sku: 'BRK-CNC-01',
+        unitPrice: 1190,
+        imageUri: 'https://picsum.photos/seed/boom-shop-ms-06/720/720',
+      },
+    ],
+  },
+  {
+    id: 'io-wait',
+    masterSkuId: 'ms-09',
+    buyerId: 'buyer-fleet-chanthaburi',
+    customerName: 'ทีมฟลีทจันทบุรี',
+    customerAvatarColor: '#2E8CFF',
+    productTitle: 'Multi-Voltage Fast Charger',
+    qty: 5,
+    amount: 5550,
+    currency: 'THB',
+    status: 'paid',
+    placedAt: '6 ชม. ที่แล้ว',
+    placedAtIso: new Date(SEED_NOW - 6 * 3600_000).toISOString(),
+    shippingSpeed: 'standard',
+    imageUri: 'https://picsum.photos/seed/boom-shop-ms-09b/720/720',
+    recipientPhone: '0830001122',
+    shippingAddress: '55 นิคมอุตสาหกรรม อ.แหลมสิงห์ จ.จันทบุรี 22130',
+    paymentMethod: 'PAID',
+    sku: 'CHG-MV-02',
+    variantLabel: '48-72V',
+    lines: [
+      {
+        title: 'Multi-Voltage Fast Charger',
+        option: '48-72V',
+        qty: 3,
+        sku: 'CHG-MV-02',
+        unitPrice: 1590,
+        imageUri: 'https://picsum.photos/seed/boom-shop-ms-09b/720/720',
+      },
+      {
+        title: 'สายไฟ 10AWG Pair',
+        option: '1.5 ม. · แดง/ดำ',
+        qty: 2,
+        sku: 'CBL-10-15',
+        unitPrice: 390,
+        imageUri: 'https://picsum.photos/seed/boom-shop-cable/720/720',
+      },
+    ],
   },
   {
     id: 'io-2',
     masterSkuId: 'ms-06',
+    buyerId: 'buyer-sky',
     customerName: 'น้อง Sky',
     customerAvatarColor: '#FE2C55',
     productTitle: 'CNC Front Brake Master',
@@ -154,10 +314,19 @@ const seedIncomingOrders: IncomingOrder[] = [
     currency: 'THB',
     status: 'pending',
     placedAt: '38 นาทีที่แล้ว',
+    placedAtIso: new Date(SEED_NOW - 38 * 60_000).toISOString(),
+    shippingSpeed: 'standard',
+    imageUri: 'https://picsum.photos/seed/boom-shop-ms-06b/720/720',
+    recipientPhone: '0812345678',
+    shippingAddress: '88 ถ.ตรีรัตน์ ต.วัดใหม่ อ.เมืองจันทบุรี จ.จันทบุรี 22000',
+    paymentMethod: 'COD',
+    sku: 'BRK-CNC-01',
+    variantLabel: 'สีเงิน',
   },
   {
     id: 'io-3',
     masterSkuId: 'ms-09',
+    buyerId: 'buyer-ek',
     customerName: 'เอกช่างกลึง',
     customerAvatarColor: '#E5893A',
     productTitle: 'Multi-Voltage Fast Charger',
@@ -166,10 +335,30 @@ const seedIncomingOrders: IncomingOrder[] = [
     currency: 'THB',
     status: 'shipped',
     placedAt: 'เมื่อวาน',
+    placedAtIso: new Date(SEED_NOW - 26 * 3600_000).toISOString(),
+    shippingSpeed: 'standard',
+    imageUri: 'https://picsum.photos/seed/boom-shop-ms-09/720/720',
+    trackingNo: 'BEV-TH-44190218',
+    recipientPhone: '0891112233',
+    shippingAddress: '12/4 ม.3 ต.คมบาง อ.เมืองจันทบุรี จ.จันทบุรี 22000',
+    paymentMethod: 'PAID',
+    sku: 'CHG-MV-02',
+    variantLabel: '48-72V',
+    lines: [
+      {
+        title: 'Multi-Voltage Fast Charger',
+        option: '48-72V',
+        qty: 2,
+        sku: 'CHG-MV-02',
+        unitPrice: 1590,
+        imageUri: 'https://picsum.photos/seed/boom-shop-ms-09/720/720',
+      },
+    ],
   },
   {
     id: 'io-4',
     masterSkuId: 'ms-10',
+    buyerId: 'buyer-kob',
     customerName: 'กบสกู๊ตเตอร์',
     customerAvatarColor: '#2FA36B',
     productTitle: 'CNC Star Rim 14"',
@@ -178,6 +367,15 @@ const seedIncomingOrders: IncomingOrder[] = [
     currency: 'THB',
     status: 'delivered',
     placedAt: '3 วันที่แล้ว',
+    placedAtIso: new Date(SEED_NOW - 3 * 86400_000).toISOString(),
+    shippingSpeed: 'standard',
+    imageUri: 'https://picsum.photos/seed/boom-shop-ms-10/720/720',
+    returnRequested: true,
+    recipientPhone: '0625550199',
+    shippingAddress: '9 ซ.ตลาดน้ำ ต.ตลาด อ.เมืองจันทบุรี จ.จันทบุรี 22000',
+    paymentMethod: 'PAID',
+    sku: 'RIM-14-ST',
+    variantLabel: 'ลายดาว · ดำ',
   },
 ];
 
@@ -225,21 +423,56 @@ type OrdersState = {
   incomingOrders: IncomingOrder[];
   inquiries: ProductInquiry[];
   advanceIncomingOrder: (id: string) => void;
+  acceptIncomingReturn: (id: string) => { ok: true } | { ok: false; reason: string };
+  cancelIncomingOrder: (id: string) => { ok: true } | { ok: false; reason: string };
   cancelMyOrder: (id: string) => void;
   markInquiryRead: (id: string) => void;
   markProductAlertsSeen: (masterSkuId: string) => void;
+  upsertIncoming: (orders: IncomingOrder[]) => void;
 };
 
-export const useOrdersStore = create<OrdersState>((set) => ({
+export const useOrdersStore = create<OrdersState>((set, get) => ({
   myOrders: seedMyOrders,
   incomingOrders: seedIncomingOrders,
   inquiries: seedInquiries,
   advanceIncomingOrder: (id) =>
     set((state) => ({
-      incomingOrders: state.incomingOrders.map((o) =>
-        o.id === id ? { ...o, status: nextStatus(o.status) } : o,
-      ),
+      incomingOrders: state.incomingOrders.map((o) => {
+        if (o.id !== id) return o;
+        const status = nextStatus(o.status);
+        const trackingNo =
+          o.status === 'paid' && status === 'shipped'
+            ? o.trackingNo ?? `BEV-TH-${`${Date.now()}`.slice(-8)}`
+            : o.trackingNo;
+        return { ...o, status, trackingNo };
+      }),
     })),
+  acceptIncomingReturn: (id) => {
+    const order = get().incomingOrders.find((o) => o.id === id);
+    if (!order) return { ok: false, reason: 'ไม่พบออเดอร์' };
+    if (!order.returnRequested || order.status !== 'delivered') {
+      return { ok: false, reason: 'รายการนี้ไม่ได้ขอคืนสินค้า' };
+    }
+    set((state) => ({
+      incomingOrders: state.incomingOrders.map((o) =>
+        o.id === id ? { ...o, status: 'cancelled', returnRequested: false } : o,
+      ),
+    }));
+    return { ok: true };
+  },
+  cancelIncomingOrder: (id) => {
+    const order = get().incomingOrders.find((o) => o.id === id);
+    if (!order) return { ok: false, reason: 'ไม่พบออเดอร์' };
+    if (order.status !== 'pending') {
+      return { ok: false, reason: 'ยกเลิกได้เฉพาะออเดอร์ที่ยังไม่ชำระ' };
+    }
+    set((state) => ({
+      incomingOrders: state.incomingOrders.map((o) =>
+        o.id === id ? { ...o, status: 'cancelled' } : o,
+      ),
+    }));
+    return { ok: true };
+  },
   cancelMyOrder: (id) =>
     set((state) => ({
       myOrders: state.myOrders.map((o) => (o.id === id ? { ...o, status: 'cancelled' } : o)),
@@ -254,4 +487,15 @@ export const useOrdersStore = create<OrdersState>((set) => ({
         q.masterSkuId === masterSkuId ? { ...q, unread: false } : q,
       ),
     })),
+  upsertIncoming: (orders) =>
+    set((state) => {
+      if (!orders.length) return state;
+      const next = [...state.incomingOrders];
+      for (const order of orders) {
+        const at = next.findIndex((row) => row.id === order.id);
+        if (at >= 0) next[at] = { ...next[at], ...order, lines: order.lines ?? next[at]?.lines };
+        else next.unshift(order);
+      }
+      return { incomingOrders: next };
+    }),
 }));

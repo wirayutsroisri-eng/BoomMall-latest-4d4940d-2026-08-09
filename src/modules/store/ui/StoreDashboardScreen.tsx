@@ -1,9 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
-  Dimensions,
   FlatList,
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,9 +12,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
+import * as DocumentPicker from 'expo-document-picker';
+import { File } from 'expo-file-system';
 import { masterContentImage } from '@/modules/commerce/data/catalog';
 import { useInventoryStore } from '@/modules/commerce/state/inventory-store';
 import {
@@ -24,38 +23,56 @@ import {
   stockStatusOf,
   DEFAULT_LOW_STOCK_THRESHOLD,
 } from '@/modules/commerce/domain/stock-core';
-import type { MasterSku, StockStatus } from '@/modules/commerce/domain/types';
+import type { MasterSku, SkuVariant, StockStatus } from '@/modules/commerce/domain/types';
 import { useOrdersStore } from '@/modules/store/state/orders-store';
 import { ORDER_STATUS_LABEL } from '@/modules/store/domain/types';
+import { parseInventoryCsv } from '@/modules/store/domain/inventory-csv';
+import { coverKindOf, listingThumbUri } from '@/modules/commerce/domain/product-media';
 import { useCategoriesStore } from '@/modules/store/state/categories-store';
 import { useStockAlertsStore } from '@/modules/store/state/stock-alerts-store';
 import { useWarehouseStore, MY_SHOP_ID } from '@/modules/warehouse/state/warehouse-store';
 import type { Listing } from '@/modules/warehouse/domain/types';
 import { ProductQuickPreviewSheet } from '@/modules/store/ui/warehouse/ProductQuickPreviewSheet';
+import { PromoteProductSheet } from '@/modules/store/ui/PromoteProductSheet';
+import { SellerNotifyBanner } from '@/modules/store/ui/SellerNotifyBanner';
+import {
+  InventoryProductCard,
+  INVENTORY_CARD_H,
+} from '@/modules/store/ui/warehouse/InventoryProductCard';
+import { BarcodeScannerSheet } from '@/modules/store/ui/BarcodeScannerSheet';
+import { CategoryNameSheet } from '@/modules/store/ui/CategoryNameSheet';
 import { colors } from '@/shared/theme/colors';
 
-const SCREEN_W = Dimensions.get('window').width;
 const H_PAD = 14;
-const GRID_GAP = 10;
-const COLS = 2;
-const CARD_W = (SCREEN_W - H_PAD * 2 - GRID_GAP * (COLS - 1)) / COLS;
-/** รูปสินค้าแสดงอัตราส่วน 4:5 */
-const IMAGE_W = Math.round(CARD_W);
-const IMAGE_H = Math.round((CARD_W * 5) / 4);
-const INFO_H = 88;
-const CARD_H = IMAGE_H + INFO_H;
-const PAGE_SIZE = 30;
+const ITEM_GAP = 10;
+const ITEM_H = INVENTORY_CARD_H + ITEM_GAP;
+const MY_WAREHOUSE_ID = 'wh-boom-ev';
 
 type ToneFilter = 'all' | StockStatus;
 
+function optionLinesOf(variants: SkuVariant[]): string[] {
+  if (!variants.length) return ['ยังไม่มีรุ่น'];
+  return variants.map((v) => {
+    const name = v.label.trim() && v.label.trim() !== 'มาตรฐาน' ? v.label.trim() : '';
+    const size = v.attrs.size?.trim();
+    const weight = v.attrs.weight?.trim();
+    const parts = [name, size, weight].filter(Boolean);
+    if (parts.length) return parts.join(' · ');
+    if (v.label.trim() === 'มาตรฐาน') return 'รุ่นมาตรฐาน';
+    return v.label.trim() || v.sku;
+  });
+}
+
 const CATEGORY_MATCH_ORDER: Array<[string, string[]]> = [
-  ['controller', ['controller']],
-  ['motor', ['conversion', 'motor', 'hub']],
+  ['controller', ['controller', 'กล่องควบคุม']],
+  ['motor', ['conversion', 'motor', 'hub', 'มอเตอร์']],
+  ['brakes', ['brake', 'เบรก', 'ชุดเบรก']],
+  ['cables', ['cable', 'wire', 'สายไฟ', 'สายชาร์จ']],
   ['custom', ['custom', 'สั่งทำ']],
   ['bag', ['bag', 'กระเป๋า']],
   ['apparel', ['shirt', 'jacket', 'เสื้อ']],
   ['battery', ['lifepo4', 'bms', 'pack', 'cell', 'starter', 'fleet', 'แบต']],
-  ['parts', ['brake', 'shock', 'rim', 'disc', 'cable', 'led', 'footpeg', 'cooling', 'display', 'charger', 'cnc']],
+  ['parts', ['shock', 'rim', 'disc', 'led', 'footpeg', 'cooling', 'display', 'charger', 'cnc']],
 ];
 
 const TONE_LABEL: Record<ToneFilter, string> = {
@@ -70,15 +87,6 @@ const STOCK_DOT: Record<StockStatus, string> = {
   low: '#F5A524',
   out: '#FF3B4A',
 };
-
-const CARD_GRADIENTS: Array<[string, string]> = [
-  ['#0B3D2E', '#1A7A55'],
-  ['#1A1A2E', '#3A4A5C'],
-  ['#0F2A3A', '#1F6A7A'],
-  ['#2A1A0F', '#6A4A2A'],
-  ['#1A0F2A', '#4A2A6A'],
-  ['#0F1F2A', '#2A4A5A'],
-];
 
 function formatTHB(n: number) {
   return `฿${n.toLocaleString('th-TH')}`;
@@ -107,10 +115,11 @@ type ProductActivity = {
   askLines: string[];
 };
 
-const ADD_TILE_ID = '__add_product__';
-type GridItem =
-  | { kind: 'product'; id: string; product: MasterSku; listing?: Listing }
-  | { kind: 'add'; id: typeof ADD_TILE_ID };
+type GridItem = {
+  id: string;
+  product: MasterSku;
+  listing?: Listing;
+};
 
 export function StoreDashboardScreen() {
   const insets = useSafeAreaInsets();
@@ -119,9 +128,13 @@ export function StoreDashboardScreen() {
   const [query, setQuery] = useState('');
   const [sortLatest, setSortLatest] = useState(true);
   const [toneFilter, setToneFilter] = useState<ToneFilter>('all');
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  const [pageKey, setPageKey] = useState('');
   const [previewProductId, setPreviewProductId] = useState<string | null>(null);
+  const [promoteProductId, setPromoteProductId] = useState<string | null>(null);
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [categoryName, setCategoryName] = useState<
+    { mode: 'create' } | { mode: 'rename'; key: string; label: string } | null
+  >(null);
 
   const masters = useInventoryStore((s) => s.masters);
   const variants = useInventoryStore((s) => s.variants);
@@ -140,7 +153,9 @@ export function StoreDashboardScreen() {
   const listings = useWarehouseStore((s) => s.listings);
   const warehousesShared = useWarehouseStore((s) => s.warehouses);
   const requests = useWarehouseStore((s) => s.requests);
+  const onNewProductCreated = useWarehouseStore((s) => s.onNewProductCreated);
   const takeTransitions = useStockAlertsStore((s) => s.takeTransitions);
+  const createMasterWithVariants = useInventoryStore((s) => s.createMasterWithVariants);
 
   const pendingRequests = requests.filter(
     (r) => r.status === 'pending' && warehousesShared.some((w) => w.id === r.warehouseId && w.ownerShopId === MY_SHOP_ID),
@@ -301,6 +316,7 @@ export function StoreDashboardScreen() {
     const catKey = inferCategory(m);
     const catLabel = categories.find((c) => c.key === catKey)?.label ?? '';
     if (catLabel.toLowerCase().includes(q)) return true;
+    if (m.barcode?.toLowerCase().includes(q)) return true;
     return (variantsByMaster.get(m.id) ?? []).some(
       (v) => v.sku.toLowerCase().includes(q) || v.label.toLowerCase().includes(q),
     );
@@ -321,7 +337,6 @@ export function StoreDashboardScreen() {
       if (!sortLatest) rows = [...rows].reverse();
       else rows = [...rows].sort((a, b) => b.listing.installedAt.localeCompare(a.listing.installedAt));
       return rows.map(({ listing, master }) => ({
-        kind: 'product' as const,
         id: listing.id,
         product: master,
         listing,
@@ -335,20 +350,8 @@ export function StoreDashboardScreen() {
     });
     // masters are prepended on create, so natural order is already newest-first
     if (!sortLatest) list = [...list].reverse();
-    return list.map((product) => ({ kind: 'product' as const, id: product.id, product }));
+    return list.map((product) => ({ id: product.id, product }));
   }, [tab, myMasters, myListings, mastersById, category, query, sortLatest, toneFilter, stockOfMaster, categories]);
-
-  // Reset pagination when filters change (derived-state-during-render pattern)
-  const filterKey = `${tab}|${category}|${query}|${toneFilter}|${sortLatest}`;
-  if (pageKey !== filterKey) {
-    setPageKey(filterKey);
-    setVisibleCount(PAGE_SIZE);
-  }
-
-  const gridItems = useMemo<GridItem[]>(() => {
-    const page = productItems.slice(0, visibleCount);
-    return tab === 'mine' ? [...page, { kind: 'add' as const, id: ADD_TILE_ID }] : page;
-  }, [productItems, visibleCount, tab]);
 
   // ----- Actions -----
   const openAddProduct = () => {
@@ -364,20 +367,31 @@ export function StoreDashboardScreen() {
     });
   };
 
-  const cloneProduct = (master: MasterSku) => {
-    // eslint-disable-next-line react-hooks/purity -- event handler, not render
-    const prefill = buildClonePrefill(master, variantsByMaster.get(master.id) ?? [], Date.now());
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const catKey = master.categoryKey ?? inferCategory(master);
-    router.push({
-      pathname: '/create-details',
-      params: {
-        clone: JSON.stringify(prefill),
-        category: catKey,
-        categoryLabel: categories.find((c) => c.key === catKey)?.label ?? '',
-      },
-    });
-  };
+  const cloneProduct = useCallback(
+    (master: MasterSku) => {
+      const prefill = buildClonePrefill(master, variantsByMaster.get(master.id) ?? [], Date.now());
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      const catKey = master.categoryKey ?? inferCategory(master);
+      router.push({
+        pathname: '/create-details',
+        params: {
+          clone: JSON.stringify(prefill),
+          category: catKey,
+          categoryLabel: categories.find((c) => c.key === catKey)?.label ?? '',
+        },
+      });
+    },
+    [variantsByMaster, categories],
+  );
+
+  const duplicateProduct = useCallback(
+    (productId: string) => {
+      const master = mastersById.get(productId);
+      if (!master) return;
+      cloneProduct(master);
+    },
+    [mastersById, cloneProduct],
+  );
 
   const openAlerts = (master: MasterSku, activity: ProductActivity) => {
     Alert.alert(
@@ -388,16 +402,133 @@ export function StoreDashboardScreen() {
     );
   };
 
-  const openQuickPreview = (item: GridItem & { kind: 'product' }) => {
-    void Haptics.selectionAsync();
-    setPreviewProductId(item.product.id);
-  };
-
-  /** Tap product card → real product detail (inventory data), not empty edit */
-  const openProductDetail = (item: GridItem & { kind: 'product' }) => {
+  const openProduct = useCallback((productId: string) => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setPreviewProductId(null);
-    router.push({ pathname: '/store/product/[id]', params: { id: item.product.id } });
+    router.push({ pathname: '/store/product/[id]', params: { id: productId } });
+  }, []);
+
+  const openEdit = useCallback((productId: string) => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setPreviewProductId(null);
+    router.push({ pathname: '/products/[id]/edit', params: { id: productId } });
+  }, []);
+
+  const openPreview = useCallback((productId: string) => {
+    void Haptics.selectionAsync();
+    setPreviewProductId(productId);
+  }, []);
+
+  const openProductAlerts = useCallback(
+    (productId: string) => {
+      const master = mastersById.get(productId);
+      const activity = activityBySku.get(productId);
+      if (!master || !activity) return;
+      openAlerts(master, activity);
+    },
+    [mastersById, activityBySku],
+  );
+
+  const applyBarcodeLookup = (code: string) => {
+    setScannerOpen(false);
+    const q = code.trim().toLowerCase();
+    const pool = tab === 'mine' ? myMasters : myListings
+      .map((l) => mastersById.get(l.masterSkuId))
+      .filter((m): m is MasterSku => !!m);
+    const exact = pool.filter(
+      (m) =>
+        (m.barcode ?? '').toLowerCase() === q ||
+        m.masterSku.toLowerCase() === q ||
+        (variantsByMaster.get(m.id) ?? []).some((v) => v.sku.toLowerCase() === q),
+    );
+    const hits = exact.length ? exact : pool.filter((m) => matchQuery(m, q));
+    setQuery(code.trim());
+    if (hits.length === 1) {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setPreviewProductId(hits[0]!.id);
+      return;
+    }
+    if (hits.length > 1) {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      return;
+    }
+    Alert.alert('ไม่พบสินค้า', `ไม่พบบาร์โค้ดหรือ SKU “${code.trim()}” ในคลังนี้`);
+  };
+
+  const importCsvFile = async () => {
+    if (importing) return;
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({
+        type: [
+          'text/csv',
+          'text/comma-separated-values',
+          'text/plain',
+          'public.comma-separated-values-text',
+          'application/vnd.ms-excel',
+          '*/*',
+        ],
+        copyToCacheDirectory: true,
+      });
+      if (picked.canceled || !picked.assets?.[0]?.uri) return;
+      setImporting(true);
+      const file = new File(picked.assets[0].uri);
+      const text = await file.text();
+      const parsed = parseInventoryCsv(text);
+      if (!parsed.ok) {
+        Alert.alert('นำเข้าไม่สำเร็จ', parsed.reason);
+        return;
+      }
+      const confirm = await new Promise<boolean>((resolve) => {
+        Alert.alert(
+          'นำเข้าสินค้า',
+          `พบ ${parsed.products.length} สินค้า` +
+            (parsed.skipped ? ` (ข้าม ${parsed.skipped} แถว)` : '') +
+            '\nยืนยันสร้างในคลังนี้?',
+          [
+            { text: 'ยกเลิก', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'นำเข้า', onPress: () => resolve(true) },
+          ],
+        );
+      });
+      if (!confirm) return;
+      const stamp = `${Date.now()}`.slice(-6);
+      parsed.products.forEach((product, index) => {
+        const cat =
+          categories.find(
+            (c) =>
+              c.key === product.category ||
+              c.label.toLowerCase() === (product.category ?? '').trim().toLowerCase(),
+          ) ?? null;
+        const sku = product.sku?.trim() || `BEV-IMP-${stamp}-${index + 1}`;
+        const basePrice = Math.min(...product.variants.map((v) => v.price));
+        const masterId = createMasterWithVariants({
+          title: product.title,
+          masterSku: sku,
+          channel: 'B2C',
+          basePrice,
+          tags: [cat?.label ?? 'Custom', 'Import'],
+          customFields: [],
+          description: product.description,
+          categoryKey: cat?.key,
+          variants: product.variants.map((v, vi) => ({
+            label: v.label,
+            sku: v.sku?.trim() || `${sku}-V${vi + 1}`,
+            price: v.price,
+            attrs: {},
+            warehouseId: 'WH-CTI-MAIN',
+            onHand: v.stock,
+          })),
+        });
+        onNewProductCreated(MY_WAREHOUSE_ID, masterId, cat?.key);
+      });
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert('นำเข้าเรียบร้อย', `สร้างสินค้าใหม่ ${parsed.products.length} รายการจากไฟล์`);
+    } catch {
+      Alert.alert('นำเข้าไม่สำเร็จ', 'อ่านไฟล์ไม่ได้ — บันทึกเป็น CSV แล้วลองอีกครั้ง');
+    } finally {
+      setImporting(false);
+    }
   };
 
   const previewProduct = previewProductId ? mastersById.get(previewProductId) ?? null : null;
@@ -437,20 +568,7 @@ export function StoreDashboardScreen() {
 
   const addUserCategory = () => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Alert.prompt(
-      'สร้างหมวดหมู่ใหม่',
-      'ตั้งชื่อหมวดหมู่ — ระบบจะรวมยอดสต็อกของสินค้าที่เข้าเงื่อนไขให้อัตโนมัติ',
-      (text) => {
-        const result = addCategory(text ?? '');
-        if (!result.ok) {
-          if (text?.trim()) Alert.alert('สร้างไม่สำเร็จ', result.message);
-          return;
-        }
-        setCategory(result.key!);
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      },
-      'plain-text',
-    );
+    setCategoryName({ mode: 'create' });
   };
 
   const openCategoryMenu = (key: string) => {
@@ -461,10 +579,7 @@ export function StoreDashboardScreen() {
     if (!cat.builtin) {
       buttons.push({
         text: 'เปลี่ยนชื่อ',
-        onPress: () =>
-          Alert.prompt('เปลี่ยนชื่อหมวดหมู่', cat.label, (text) => {
-            if (text?.trim()) renameCategory(key, text);
-          }),
+        onPress: () => setCategoryName({ mode: 'rename', key, label: cat.label }),
       });
     }
     buttons.push({ text: '← เลื่อนไปซ้าย', onPress: () => moveCategory(key, -1) });
@@ -504,108 +619,61 @@ export function StoreDashboardScreen() {
   };
 
   // ----- Render -----
-  const renderCard = ({ item, index }: { item: GridItem; index: number }) => {
-    if (item.kind === 'add') {
-      return (
-        <Pressable style={styles.addTile} onPress={openAddProduct}>
-          <View style={[styles.addTileFrame, { height: IMAGE_H }]}>
-            <View style={styles.addTilePlus}>
-              <Ionicons name="add" size={28} color={colors.brand.primaryDark} />
-            </View>
-            <Text style={styles.addTileText}>เพิ่มสินค้า</Text>
-          </View>
-          <View style={styles.addTileInfoSpacer} />
-        </Pressable>
+  const renderCard = useCallback(
+    ({ item }: { item: GridItem }) => {
+      const { product, listing } = item;
+      const stock = stockOfMaster(product);
+      const itemVariants = variantsByMaster.get(product.id) ?? [];
+      const threshold = Math.min(
+        ...itemVariants.map((v) => v.lowStockThreshold ?? DEFAULT_LOW_STOCK_THRESHOLD),
+        DEFAULT_LOW_STOCK_THRESHOLD,
       );
-    }
+      const tone = stockStatusOf(stock, threshold);
+      const prices = itemVariants.map((v) => v.price);
+      const minPrice = prices.length ? Math.min(...prices) : product.basePrice;
+      const maxPrice = prices.length ? Math.max(...prices) : product.basePrice;
+      const priceLabel =
+        minPrice === maxPrice ? formatTHB(minPrice) : `${formatTHB(minPrice)} – ${formatTHB(maxPrice)}`;
+      const activity = activityBySku.get(product.id);
+      const sourceWarehouse = listing
+        ? warehousesShared.find((w) => w.id === listing.warehouseId)?.name
+        : undefined;
 
-    const { product, listing } = item;
-    const stock = stockOfMaster(product);
-    const tone = stockStatusOf(stock);
-    const itemVariants = variantsByMaster.get(product.id) ?? [];
-    const prices = itemVariants.map((v) => v.price);
-    const minPrice = prices.length ? Math.min(...prices) : product.basePrice;
-    const maxPrice = prices.length ? Math.max(...prices) : product.basePrice;
-    const priceLabel =
-      minPrice === maxPrice ? formatTHB(minPrice) : `${formatTHB(minPrice)} - ${formatTHB(maxPrice)}`;
-    const activity = activityBySku.get(product.id);
-    const imageUri = product.imageUri ?? masterContentImage(product.id);
-    const gradient = CARD_GRADIENTS[index % CARD_GRADIENTS.length];
-    const sourceWarehouse = listing
-      ? warehousesShared.find((w) => w.id === listing.warehouseId)?.name
-      : undefined;
-    const disabled = listing?.status === 'disabled';
-
-    return (
-      <Pressable
-        style={[styles.card, disabled && { opacity: 0.55 }]}
-        onPress={() => openProductDetail(item)}
-        onLongPress={() => openQuickPreview(item)}
-        delayLongPress={380}
-      >
-        <View style={styles.visual}>
-          <LinearGradient colors={gradient} style={StyleSheet.absoluteFill} />
-          <Image source={{ uri: imageUri }} style={styles.visualImage} resizeMode="cover" />
-          <LinearGradient
-            colors={['rgba(7,20,15,0.12)', 'rgba(7,20,15,0.5)']}
-            style={StyleSheet.absoluteFill}
+      return (
+        <View style={{ marginBottom: ITEM_GAP }}>
+          <InventoryProductCard
+            productId={product.id}
+            imageUri={listingThumbUri(product) ?? masterContentImage(product.id)}
+            coverKind={coverKindOf(product)}
+            title={product.title}
+            priceLabel={priceLabel}
+            optionLines={optionLinesOf(itemVariants)}
+            stock={stock}
+            tone={tone}
+            disabled={listing?.status === 'disabled'}
+            sourceWarehouse={sourceWarehouse}
+            activityCount={activity?.total}
+            canEdit={tab === 'mine' && !listing}
+            promoted={Boolean(product.isPromoted)}
+            onOpen={tab === 'mine' && !listing ? openEdit : openProduct}
+            onPreview={openPreview}
+            onAlertPress={activity && activity.total > 0 ? openProductAlerts : undefined}
           />
-
-          {sourceWarehouse ? (
-            <View style={[styles.hashTag, styles.sourceTag]}>
-              <Ionicons name="business" size={9} color="#fff" />
-              <Text style={styles.hashTagText} numberOfLines={1}>
-                {sourceWarehouse}
-              </Text>
-            </View>
-          ) : (
-            <View style={styles.hashTag}>
-              <Text style={styles.hashTagText}>
-                #{categories.find((c) => c.key === inferCategory(product))?.label ?? product.channel}
-              </Text>
-            </View>
-          )}
-
-          <View style={[styles.statusDot, { backgroundColor: STOCK_DOT[tone] }]} />
-
-          {tone !== 'ready' ? (
-            <View style={[styles.lowBadge, tone === 'out' && { backgroundColor: STOCK_DOT.out }]}>
-              <Text style={styles.lowBadgeText}>{tone === 'out' ? 'หมด' : 'ใกล้หมด'}</Text>
-            </View>
-          ) : null}
-
-          {disabled ? (
-            <View style={styles.disabledOverlay}>
-              <Text style={styles.disabledText}>ปิดการขาย</Text>
-            </View>
-          ) : null}
-
-          {activity && activity.total > 0 ? (
-            <Pressable
-              style={styles.alertBadge}
-              onPress={() => openAlerts(product, activity)}
-              hitSlop={6}
-            >
-              <Ionicons name="notifications" size={10} color="#fff" />
-              <Text style={styles.alertBadgeText}>{activity.total}</Text>
-            </Pressable>
-          ) : null}
         </View>
-
-        <View style={styles.infoPanel}>
-          <Text style={styles.productName} numberOfLines={2}>
-            {product.title}
-          </Text>
-          <Text style={styles.metaLine} numberOfLines={1}>
-            {itemVariants.length} รุ่น · ขายได้ {stock} ชิ้น
-          </Text>
-          <Text style={styles.price} numberOfLines={1}>
-            {priceLabel}
-          </Text>
-        </View>
-      </Pressable>
-    );
-  };
+      );
+    },
+    [
+      stockOfMaster,
+      variantsByMaster,
+      activityBySku,
+      warehousesShared,
+      tab,
+      openProduct,
+      openEdit,
+      openPreview,
+      openProductAlerts,
+    ],
+  );
 
   const listHeader = (
     <View style={styles.headerBlock}>
@@ -617,14 +685,23 @@ export function StoreDashboardScreen() {
         <StatCell label="หมด" value={stats.out} accent={stats.out > 0 ? STOCK_DOT.out : undefined} />
       </View>
 
-      <View style={styles.actionsRow}>
-        <Pressable style={styles.outlineBtn} onPress={shareStore}>
-          <Ionicons name="share-outline" size={14} color={colors.text.primary} />
-          <Text style={styles.outlineBtnText}>แชร์หน้าร้าน</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={{ marginBottom: 12, flexGrow: 0 }}
+        contentContainerStyle={styles.actionsRow}
+      >
+        <Pressable style={styles.outlineBtn} onPress={() => setScannerOpen(true)}>
+          <Ionicons name="barcode-outline" size={14} color={colors.text.primary} />
+          <Text style={styles.outlineBtnText}>สแกนบาร์โค้ด</Text>
         </Pressable>
-        <Pressable style={styles.outlineBtn} onPress={() => router.push('/store/ledger')}>
-          <Ionicons name="receipt-outline" size={14} color={colors.text.primary} />
-          <Text style={styles.outlineBtnText}>ความเคลื่อนไหว</Text>
+        <Pressable
+          style={[styles.outlineBtn, importing && { opacity: 0.6 }]}
+          onPress={() => void importCsvFile()}
+          disabled={importing}
+        >
+          <Ionicons name="document-text-outline" size={14} color={colors.text.primary} />
+          <Text style={styles.outlineBtnText}>{importing ? 'กำลังนำเข้า…' : 'นำเข้า CSV'}</Text>
         </Pressable>
         <Pressable style={styles.outlineBtn} onPress={() => router.push('/store/warehouse')}>
           <Ionicons name="business-outline" size={14} color={colors.text.primary} />
@@ -635,11 +712,19 @@ export function StoreDashboardScreen() {
             </View>
           ) : null}
         </Pressable>
+        <Pressable style={styles.outlineBtn} onPress={shareStore}>
+          <Ionicons name="share-outline" size={14} color={colors.text.primary} />
+          <Text style={styles.outlineBtnText}>แชร์หน้าร้าน</Text>
+        </Pressable>
+        <Pressable style={styles.outlineBtn} onPress={() => router.push('/store/ledger')}>
+          <Ionicons name="receipt-outline" size={14} color={colors.text.primary} />
+          <Text style={styles.outlineBtnText}>ความเคลื่อนไหว</Text>
+        </Pressable>
         <Pressable style={styles.addBtn} onPress={openAddProduct}>
           <Ionicons name="add" size={16} color="#fff" />
           <Text style={styles.addBtnText}>เพิ่มสินค้า</Text>
         </Pressable>
-      </View>
+      </ScrollView>
 
       {/* Mine / Shared tabs */}
       <View style={styles.tabsRow}>
@@ -799,29 +884,29 @@ export function StoreDashboardScreen() {
       </View>
 
       <FlatList
-        data={gridItems}
+        data={productItems}
         keyExtractor={(item) => item.id}
-        numColumns={COLS}
         style={styles.list}
-        columnWrapperStyle={styles.gridRow}
-        contentContainerStyle={[styles.grid, { paddingBottom: insets.bottom + 28 }]}
+        contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 28 }]}
         showsVerticalScrollIndicator={false}
         ListHeaderComponent={listHeader}
         renderItem={renderCard}
-        onEndReachedThreshold={0.6}
-        onEndReached={() => {
-          if (visibleCount < productItems.length) {
-            setVisibleCount((n) => n + PAGE_SIZE);
-          }
-        }}
-        initialNumToRender={8}
+        getItemLayout={(_, index) => ({
+          length: ITEM_H,
+          offset: ITEM_H * index,
+          index,
+        })}
+        initialNumToRender={12}
+        maxToRenderPerBatch={8}
+        updateCellsBatchingPeriod={50}
         windowSize={7}
         removeClippedSubviews
         ListFooterComponent={
-          visibleCount < productItems.length ? (
-            <Text style={styles.footerHint}>
-              กำลังแสดง {Math.min(visibleCount, productItems.length)}/{productItems.length} · เลื่อนเพื่อโหลดต่อ
-            </Text>
+          tab === 'mine' ? (
+            <Pressable style={styles.addRow} onPress={openAddProduct}>
+              <Ionicons name="add" size={18} color={colors.brand.primaryDark} />
+              <Text style={styles.addRowText}>เพิ่มสินค้า</Text>
+            </Pressable>
           ) : (
             <Text style={styles.footerHint}>แสดงครบทุกรายการแล้ว</Text>
           )
@@ -844,11 +929,26 @@ export function StoreDashboardScreen() {
             : undefined
         }
         onClose={() => setPreviewProductId(null)}
+        canEdit={!previewListing}
+        onPromote={
+          previewProduct && !previewListing
+            ? () => {
+                const id = previewProduct.id;
+                setPreviewProductId(null);
+                setPromoteProductId(id);
+              }
+            : undefined
+        }
         onOpenFull={() => {
           if (!previewProduct) return;
           const id = previewProduct.id;
+          const goEdit = !previewListing;
           setPreviewProductId(null);
-          router.push({ pathname: '/store/product/[id]', params: { id } });
+          if (goEdit) {
+            router.push({ pathname: '/products/[id]/edit', params: { id } });
+          } else {
+            router.push({ pathname: '/store/product/[id]', params: { id } });
+          }
         }}
         onClone={
           previewProduct && !previewListing
@@ -861,6 +961,42 @@ export function StoreDashboardScreen() {
         }
       />
 
+      <PromoteProductSheet
+        visible={!!promoteProductId}
+        product={promoteProductId ? mastersById.get(promoteProductId) ?? null : null}
+        onClose={() => setPromoteProductId(null)}
+      />
+
+      <BarcodeScannerSheet
+        visible={scannerOpen}
+        onClose={() => setScannerOpen(false)}
+        onScanned={applyBarcodeLookup}
+        mode="lookup"
+        title="ค้นหาด้วยบาร์โค้ด"
+        subtitle="สแกนหรือพิมพ์บาร์โค้ด / SKU เพื่อเปิดสินค้าทันที"
+      />
+      <CategoryNameSheet
+        visible={!!categoryName}
+        title={categoryName?.mode === 'rename' ? 'เปลี่ยนชื่อหมวดหมู่' : 'สร้างหมวดใหม่'}
+        subtitle="ตั้งชื่อหมวดหมู่ — ระบบจะรวมยอดสต็อกของสินค้าที่เข้าเงื่อนไขให้อัตโนมัติ"
+        initialValue={categoryName?.mode === 'rename' ? categoryName.label : ''}
+        onClose={() => setCategoryName(null)}
+        onSubmit={(text) => {
+          if (categoryName?.mode === 'rename') {
+            renameCategory(categoryName.key, text);
+            setCategoryName(null);
+            return;
+          }
+          const result = addCategory(text);
+          if (!result.ok) {
+            Alert.alert('สร้างไม่สำเร็จ', result.message);
+            return;
+          }
+          setCategory(result.key!);
+          setCategoryName(null);
+        }}
+      />
+      <SellerNotifyBanner />
     </View>
   );
 }
@@ -931,7 +1067,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     paddingHorizontal: H_PAD,
-    marginBottom: 12,
+    paddingRight: H_PAD,
   },
   outlineBtn: {
     flexDirection: 'row',
@@ -943,6 +1079,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 8,
+    flexShrink: 0,
   },
   outlineBtnText: {
     fontSize: 11,
@@ -960,7 +1097,6 @@ const styles = StyleSheet.create({
   },
   pendingDotText: { color: '#fff', fontSize: 9, fontWeight: '900' },
   addBtn: {
-    marginLeft: 'auto',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
@@ -968,6 +1104,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 8,
+    flexShrink: 0,
   },
   addBtnText: {
     color: '#fff',
@@ -1129,178 +1266,27 @@ const styles = StyleSheet.create({
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   legendDot: { width: 8, height: 8, borderRadius: 4 },
   legendText: { fontSize: 11, color: colors.text.secondary, fontWeight: '600' },
-  grid: {
+  listContent: {
     paddingHorizontal: H_PAD,
   },
-  gridRow: {
-    gap: GRID_GAP,
-    marginBottom: GRID_GAP,
-  },
-  card: {
-    width: CARD_W,
-    height: CARD_H,
-    borderRadius: 18,
-    overflow: 'hidden',
-    backgroundColor: colors.surface.card,
-    borderWidth: 1,
-    borderColor: colors.border.soft,
-  },
-  addTile: {
-    width: CARD_W,
-    height: CARD_H,
-    borderRadius: 18,
-    overflow: 'hidden',
-    backgroundColor: colors.surface.card,
+  addRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 48,
+    borderRadius: 14,
     borderWidth: 1.5,
     borderStyle: 'dashed',
-    borderColor: colors.border.strong,
-  },
-  addTileFrame: {
-    width: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    backgroundColor: colors.brand.mist,
-  },
-  addTilePlus: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    borderWidth: 1.5,
     borderColor: colors.brand.primaryDark,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: colors.brand.mist,
+    marginTop: 4,
+    marginBottom: 12,
   },
-  addTileText: {
-    fontSize: 13,
+  addRowText: {
+    fontSize: 14,
     fontWeight: '800',
     color: colors.brand.primaryDark,
-  },
-  addTileInfoSpacer: {
-    height: INFO_H,
-    backgroundColor: colors.surface.card,
-  },
-  visual: {
-    width: IMAGE_W,
-    height: IMAGE_H,
-    position: 'relative',
-    overflow: 'hidden',
-    backgroundColor: '#0B1F17',
-  },
-  visualImage: {
-    width: IMAGE_W,
-    height: IMAGE_H,
-    opacity: 0.88,
-  },
-  hashTag: {
-    position: 'absolute',
-    top: 8,
-    left: 8,
-    backgroundColor: 'rgba(10,16,14,0.72)',
-    borderRadius: 8,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-  },
-  sourceTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    backgroundColor: 'rgba(46,140,255,0.85)',
-    maxWidth: IMAGE_W - 40,
-  },
-  hashTagText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  statusDot: {
-    position: 'absolute',
-    top: 10,
-    right: 10,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.85)',
-  },
-  lowBadge: {
-    position: 'absolute',
-    bottom: 8,
-    left: 8,
-    backgroundColor: STOCK_DOT.low,
-    borderRadius: 8,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-  },
-  lowBadgeText: { color: '#fff', fontSize: 10, fontWeight: '900' },
-  disabledOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(10,16,14,0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  disabledText: {
-    color: '#fff',
-    fontWeight: '900',
-    fontSize: 13,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  alertBadge: {
-    position: 'absolute',
-    top: 28,
-    right: 6,
-    minWidth: 22,
-    height: 20,
-    borderRadius: 10,
-    paddingHorizontal: 5,
-    backgroundColor: colors.accent.live,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 2,
-    borderWidth: 1.5,
-    borderColor: '#fff',
-  },
-  alertBadgeText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '900',
-  },
-  infoPanel: {
-    height: INFO_H,
-    backgroundColor: colors.surface.card,
-    paddingHorizontal: 10,
-    paddingTop: 10,
-    paddingBottom: 10,
-    gap: 3,
-    justifyContent: 'center',
-  },
-  productName: {
-    fontSize: 13,
-    fontWeight: '900',
-    color: colors.text.primary,
-    lineHeight: 17,
-    height: 34,
-  },
-  metaLine: {
-    fontSize: 11,
-    color: colors.text.muted,
-    fontWeight: '600',
-  },
-  price: {
-    marginTop: 2,
-    fontSize: 13,
-    fontWeight: '900',
-    color: colors.accent.live,
   },
   footerHint: {
     textAlign: 'center',

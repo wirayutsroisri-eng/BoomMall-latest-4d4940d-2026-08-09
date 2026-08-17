@@ -8,6 +8,7 @@
 import {
   applyAdjust,
   applyCommitSale,
+  applyDirectSale,
   applyRelease,
   applyReserve,
   applyRestock,
@@ -182,6 +183,12 @@ section('TEST 4: Order → Reserve → Available ลด');
     const sale = applyCommitSale(reserve.next, 3, 'order-123');
     check('Commit sale ตัดจริง 10 → 7', sale.ok && sale.next.onHand === 7 && sale.next.reserved === 0);
   }
+
+  const open: WarehouseStock = { variantId: 'v1', warehouseId: 'WH-CTI-MAIN', onHand: 10, reserved: 0, revision: 1 };
+  const cartHold = availableOf(open);
+  check('ใส่ตะกร้าแล้วยังไม่ตัดสต็อก', cartHold === 10);
+  const buy = applyDirectSale(open, 3, 'order-direct');
+  check('กดซื้อแล้วตัดจากคลังโดยไม่จองก่อน', buy.ok && buy.next.onHand === 7 && buy.next.reserved === 0);
 }
 
 // ============================================================

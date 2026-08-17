@@ -18,6 +18,7 @@ import {
   postPublicReport,
   postResolveReport,
   postSocialLogin,
+  postUnlockUser,
 } from '../controllers/moderationController';
 
 /** Public surfaces for mobile app */
@@ -39,6 +40,7 @@ moderationAdminRouter.post('/content/:id/action', postContentAction);
 moderationAdminRouter.get('/users', getModerationUsers);
 moderationAdminRouter.get('/users/:id', getModerationUser);
 moderationAdminRouter.post('/users/:id/ban', postBanUser);
+moderationAdminRouter.post('/users/:id/unlock', postUnlockUser);
 moderationAdminRouter.delete('/users/:id/hard-delete', deleteHardUser);
 moderationAdminRouter.get('/blacklist', getBlacklist);
 moderationAdminRouter.get('/audit', getAuditLog);

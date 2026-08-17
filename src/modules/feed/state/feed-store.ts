@@ -6,6 +6,7 @@ import { useVaultStore } from '@/modules/vault/state/vault-store';
 import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
 import { CHANTHABURI } from '@/modules/matching/domain/geo';
 import { runPostMatching } from '@/modules/matching/domain/run-post-matching';
+import { publishSocialPost, syncFeedComment } from '@/modules/feed/data/feedEngageApi';
 import {
   DEFAULT_SEARCH_RADIUS,
   type SearchRadiusOption,
@@ -17,6 +18,8 @@ type NewPostInput = {
   price: number;
   channel: CommerceTier;
   imageUri?: string;
+  imageWidth?: number;
+  imageHeight?: number;
   imageUris?: string[];
   videoUri?: string;
   overlayText?: string;
@@ -63,6 +66,7 @@ type FeedState = {
   creatorProfileNonce: number;
   setTab: (tab: FeedTab) => void;
   toggleLike: (id: string) => void;
+  bumpShare: (id: string) => void;
   toggleSave: (id: string) => void;
   tipClip: (id: string, amount: number) => void;
   addPost: (input: NewPostInput) => string;
@@ -72,7 +76,7 @@ type FeedState = {
   closeComments: () => void;
   openTip: (feedId: string) => void;
   closeTip: () => void;
-  addComment: (feedId: string, text: string, author?: string, authorInitial?: string) => void;
+  addComment: (feedId: string, text: string, author?: string, authorInitial?: string, parentId?: string) => void;
   toggleCommentLike: (feedId: string, commentId: string) => void;
   openCreatorProfile: (handle: string, feedId?: string) => void;
   closeCreatorProfile: () => void;
@@ -128,6 +132,12 @@ export const useFeedStore = create<FeedState>((set) => ({
               likes: item.liked ? item.likes - 1 : item.likes + 1,
             }
           : item,
+      ),
+    })),
+  bumpShare: (id) =>
+    set((state) => ({
+      items: state.items.map((item) =>
+        item.id === id ? { ...item, shares: item.shares + 1 } : item,
       ),
     })),
   toggleSave: (id) =>
@@ -201,6 +211,8 @@ export const useFeedStore = create<FeedState>((set) => ({
       musicTitle: input.musicTitle?.trim() || 'Original Sound — BoomMall',
       gradient: ['#0B3D2E', '#1A7A55'],
       imageUri: imageUris?.[0] ?? input.imageUri,
+      imageWidth: input.imageWidth,
+      imageHeight: input.imageHeight,
       imageUris,
       videoUri: input.videoUri,
       overlayText: input.overlayText?.trim() || undefined,
@@ -231,6 +243,16 @@ export const useFeedStore = create<FeedState>((set) => ({
     };
     set((state) => ({ items: [newItem, ...state.items] }));
 
+    void publishSocialPost({
+      body: caption,
+      media: imageUris ?? (input.imageUri ? [input.imageUri] : []),
+      lat: gps.lat,
+      lng: gps.lng,
+      locationLabel: newItem.location,
+      tags: newItem.product.tags,
+      lane: newItem.lane,
+    });
+
     // Matching only for board demand posts
     if (isJobPost && boardSide === 'demand') {
       runPostMatching({
@@ -252,7 +274,7 @@ export const useFeedStore = create<FeedState>((set) => ({
   closeComments: () => set({ activeCommentsFeedId: null }),
   openTip: (feedId) => set({ activeTipFeedId: feedId }),
   closeTip: () => set({ activeTipFeedId: null }),
-  addComment: (feedId, text, author = 'คุณ', authorInitial = 'ค') =>
+  addComment: (feedId, text, author = 'คุณ', authorInitial = 'ค', parentId) =>
     set((state) => {
       commentSeq += 1;
       const comment: FeedComment = {
@@ -263,7 +285,9 @@ export const useFeedStore = create<FeedState>((set) => ({
         text,
         likes: 0,
         createdAt: 'เมื่อสักครู่',
+        parentId,
       };
+      void syncFeedComment(feedId, text, parentId);
       return {
         commentsByFeedId: {
           ...state.commentsByFeedId,

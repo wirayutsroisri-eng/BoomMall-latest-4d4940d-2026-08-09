@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import {
   Alert,
   Image,
@@ -27,6 +27,14 @@ import {
   ENABLE_CHECKOUT_PLACE_ORDER,
   ENABLE_PAYLATER_AND_CREDIT_UI,
 } from '@/shared/compliance/appStoreGates';
+import { createCommerceOrder, payCommerceOrder } from '@/modules/commerce/data/commerceApi';
+import { pullCommerceCatalog } from '@/modules/commerce/data/commerceSync';
+import { incomingFromCommerceOrder } from '@/modules/store/domain/commerce-order-map';
+import { useOrdersStore } from '@/modules/store/state/orders-store';
+import { useBuyerPaymentStore } from '@/modules/account/state/buyer-payment-store';
+import { buyerHint, type BuyerPaymentKind } from '@/modules/account/domain/buyer-payment';
+import { promptText } from '@/shared/components/AppPrompt';
+import { openLegalDocument } from '@/shared/legal/openLegal';
 
 const ORANGE = '#EE4D2D';
 
@@ -38,7 +46,7 @@ export function CheckoutScreen() {
   const insets = useSafeAreaInsets();
 
   const lines = useCartStore((s) => s.lines);
-  const checkoutSelected = useCartStore((s) => s.checkoutSelected);
+  const removeLine = useCartStore((s) => s.removeLine);
   const selectedLines = useMemo(() => lines.filter((l) => l.selected !== false), [lines]);
 
   const masters = useInventoryStore((s) => s.masters);
@@ -48,7 +56,24 @@ export function CheckoutScreen() {
 
   const address = useCheckoutStore((s) => s.address);
   const paymentMethod = useCheckoutStore((s) => s.paymentMethod);
+  const setPaymentMethod = useCheckoutStore((s) => s.setPaymentMethod);
   const cardLabel = useCheckoutStore((s) => s.cardLabel);
+  const instruments = useBuyerPaymentStore((s) => s.instruments);
+  const paymentHint = useMemo(() => {
+    const kind: BuyerPaymentKind | undefined =
+      paymentMethod === 'mobile_banking'
+        ? 'bank_account'
+        : paymentMethod === 'cod'
+          ? undefined
+          : (paymentMethod as BuyerPaymentKind);
+    if (paymentMethod === 'cod') return 'จ่ายตอนรับของ';
+    return buyerHint(instruments.find((a) => a.kind === kind));
+  }, [instruments, paymentMethod]);
+  const methodReady =
+    paymentMethod === 'cod' ||
+    instruments.some((a) =>
+      paymentMethod === 'mobile_banking' ? a.kind === 'bank_account' : a.kind === paymentMethod,
+    );
   const shippingMethod = useCheckoutStore((s) => s.shippingMethod);
   const setShippingMethod = useCheckoutStore((s) => s.setShippingMethod);
   const shopVoucherOn = useCheckoutStore((s) => s.shopVoucherOn);
@@ -88,7 +113,11 @@ export function CheckoutScreen() {
   const paymentLabel =
     PAYMENT_OPTIONS.find((p) => p.id === paymentMethod)?.label ?? 'ช่องทางชำระเงิน';
 
-  const placeOrder = () => {
+  useEffect(() => {
+    if (!methodReady) setPaymentMethod('cod');
+  }, [methodReady, setPaymentMethod]);
+
+  const placeOrder = async () => {
     if (!ENABLE_CHECKOUT_PLACE_ORDER) {
       Alert.alert(
         'ชำระเงินยังไม่พร้อม',
@@ -100,16 +129,50 @@ export function CheckoutScreen() {
       Alert.alert('ไม่มีสินค้า', 'กลับไปเลือกสินค้าในตะกร้า');
       return;
     }
-    const result = checkoutSelected();
-    void Haptics.notificationAsync(
-      result.ok
-        ? Haptics.NotificationFeedbackType.Success
-        : Haptics.NotificationFeedbackType.Error,
-    );
-    if (result.ok) {
+    if (!methodReady) {
+      Alert.alert('ยังเลือกช่องทางชำระไม่ได้', 'สมัครช่องทางชำระเงินก่อน หรือใช้เก็บเงินปลายทาง');
+      return;
+    }
+    try {
+      const created = await createCommerceOrder({
+        lines: selectedLines.map((line) => {
+          const variant = variantMap.get(line.variantId);
+          const master = variant ? masterMap.get(variant.masterSkuId) : undefined;
+          return {
+            variantId: line.variantId,
+            warehouseId: line.warehouseId,
+            qty: line.qty,
+            unitPrice: line.unitPrice,
+            productId: variant?.masterSkuId,
+            title: master?.title,
+            sku: variant?.sku,
+            label: variant?.label,
+            color: variant?.attrs.color,
+            variant: variant?.label,
+            image: master?.imageUri,
+          };
+        }),
+        shippingFeeThb: totals.shippingPayable,
+        shipping: {
+          name: address.name,
+          phone: address.phone,
+          line1: address.line1,
+          district: address.district,
+          amphoe: address.amphoe,
+          province: address.province,
+          postcode: address.postcode,
+          paymentMethod,
+        },
+        paymentMethod,
+      });
+      const paid = await payCommerceOrder(created.data.id);
+      useOrdersStore.getState().upsertIncoming([incomingFromCommerceOrder(paid.data)]);
+      for (const line of selectedLines) removeLine(line.variantId, line.warehouseId);
+      await pullCommerceCatalog();
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert(
         'สั่งซื้อสำเร็จ',
-        `${result.message}\nยอดชำระ ${formatTHB(totals.total)}\nชำระผ่าน ${paymentLabel}${
+        `กันสต็อกในคลังแล้ว · ร้านจะตัดยอดตอนแพ็กเสร็จ\nยอดชำระ ${formatTHB(paid.data.merchandiseThb)}\nชำระผ่าน ${paymentLabel}${
           paymentMethod === 'card' ? ` (${cardLabel})` : ''
         }`,
         [
@@ -129,8 +192,12 @@ export function CheckoutScreen() {
           },
         ],
       );
-    } else {
-      Alert.alert('สั่งซื้อไม่สำเร็จ', result.message);
+    } catch (e) {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert(
+        'ชำระไม่สำเร็จ',
+        e instanceof Error ? e.message : 'Payment Gateway ยังไม่พร้อม',
+      );
     }
   };
 
@@ -163,11 +230,14 @@ export function CheckoutScreen() {
         {/* Address */}
         <Pressable
           style={styles.card}
-          onPress={() =>
-            Alert.prompt('แก้ไขชื่อผู้รับ', undefined, (text) => {
+          onPress={() => {
+            void promptText({
+              title: 'แก้ไขชื่อผู้รับ',
+              defaultValue: address.name,
+            }).then((text) => {
               if (text?.trim()) useCheckoutStore.getState().setAddress({ name: text.trim() });
-            }, 'plain-text', address.name)
-          }
+            });
+          }}
         >
           <View style={styles.addressRow}>
             <Ionicons name="location" size={18} color={ORANGE} />
@@ -208,7 +278,10 @@ export function CheckoutScreen() {
                   <View key={`${line.variantId}-${line.warehouseId}`} style={styles.productRow}>
                     <Image
                       source={{
-                        uri: master?.imageUri ?? masterContentImage(master?.id ?? line.variantId),
+                        uri:
+                          variant?.imageUri ??
+                          master?.imageUri ??
+                          masterContentImage(master?.id ?? line.variantId),
                       }}
                       style={styles.thumb}
                     />
@@ -339,13 +412,6 @@ export function CheckoutScreen() {
             <Text style={styles.vipText}>VIP · สมัครรับส่วนลดเพิ่มและส่งฟรีทั่วไทย</Text>
           </View>
 
-          <View style={styles.metaRow}>
-            <Ionicons name="diamond-outline" size={14} color={colors.accent.vault} />
-            <Text style={[styles.metaLabel, { flex: 1 }]}>
-              ไม่สามารถใช้ BoomMall Coins ในคำสั่งซื้อนี้
-            </Text>
-            <Ionicons name="information-circle-outline" size={14} color={colors.text.muted} />
-          </View>
         </View>
 
         <View style={styles.card}>
@@ -364,16 +430,18 @@ export function CheckoutScreen() {
                     ? 'cash-outline'
                     : paymentMethod === 'promptpay'
                       ? 'qr-code-outline'
-                      : 'wallet-outline'
+                      : paymentMethod === 'truemoney' || paymentMethod === 'mobile_banking'
+                        ? 'phone-portrait-outline'
+                        : paymentMethod === 'bank_account'
+                          ? 'business-outline'
+                          : 'wallet-outline'
               }
               size={20}
               color={ORANGE}
             />
             <View style={{ flex: 1 }}>
               <Text style={styles.paymentLabel}>{paymentLabel}</Text>
-              {paymentMethod === 'card' ? (
-                <Text style={styles.paymentSub}>{cardLabel}</Text>
-              ) : null}
+              {paymentHint ? <Text style={styles.paymentSub}>{paymentHint}</Text> : null}
             </View>
             <Ionicons name="checkmark-circle" size={20} color={ORANGE} />
           </Pressable>
@@ -405,11 +473,11 @@ export function CheckoutScreen() {
             : 'ยังไม่สามารถสั่งซื้อได้จนกว่า Payment Gateway จะพร้อม — ไม่มีการเรียกเก็บเงินในเวอร์ชันนี้'}
         </Text>
         <View style={styles.legalLinks}>
-          <Pressable onPress={() => router.push({ pathname: '/legal/[doc]', params: { doc: 'terms' } })}>
+          <Pressable onPress={() => void openLegalDocument('terms')}>
             <Text style={styles.legalLink}>ข้อกำหนดการใช้บริการ</Text>
           </Pressable>
           <Text style={styles.legalSep}>·</Text>
-          <Pressable onPress={() => router.push({ pathname: '/legal/[doc]', params: { doc: 'privacy' } })}>
+          <Pressable onPress={() => void openLegalDocument('privacy')}>
             <Text style={styles.legalLink}>นโยบายความเป็นส่วนตัว</Text>
           </Pressable>
         </View>

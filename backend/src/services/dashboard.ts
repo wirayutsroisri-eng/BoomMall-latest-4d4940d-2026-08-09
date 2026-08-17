@@ -44,6 +44,47 @@ export async function getDashboardStats(prisma: PrismaClient) {
 
   const reconcile = await reconcileLedger(prisma);
 
+  const since = new Date(Date.now() - 24 * 3600_000);
+  let dau = 0;
+  let gmvPaidThb = 0;
+  let gpCollectedThb = 0;
+  let netToMerchantThb = 0;
+  let paidOrderCount = 0;
+  let popularPosts: Array<{ id: string; body: string; likeCount: number; commentCount: number }> = [];
+  let userCount = 0;
+  let postCount = 0;
+  try {
+    const [dauGroup, paidAgg, posts, users, allPosts] = await Promise.all([
+      prisma.analyticsEvent.groupBy({
+        by: ['userId'],
+        where: { name: 'session.active', createdAt: { gte: since }, userId: { not: null } },
+      }),
+      prisma.commerceOrder.aggregate({
+        where: { status: 'PAID' },
+        _sum: { merchandiseThb: true, gpAmountThb: true, netToMerchantThb: true },
+        _count: true,
+      }),
+      prisma.socialPost.findMany({
+        where: { status: 'ACTIVE' },
+        orderBy: [{ likeCount: 'desc' }, { commentCount: 'desc' }],
+        take: 5,
+        select: { id: true, body: true, likeCount: true, commentCount: true },
+      }),
+      prisma.userProfile.count(),
+      prisma.socialPost.count({ where: { status: 'ACTIVE' } }),
+    ]);
+    dau = dauGroup.length;
+    gmvPaidThb = paidAgg._sum.merchandiseThb ?? 0;
+    gpCollectedThb = paidAgg._sum.gpAmountThb ?? 0;
+    netToMerchantThb = paidAgg._sum.netToMerchantThb ?? 0;
+    paidOrderCount = paidAgg._count;
+    popularPosts = posts;
+    userCount = users;
+    postCount = allPosts;
+  } catch {
+    /* tables may not exist yet */
+  }
+
   return {
     totalMintedSupply: supply.totalMinted.toString(),
     circulatingSupply: circulating.toString(),
@@ -58,6 +99,14 @@ export async function getDashboardStats(prisma: PrismaClient) {
     approvedTopUpCoinSum: (approvedTopUps._sum.amountCoin ?? 0n).toString(),
     ledgerHealthy: reconcile.ok,
     reconcile,
+    dau24h: dau,
+    gmvPaidThb,
+    gpCollectedThb,
+    netToMerchantThb,
+    paidOrderCount,
+    userCount,
+    postCount,
+    popularPosts,
     generatedAt: new Date().toISOString(),
   };
 }

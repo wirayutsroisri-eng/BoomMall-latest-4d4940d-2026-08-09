@@ -27,6 +27,9 @@ export type AppEnv = {
   corsOrigin: string[];
   initialTreasuryMint: bigint;
   databaseUrl: string;
+  redisUrl: string | null;
+  chatFlushIntervalMs: number;
+  chatSocketPath: string;
   /** Tuned for private company servers */
   prisma: {
     connectionLimit: number;
@@ -113,6 +116,9 @@ export function loadEnv(): AppEnv {
       .filter(Boolean),
     initialTreasuryMint: BigInt(process.env.INITIAL_TREASURY_MINT ?? '100000'),
     databaseUrl,
+    redisUrl: process.env.REDIS_URL?.trim() || null,
+    chatFlushIntervalMs: optInt('CHAT_FLUSH_INTERVAL_MS', 2000),
+    chatSocketPath: process.env.CHAT_SOCKET_PATH?.trim() || '/socket.io/chat',
     prisma: {
       connectionLimit: optInt('DATABASE_POOL_SIZE', optInt('PRISMA_CONNECTION_LIMIT', 10)),
       poolTimeoutSec: optInt('DATABASE_POOL_TIMEOUT', 20),

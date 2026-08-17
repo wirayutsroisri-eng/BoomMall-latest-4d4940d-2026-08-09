@@ -1,6 +1,7 @@
 import type {
   CustomFieldValue,
   MasterSku,
+  ProductMediaItem,
   SkuVariant,
   StockLedgerEntry,
   StockLedgerType,
@@ -8,6 +9,7 @@ import type {
   WarehouseId,
   WarehouseStock,
 } from './types';
+import { firstImageUri, fromLegacyImages, imageUrisOf, resolveProductMedia } from './product-media';
 
 /**
  * Pure stock/product logic shared by the Zustand store and node test scripts.
@@ -109,6 +111,23 @@ export function applyCommitSale(
   return { ok: true, next, entry: draft('SALE', row, next, { orderRef }) };
 }
 
+/** Cut on-hand at purchase time without a prior cart reservation. */
+export function applyDirectSale(
+  row: WarehouseStock | undefined,
+  qty: number,
+  orderRef?: string,
+): MutationOutcome {
+  if (!row) return { ok: false, reason: 'NOT_FOUND' };
+  if (!Number.isFinite(qty) || qty <= 0) return { ok: false, reason: 'INVALID' };
+  if (qty > availableOf(row)) return { ok: false, reason: 'INSUFFICIENT' };
+  const next: WarehouseStock = {
+    ...row,
+    onHand: row.onHand - qty,
+    revision: row.revision + 1,
+  };
+  return { ok: true, next, entry: draft('SALE', row, next, { orderRef }) };
+}
+
 export function applyRelease(
   row: WarehouseStock | undefined,
   qty: number,
@@ -203,6 +222,7 @@ export type VariantInput = {
   attrs: SkuVariant['attrs'];
   warehouseId: WarehouseId;
   onHand: number;
+  imageUri?: string;
 };
 
 export type CreateMasterInput = {
@@ -218,6 +238,10 @@ export type CreateMasterInput = {
   brand?: string;
   shopName?: string;
   variants: VariantInput[];
+  media?: ProductMediaItem[];
+  usageGuide?: string;
+  specImages?: ProductMediaItem[];
+  usageImages?: ProductMediaItem[];
 };
 
 export type CreatedBundle = {
@@ -245,6 +269,7 @@ export function buildMasterWithVariants(
       masterSkuId: masterId,
       sku: v.sku,
       label: v.label,
+      imageUri: v.imageUri,
       attrs: v.attrs,
       price: v.price,
       cost: v.cost,
@@ -274,6 +299,11 @@ export function buildMasterWithVariants(
     }
   });
 
+  const media =
+    input.media?.length ? input.media : fromLegacyImages(imageUris);
+  const photos = imageUrisOf(media);
+  const coverImage = firstImageUri(media);
+
   const master: MasterSku = {
     id: masterId,
     masterSku: input.masterSku,
@@ -289,8 +319,12 @@ export function buildMasterWithVariants(
     ownerShopId: input.ownerShopId,
     categoryKey: input.categoryKey,
     description: input.description?.trim() || undefined,
-    imageUri: imageUris?.[0],
-    imageUris,
+    usageGuide: input.usageGuide?.trim() || undefined,
+    specImages: input.specImages?.length ? input.specImages : undefined,
+    usageImages: input.usageImages?.length ? input.usageImages : undefined,
+    imageUri: coverImage,
+    imageUris: photos.length ? photos : undefined,
+    media: media.length ? media : undefined,
     createdAt: new Date(now).toISOString(),
   };
 
@@ -307,6 +341,8 @@ export function buildAddedVariant(
     warehouseId: WarehouseId;
     sku?: string;
     lowStockThreshold?: number;
+    imageUri?: string;
+    attrs?: SkuVariant['attrs'];
   },
   now: number,
 ): {
@@ -324,7 +360,8 @@ export function buildAddedVariant(
     masterSkuId: master.id,
     sku,
     label: input.label.trim(),
-    attrs: {},
+    imageUri: input.imageUri,
+    attrs: input.attrs ?? {},
     price: input.price,
     lowStockThreshold: input.lowStockThreshold,
     status: 'active',
@@ -369,18 +406,23 @@ export function buildAddedVariant(
 export type ClonePrefill = {
   title: string;
   description?: string;
+  usageGuide?: string;
+  specImages: ProductMediaItem[];
+  usageImages: ProductMediaItem[];
   channel: MasterSku['channel'];
   basePrice: number;
   tags: string[];
   categoryKey?: string;
   customFields: CustomFieldValue[];
   imageUris: string[];
+  media: ProductMediaItem[];
   /** Variant STRUCTURE only — new SKU codes suggested, stock reset to 0 */
   variants: Array<{
     label: string;
     suggestedSku: string;
     price: number;
     attrs: SkuVariant['attrs'];
+    imageUri?: string;
   }>;
 };
 
@@ -398,17 +440,22 @@ export function buildClonePrefill(
   return {
     title: `${master.title} (คัดลอก)`,
     description: master.description,
+    usageGuide: master.usageGuide,
+    specImages: (master.specImages ?? []).map((item) => ({ ...item })),
+    usageImages: (master.usageImages ?? []).map((item) => ({ ...item })),
     channel: master.channel,
     basePrice: master.basePrice,
     tags: master.tags.filter((t) => t !== 'Custom'),
     categoryKey: master.categoryKey,
     customFields: master.customFields.map((f) => ({ ...f })),
-    imageUris: master.imageUris ?? (master.imageUri ? [master.imageUri] : []),
+    media: resolveProductMedia(master).map((item) => ({ ...item })),
+    imageUris: imageUrisOf(resolveProductMedia(master)),
     variants: variants.map((v, index) => ({
       label: v.label,
       suggestedSku: `${master.masterSku}-C${stamp}-${index + 1}`,
       price: v.price,
       attrs: { ...v.attrs },
+      imageUri: v.imageUri,
     })),
   };
 }

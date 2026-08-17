@@ -19,6 +19,7 @@ import * as Haptics from 'expo-haptics';
 import * as MediaLibrary from 'expo-media-library/legacy';
 import { DragDownDismiss } from '@/shared/components/DragDownDismiss';
 import { colors } from '@/shared/theme/colors';
+import { GalleryPhotoEditor, type GalleryEditTool } from '@/shared/media/GalleryPhotoEditor';
 
 export type GalleryMediaKind = 'photo' | 'video';
 
@@ -171,29 +172,38 @@ function GalleryThumb({
   asset,
   style,
   resizeMode = 'cover',
+  uriOverride,
 }: {
   asset: MediaLibrary.Asset;
-  style?: object;
+  style?: object | object[];
   resizeMode?: 'cover' | 'contain';
+  uriOverride?: string;
 }) {
   const [uri, setUri] = useState<string | null>(
-    () => displayUriCache.get(asset.id) ?? (isDirectImageUri(asset.uri) ? asset.uri : null),
+    () =>
+      uriOverride ??
+      displayUriCache.get(asset.id) ??
+      (isDirectImageUri(asset.uri) ? asset.uri : null),
   );
 
   useEffect(() => {
+    if (uriOverride) {
+      setUri(uriOverride);
+      return;
+    }
     setUri(displayUriCache.get(asset.id) ?? (isDirectImageUri(asset.uri) ? asset.uri : null));
-  }, [asset.id, asset.uri]);
+  }, [asset.id, asset.uri, uriOverride]);
 
   useEffect(() => {
     let alive = true;
-    if (uri) return;
+    if (uriOverride || uri) return;
     void resolveDisplayUri(asset).then((next) => {
       if (alive && next) setUri(next);
     });
     return () => {
       alive = false;
     };
-  }, [asset, uri]);
+  }, [asset, uri, uriOverride]);
 
   if (!uri) {
     return (
@@ -209,6 +219,7 @@ function GalleryThumb({
 /**
  * LINE-style multi photo picker:
  * - Dark chrome, 4-column grid, circle select on every tile
+ * - Tap tile → large preview + edit tools; circle still multi-selects
  * - Sticky bottom: ดูตัวอย่าง · ภาพเต็ม · ส่ง
  * - Album dropdown (ล่าสุด / albums)
  */
@@ -239,6 +250,13 @@ export function MediaGalleryPicker({
   const [albums, setAlbums] = useState<MediaLibrary.Album[]>([]);
   const [albumId, setAlbumId] = useState<string | null>(null);
   const [albumTitle, setAlbumTitle] = useState(title);
+  const [editedUris, setEditedUris] = useState<Record<string, string>>({});
+  const [editor, setEditor] = useState<{
+    assetId: string;
+    uri: string;
+    tool: GalleryEditTool;
+  } | null>(null);
+  const [editorLoading, setEditorLoading] = useState(false);
   const loadingMore = useRef(false);
   const previewListRef = useRef<FlatList<MediaLibrary.Asset>>(null);
   const galleryScrollY = useSharedValue(0);
@@ -261,6 +279,8 @@ export function MediaGalleryPicker({
     setAlbumId(null);
     setAlbumTitle(title);
     setMode(initialMode);
+    setEditedUris({});
+    setEditor(null);
   }, [initialMode, title]);
 
   const mediaTypeFilter =
@@ -310,6 +330,8 @@ export function MediaGalleryPicker({
     setMode(initialMode);
     setAlbumTitle(title);
     setAlbumId(null);
+    setEditedUris({});
+    setEditor(null);
   }, [visible, initialMode, title]);
 
   useEffect(() => {
@@ -379,13 +401,6 @@ export function MediaGalleryPicker({
     const index = assets.findIndex((a) => a.id === asset.id);
     if (index < 0) return;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    // Ensure current photo is selected so send works from preview
-    setSelectedIds((prev) => {
-      if (prev.includes(asset.id)) return prev;
-      if (selectionLimit === 1) return [asset.id];
-      if (prev.length >= selectionLimit) return [...prev.slice(0, -1), asset.id];
-      return [...prev, asset.id];
-    });
     setPreview({ list: assets, index });
   };
 
@@ -396,10 +411,16 @@ export function MediaGalleryPicker({
   };
 
   const closePreview = useCallback(() => {
+    setEditor(null);
     setPreview(null);
   }, []);
 
   const previewCurrent = preview?.list[preview.index] ?? null;
+
+  const resolveItemUri = async (a: MediaLibrary.Asset) => {
+    if (editedUris[a.id]) return editedUris[a.id];
+    return resolveSendUri(a);
+  };
 
   const sendFromPreview = async () => {
     const current = preview?.list[preview.index] ?? null;
@@ -418,7 +439,7 @@ export function MediaGalleryPicker({
       const items: PickedGalleryItem[] = await Promise.all(
         ordered.map(async (a) => ({
           id: a.id,
-          uri: await resolveSendUri(a),
+          uri: await resolveItemUri(a),
           mediaType: a.mediaType === 'video' ? ('video' as const) : ('photo' as const),
           duration: a.duration,
           width: a.width,
@@ -443,22 +464,31 @@ export function MediaGalleryPicker({
   };
 
   const previewTools: Array<{
-    key: string;
+    key: GalleryEditTool;
     icon?: keyof typeof Ionicons.glyphMap;
     letter?: string;
     label: string;
   }> = [
-    { key: 'sticker', icon: 'happy-outline', label: 'สติกเกอร์' },
     { key: 'text', letter: 'T', label: 'ข้อความ' },
     { key: 'draw', icon: 'pencil', label: 'วาด' },
     { key: 'mosaic', icon: 'grid', label: 'โมเสก' },
     { key: 'filter', icon: 'color-filter', label: 'ฟิลเตอร์' },
-    { key: 'scan', icon: 'scan-outline', label: 'สแกน' },
+    { key: 'crop', icon: 'crop-outline', label: 'ครอป' },
   ];
 
-  const onToolPress = (_key: string) => {
-    // Crop/tools not shipped — avoid App Store “coming soon” Alerts (Guideline 2.1)
+  const openEditor = async (tool: GalleryEditTool) => {
+    const current = preview?.list[preview.index] ?? null;
+    if (!current || current.mediaType === 'video' || editorLoading) return;
     void Haptics.selectionAsync();
+    setEditorLoading(true);
+    try {
+      const uri = editedUris[current.id] ?? (await resolveSendUri(current));
+      setEditor({ assetId: current.id, uri, tool });
+    } catch {
+      Alert.alert('เปิดเครื่องมือไม่ได้', 'ลองใหม่อีกครั้ง');
+    } finally {
+      setEditorLoading(false);
+    }
   };
 
   const onPressSend = async () => {
@@ -470,7 +500,7 @@ export function MediaGalleryPicker({
       const items: PickedGalleryItem[] = await Promise.all(
         ordered.map(async (a) => ({
           id: a.id,
-          uri: await resolveSendUri(a),
+          uri: await resolveItemUri(a),
           mediaType: a.mediaType === 'video' ? ('video' as const) : ('photo' as const),
           duration: a.duration,
           width: a.width,
@@ -511,9 +541,9 @@ export function MediaGalleryPicker({
         <Pressable
           style={StyleSheet.absoluteFill}
           onPress={() => openBrowsePreview(item)}
-          accessibilityLabel="ดูรีวิวรูป"
+          accessibilityLabel="ดูรูปใหญ่"
         >
-          <GalleryThumb asset={item} style={styles.tileImage} />
+          <GalleryThumb asset={item} style={styles.tileImage} uriOverride={editedUris[item.id]} />
           {selected ? <View style={styles.selectedWash} pointerEvents="none" /> : null}
           {isVideo ? (
             <View style={styles.durationBadge}>
@@ -726,16 +756,19 @@ export function MediaGalleryPicker({
           <Pressable
             style={[styles.sendBtn, hasSelection ? styles.sendBtnOn : styles.sendBtnOff]}
             onPress={() => {
-              if (!hasSelection) return;
-              openPreviewSelected();
+              void onPressSend();
             }}
             disabled={!hasSelection || sending}
             accessibilityRole="button"
             accessibilityLabel={sendLabel}
           >
-            <Text style={[styles.sendBtnText, hasSelection && styles.sendBtnTextOn]}>
-              {hasSelection ? `${sendLabel} (${selectedIds.length})` : sendLabel}
-            </Text>
+            {sending ? (
+              <ActivityIndicator color={colors.brand.ink} />
+            ) : (
+              <Text style={[styles.sendBtnText, hasSelection && styles.sendBtnTextOn]}>
+                {hasSelection ? `${sendLabel} (${selectedIds.length})` : sendLabel}
+              </Text>
+            )}
           </Pressable>
         </View>
         </View>
@@ -749,8 +782,14 @@ export function MediaGalleryPicker({
           transparent
           onRequestClose={closePreview}
         >
-          <DragDownDismiss onDismiss={closePreview} showDim rootInModal style={styles.composeRoot}>
-            {preview ? (
+          <DragDownDismiss
+            onDismiss={closePreview}
+            enabled={!editor && !editorLoading}
+            showDim
+            rootInModal
+            style={styles.composeRoot}
+          >
+            {preview && !editor ? (
               <FlatList
                 ref={previewListRef}
                 style={StyleSheet.absoluteFill}
@@ -775,51 +814,156 @@ export function MediaGalleryPicker({
                 }}
                 renderItem={({ item }) => (
                   <View style={styles.composePage}>
-                    <GalleryThumb asset={item} style={styles.composeImage} resizeMode="cover" />
+                    <GalleryThumb
+                      asset={item}
+                      style={styles.composeImage}
+                      resizeMode="contain"
+                      uriOverride={editedUris[item.id]}
+                    />
                   </View>
                 )}
               />
             ) : null}
 
-            <View style={[styles.composeTop, { paddingTop: insets.top + 4 }]} pointerEvents="box-none">
-              <Pressable style={styles.composeIconBtn} onPress={closePreview} hitSlop={10}>
-                <Ionicons name="chevron-back" size={30} color="#fff" />
-              </Pressable>
-            </View>
-
-            <View
-              style={[styles.composeBottom, { paddingBottom: Math.max(insets.bottom, 18) }]}
-              pointerEvents="box-none"
-            >
-              <Pressable
-                style={styles.composeSelectRing}
-                onPress={() => {
-                  if (previewCurrent) toggleSelect(previewCurrent);
+            {editor ? (
+              <GalleryPhotoEditor
+                uri={editor.uri}
+                initialTool={editor.tool}
+                onClose={() => setEditor(null)}
+                onDone={(uri) => {
+                  const assetId = editor.assetId;
+                  setEditedUris((prev) => ({ ...prev, [assetId]: uri }));
+                  displayUriCache.set(assetId, uri);
+                  setSelectedIds((prev) => {
+                    if (prev.includes(assetId)) return prev;
+                    if (selectionLimit === 1) return [assetId];
+                    if (prev.length >= selectionLimit) return prev;
+                    return [...prev, assetId];
+                  });
+                  setEditor(null);
                 }}
-                accessibilityLabel="เลือก/ยกเลิก"
-              >
-                {previewCurrent && selectedSet.has(previewCurrent.id) ? (
-                  <View style={styles.composeSelectOn}>
-                    <Text style={styles.composeSelectNum}>
-                      {selectedIds.indexOf(previewCurrent.id) + 1}
-                    </Text>
+              />
+            ) : (
+              <>
+                <View
+                  style={[styles.composeTop, { paddingTop: insets.top + 4 }]}
+                  pointerEvents="box-none"
+                >
+                  <Pressable style={styles.composeIconBtn} onPress={closePreview} hitSlop={10}>
+                    <Ionicons name="chevron-back" size={30} color="#fff" />
+                  </Pressable>
+                </View>
+
+                {previewCurrent?.mediaType !== 'video' ? (
+                  <View
+                    style={[styles.composeTools, { top: insets.top + 56 }]}
+                    pointerEvents="box-none"
+                  >
+                    {previewTools.map((tool) => (
+                      <Pressable
+                        key={tool.key}
+                        style={styles.composeToolBtn}
+                        onPress={() => void openEditor(tool.key)}
+                        disabled={editorLoading}
+                        accessibilityLabel={tool.label}
+                      >
+                        {tool.letter ? (
+                          <Text style={styles.composeToolLetter}>{tool.letter}</Text>
+                        ) : (
+                          <Ionicons name={tool.icon!} size={26} color="#fff" />
+                        )}
+                      </Pressable>
+                    ))}
                   </View>
                 ) : null}
-              </Pressable>
 
-              <Pressable
-                style={styles.composeSendFab}
-                onPress={() => void sendFromPreview()}
-                disabled={sending}
-                accessibilityLabel="ส่ง"
-              >
-                {sending ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Ionicons name="paper-plane" size={24} color="#fff" />
-                )}
-              </Pressable>
-            </View>
+                {editorLoading ? (
+                  <View style={styles.editorLoading} pointerEvents="none">
+                    <ActivityIndicator color="#fff" />
+                  </View>
+                ) : null}
+
+                <View
+                  style={[styles.composeBottom, { paddingBottom: Math.max(insets.bottom, 18) }]}
+                  pointerEvents="box-none"
+                >
+                  {hasSelection ? (
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.filmStrip}
+                      style={styles.filmStripWrap}
+                    >
+                      {selectedAssets.map((a, i) => (
+                        <Pressable
+                          key={a.id}
+                          style={styles.filmItem}
+                          onPress={() => {
+                            const idx = preview?.list.findIndex((x) => x.id === a.id) ?? -1;
+                            if (idx < 0 || !preview) return;
+                            setPreview({ ...preview, index: idx });
+                            previewListRef.current?.scrollToIndex({
+                              index: idx,
+                              animated: true,
+                            });
+                          }}
+                        >
+                          <GalleryThumb
+                            asset={a}
+                            style={[
+                              styles.filmThumb,
+                              previewCurrent?.id === a.id && styles.filmThumbOn,
+                            ]}
+                            uriOverride={editedUris[a.id]}
+                          />
+                          <View style={styles.filmBadge}>
+                            <Text style={styles.filmBadgeText}>{i + 1}</Text>
+                          </View>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                  ) : null}
+
+                  <View style={styles.composeBottomRow}>
+                    <Pressable
+                      style={styles.composeSelectRing}
+                      onPress={() => {
+                        if (previewCurrent) toggleSelect(previewCurrent);
+                      }}
+                      accessibilityLabel="เลือก/ยกเลิก"
+                    >
+                      {previewCurrent && selectedSet.has(previewCurrent.id) ? (
+                        <View style={styles.composeSelectOn}>
+                          <Text style={styles.composeSelectNum}>
+                            {selectedIds.indexOf(previewCurrent.id) + 1}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </Pressable>
+
+                    <Pressable
+                      style={styles.composeSendFab}
+                      onPress={() => void sendFromPreview()}
+                      disabled={sending}
+                      accessibilityLabel="ส่ง"
+                    >
+                      {sending ? (
+                        <ActivityIndicator color="#fff" />
+                      ) : (
+                        <>
+                          <Ionicons name="paper-plane" size={24} color="#fff" />
+                          {selectedIds.length > 1 ? (
+                            <View style={styles.sendCountBadge}>
+                              <Text style={styles.sendCountText}>{selectedIds.length}</Text>
+                            </View>
+                          ) : null}
+                        </>
+                      )}
+                    </Pressable>
+                  </View>
+                </View>
+              </>
+            )}
           </DragDownDismiss>
         </Modal>
     </Modal>
@@ -1045,12 +1189,61 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     zIndex: 4,
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+  },
+  composeBottomRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 22,
-    paddingTop: 12,
+    paddingHorizontal: 6,
   },
+  filmStripWrap: { maxHeight: 64, marginBottom: 2 },
+  filmStrip: { gap: 8, paddingHorizontal: 6, alignItems: 'center' },
+  filmItem: { position: 'relative' },
+  filmThumb: {
+    width: 52,
+    height: 52,
+    borderRadius: 6,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  filmThumbOn: { borderColor: '#2E8CFF' },
+  filmBadge: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#2E8CFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  filmBadgeText: { color: '#fff', fontSize: 9, fontWeight: '900' },
+  editorLoading: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.25)',
+    zIndex: 6,
+  },
+  sendCountBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  sendCountText: { color: '#2E8CFF', fontSize: 10, fontWeight: '900' },
   composeSelectRing: {
     width: 30,
     height: 30,
@@ -1078,6 +1271,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingLeft: 2,
+    overflow: 'visible',
     shadowColor: '#000',
     shadowOpacity: 0.35,
     shadowRadius: 8,

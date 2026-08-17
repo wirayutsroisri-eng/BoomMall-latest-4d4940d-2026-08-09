@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { CURRENT_USER_ID } from '@/modules/chat/data/mockChatData';
+import { currentChatUserId } from '@/modules/chat/data/chatRealtimeApi';
 import {
   PRESENCE_HEARTBEAT_MS,
   PRESENCE_ONLINE_TTL_MS,
@@ -37,7 +37,7 @@ function pushNotesFromPresence(presenceByUserId: Record<string, PresenceRecord>)
   useChatStore.setState({ notes: nextNotes });
   const my = chat.myStatus;
   if (my) {
-    const online = isPresenceOnline(presenceByUserId[CURRENT_USER_ID], Date.now(), PRESENCE_ONLINE_TTL_MS);
+    const online = isPresenceOnline(presenceByUserId[currentChatUserId()], Date.now(), PRESENCE_ONLINE_TTL_MS);
     if (my.isOnline !== online) {
       useChatStore.setState({ myStatus: { ...my, isOnline: online } });
     }
@@ -51,9 +51,9 @@ function rebuildWithLocal(
 ): Record<string, PresenceRecord> {
   let map = { ...prev };
   if (localSurface) {
-    map = touchPresence(map, CURRENT_USER_ID, localSurface, 'local', now);
-  } else if (map[CURRENT_USER_ID]?.source === 'local') {
-    const { [CURRENT_USER_ID]: _, ...rest } = map;
+    map = touchPresence(map, currentChatUserId(), localSurface, 'local', now);
+  } else if (map[currentChatUserId()]?.source === 'local') {
+    const { [currentChatUserId()]: _, ...rest } = map;
     map = rest;
   }
   return map;
@@ -69,7 +69,7 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
     set((state) => {
       const presenceByUserId = touchPresence(
         state.presenceByUserId,
-        CURRENT_USER_ID,
+        currentChatUserId(),
         surface,
         'local',
         now,
@@ -83,7 +83,7 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
     const { localSurface } = get();
     if (localSurface !== surface) return;
     set((state) => {
-      const { [CURRENT_USER_ID]: _, ...rest } = state.presenceByUserId;
+      const { [currentChatUserId()]: _, ...rest } = state.presenceByUserId;
       pushNotesFromPresence(rest);
       return { localSurface: null, presenceByUserId: rest };
     });
@@ -112,7 +112,7 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
 
     const tick = () => {
       const notes = useChatStore.getState().notes;
-      const peerIds = collectPeerUserIds(notes, CURRENT_USER_ID);
+      const peerIds = collectPeerUserIds(notes, currentChatUserId());
       const peerMap = simulatePeerPresence(peerIds);
       const { localSurface, presenceByUserId } = get();
       const merged = rebuildWithLocal(mergePresenceMaps(presenceByUserId, peerMap), localSurface);

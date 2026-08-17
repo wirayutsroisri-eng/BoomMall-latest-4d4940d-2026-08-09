@@ -11,16 +11,17 @@ type Props = {
   onChangeTab: (tab: FeedTab) => void;
   onPressLive?: () => void;
   onPressSearch?: () => void;
+  onPressMore?: () => void;
 };
 
 const TABS: Array<{ key: FeedTab; label: string }> = [
-  { key: 'board', label: 'เว็บบอร์ด' },
+  { key: 'board', label: 'หางาน' },
   { key: 'nearby', label: 'ใกล้คุณ' },
   { key: 'following', label: 'กำลังติดตาม' },
   { key: 'foryou', label: 'สำหรับคุณ' },
 ];
 
-export function FeedHeader({ tab, onChangeTab, onPressLive, onPressSearch }: Props) {
+export function FeedHeader({ tab, onChangeTab, onPressLive, onPressSearch, onPressMore }: Props) {
   const insets = useSafeAreaInsets();
   const onBoard = tab === 'board';
 
@@ -36,17 +37,17 @@ export function FeedHeader({ tab, onChangeTab, onPressLive, onPressSearch }: Pro
         pointerEvents="none"
       />
       <View style={styles.row}>
-        {onPressLive ? (
-          <Pressable onPress={onPressLive} style={styles.iconBtn} hitSlop={8}>
-            <Ionicons
-              name="radio-outline"
-              size={20}
-              color={onBoard ? colors.text.primary : colors.text.inverse}
-            />
-          </Pressable>
-        ) : (
-          <View style={styles.iconBtn} />
-        )}
+        <View style={[styles.sideAbs, styles.sideLeft]} pointerEvents="box-none">
+          {onPressLive ? (
+            <Pressable onPress={onPressLive} style={styles.iconBtn} hitSlop={8} accessibilityLabel="ไลฟ์">
+              <Ionicons
+                name="radio-outline"
+                size={20}
+                color={onBoard ? colors.text.primary : colors.text.inverse}
+              />
+            </Pressable>
+          ) : null}
+        </View>
 
         <View style={styles.tabs}>
           {TABS.map((t) => {
@@ -59,7 +60,6 @@ export function FeedHeader({ tab, onChangeTab, onPressLive, onPressSearch }: Pro
                     onBoard && styles.tabTextOnBoard,
                     active && (onBoard ? styles.tabTextActiveOnBoard : styles.tabTextActive),
                   ]}
-                  numberOfLines={1}
                 >
                   {t.label}
                 </Text>
@@ -71,13 +71,24 @@ export function FeedHeader({ tab, onChangeTab, onPressLive, onPressSearch }: Pro
           })}
         </View>
 
-        <Pressable onPress={onPressSearch} style={styles.iconBtn} hitSlop={8}>
-          <Ionicons
-            name="search"
-            size={20}
-            color={onBoard ? colors.text.primary : colors.text.inverse}
-          />
-        </Pressable>
+        <View style={[styles.sideAbs, styles.sideRight]}>
+          <Pressable onPress={onPressSearch} style={styles.iconBtn} hitSlop={8} accessibilityLabel="ค้นหา">
+            <Ionicons
+              name="search"
+              size={20}
+              color={onBoard ? colors.text.primary : colors.text.inverse}
+            />
+          </Pressable>
+          {onPressMore ? (
+            <Pressable onPress={onPressMore} style={styles.iconBtn} hitSlop={8} accessibilityLabel="ตัวเลือกเพิ่มเติม">
+              <Ionicons
+                name="ellipsis-horizontal"
+                size={20}
+                color={onBoard ? colors.text.primary : colors.text.inverse}
+              />
+            </Pressable>
+          ) : null}
+        </View>
       </View>
     </View>
   );
@@ -94,12 +105,20 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 2,
+    justifyContent: 'center',
     paddingVertical: 6,
-    gap: 0,
   },
+  sideAbs: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    zIndex: 2,
+  },
+  sideLeft: { left: 2 },
+  sideRight: { right: 2 },
   tabs: {
-    flex: 1,
     flexDirection: 'row',
     justifyContent: 'center',
     gap: 8,
@@ -108,7 +127,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 1,
     paddingBottom: 7,
-    maxWidth: 88,
   },
   tabText: {
     color: 'rgba(255,255,255,0.8)',

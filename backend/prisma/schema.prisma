@@ -39,6 +39,10 @@ enum TxType {
   REWARD_PAYOUT
   REFUND
   REVERSAL
+  /// Marketplace GP settlement (must pair with audit trail)
+  GP_SETTLEMENT
+  /// PSP capture / payout reference (real gateway only)
+  PSP_CAPTURE
 }
 
 enum TxStatus {
@@ -185,4 +189,973 @@ model AdminAuditLog {
   createdAt  DateTime @default(now())
 
   @@index([createdAt])
+}
+
+/// Admin Natural Language Moderation Directives (Dynamic Moderation Engine)
+model ModerationPolicy {
+  id          String   @id @default(uuid())
+  promptText  String
+  /// { reportThreshold, actionDurationHours, categories, softLockRiskMin, ... }
+  parsedRules Json
+  isActive    Boolean  @default(true)
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isActive, createdAt])
+}
+
+/// User / Content Soft-Lock & Risk Tracking (algorithm never writes BANNED)
+model ModerationState {
+  id               String    @id @default(uuid())
+  targetType       String // "USER" | "POST"
+  targetId         String    @unique
+  currentRiskScore Float     @default(0)
+  /// ACTIVE | SOFT_LOCKED | AUTO_HIDDEN | PENDING_REVIEW | BANNED (BANNED = admin-only mirror)
+  status           String    @default("ACTIVE")
+  softLockedAt     DateTime?
+  autoUnlockAt     DateTime?
+  lockReason       String?
+  lastReportId     String?
+  policyId         String?
+  updatedAt        DateTime  @updatedAt
+
+  @@index([status, autoUnlockAt])
+  @@index([targetType, status])
+}
+
+/// Global Feed Ranking & Personalization weights + discovery rules
+model FeedPersonalizationConfig {
+  id                     String   @id @default("GLOBAL_CONFIG")
+  /// Personalization slice (target sum with systemSignals = 1.0; personalization ≈ 0.75)
+  interestMatchWeight    Float    @default(0.35)
+  watchTimeWeight        Float    @default(0.25)
+  freshnessWeight        Float    @default(0.10)
+  creatorDiversityWeight Float    @default(0.05)
+  systemSignalsWeight    Float    @default(0.25)
+
+  boostNewCreators       Boolean  @default(true)
+  exploreNewInterests    Boolean  @default(true)
+  reduceRepeatedContent  Boolean  @default(true)
+  reduceLowQuality       Boolean  @default(true)
+
+  geoProximityBoost      Boolean  @default(true)
+  downrankReported       Boolean  @default(true)
+  prioritizeEnergyPush   Boolean  @default(true)
+  hideOutOfStock         Boolean  @default(true)
+
+  updatedAt              DateTime @updatedAt
+  updatedBy              String?
+}
+
+/// One-click Feed algorithm presets
+model FeedPreset {
+  id         String   @id @default(uuid())
+  name       String
+  configJson Json
+  isActive   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([isActive])
+}
+
+// ─── Chat domain (buyer ↔ shop realtime) ───────────────────────────────────
+
+enum ChatConversationType {
+  DIRECT
+  SHOP
+  GROUP
+}
+
+enum ChatMessageStatus {
+  CACHED
+  PERSISTED
+  DELETED
+}
+
+model ChatConversation {
+  id            String                @id @default(uuid())
+  type          ChatConversationType  @default(SHOP)
+  /// Shop / seller external id (USER_SHOP)
+  shopId        String?
+  shopName      String?
+  title         String?
+  /// Mall product / order context for shop support rooms (optional).
+  contextProductId String?
+  contextOrderId   String?
+  lastSequence  BigInt                @default(0)
+  lastMessageAt DateTime?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  participants ChatParticipant[]
+  messages     ChatMessage[]
+
+  @@index([type, shopId])
+  @@index([updatedAt])
+  @@index([lastMessageAt])
+  @@index([contextOrderId])
+  @@index([type, contextProductId])
+}
+
+model ChatParticipant {
+  id               String    @id @default(uuid())
+  conversationId   String
+  userId           String
+  role             String    @default("MEMBER") // BUYER | SELLER | ADMIN | MEMBER
+  joinedAt         DateTime  @default(now())
+  lastReadAt       DateTime?
+  lastDeliveredAt  DateTime?
+  lastReadSequence BigInt    @default(0)
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+}
+
+model ChatMessage {
+  id               String            @id @default(uuid())
+  conversationId   String
+  senderId         String
+  body             String
+  status           ChatMessageStatus @default(CACHED)
+  clientMsgId      String?
+  kind             String            @default("TEXT")
+  serverSequence   BigInt            @default(0)
+  replyToMessageId String?
+  metadataJson     Json              @default("{}")
+  createdAt        DateTime          @default(now())
+  persistedAt      DateTime?
+
+  conversation ChatConversation         @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  replyTo      ChatMessage?             @relation("ChatReply", fields: [replyToMessageId], references: [id], onDelete: SetNull)
+  replies      ChatMessage[]            @relation("ChatReply")
+  attachments  ChatMessageAttachment[]
+  reactions    ChatMessageReaction[]
+
+  @@unique([conversationId, clientMsgId])
+  @@unique([senderId, clientMsgId])
+  @@index([conversationId, createdAt])
+  @@index([conversationId, serverSequence])
+  @@index([status, createdAt])
+}
+
+model ChatMessageAttachment {
+  id               String   @id @default(uuid())
+  messageId        String
+  url              String
+  mimeType         String
+  size             Int
+  originalFilename String
+  width            Int?
+  height           Int?
+  duration         Int?
+  createdAt        DateTime @default(now())
+
+  message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+}
+
+model ChatMessageReaction {
+  id        String   @id @default(uuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
+}
+
+// ─── Auth & Profile ──────────────────────────────────────────────────────────
+
+model UserProfile {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  displayName  String?
+  handle       String?
+  role         String   @default("BUYER") // BUYER | SELLER | ADMIN
+  shopId       String?
+  bio          String?
+  avatarUrl    String?
+  coverUrl     String?
+  email        String?
+  passwordHash String?
+  /// { privateAccount, showFollowers, whoCanMessage, whoCanComment }
+  privacyJson  Json     @default("{}")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  eulaAcceptances EulaAcceptance[]
+
+  @@index([shopId])
+  @@index([handle])
+  @@index([email])
+}
+
+model EulaAcceptance {
+  id          String   @id @default(uuid())
+  userId      String
+  policyKey   String // APP_STORE_C4_CHAT | MARKETPLACE_TERMS | PRIVACY
+  version     String
+  acceptedAt  DateTime @default(now())
+  ipHint      String?
+  userAgent   String?
+
+  profile UserProfile? @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@unique([userId, policyKey, version])
+  @@index([policyKey, version])
+}
+
+// ─── Marketplace audit (GP / PSP) ────────────────────────────────────────────
+
+model MarketplaceAuditLog {
+  id           String   @id @default(cuid())
+  actor        String
+  action       String // gp.settle | psp.capture | psp.reject | order.pay
+  entityType   String
+  entityId     String
+  amountThb    BigInt?
+  gpBps        Int? // basis points e.g. 500 = 5%
+  gpAmountThb  BigInt?
+  pspRef       String?
+  ledgerTxId   String?
+  detailJson   Json     @default("{}")
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([action, createdAt])
+  @@index([entityType, entityId])
+}
+
+/// Admin-configurable marketplace GP (commission). 500 bps = 5.00%.
+model MarketplaceGpPolicy {
+  id                     String   @id @default("GLOBAL_GP")
+  enabled                Boolean  @default(true)
+  defaultGpBps           Int      @default(500)
+  b2cGpBps               Int?
+  b2bGpBps               Int?
+  minOrderThb            Int      @default(0)
+  /// Days after buyer+seller confirm + no return before seller net is payable
+  holdDaysAfterComplete  Int      @default(7)
+  /// Weekly payout cycle for RELEASE_ELIGIBLE orders
+  payoutCycleDays        Int      @default(7)
+  merchantOverridesJson  Json     @default("[]")
+  updatedAt              DateTime @updatedAt
+  updatedBy              String?
+}
+
+/// Chat/Social control policy (single row)
+model SocialControlPolicy {
+  id                    String   @id @default("GLOBAL_SOCIAL")
+  maxMessagesPerMinute  Int      @default(30)
+  maxMessagesPerDay     Int      @default(2000)
+  mediaRetentionDays    Int      @default(90)
+  textRetentionDays     Int      @default(365)
+  requireEulaForChat    Boolean  @default(true)
+  eulaVersion           String   @default("c4-2026.1")
+  reportBlockEnabled    Boolean  @default(true)
+  moderationEnabled     Boolean  @default(true)
+  updatedAt             DateTime @updatedAt
+  updatedBy             String?
+}
+
+// ─── Auth identities (Sign in with Apple / social) ───────────────────────────
+
+model AuthIdentity {
+  id             String   @id @default(uuid())
+  userId         String
+  provider       String // apple | google | line
+  providerUserId String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([provider, providerUserId])
+  @@index([userId])
+}
+
+// ─── Marketplace catalog (products + artisan services) ───────────────────────
+
+enum CatalogKind {
+  PRODUCT
+  SERVICE
+}
+
+model CatalogItem {
+  id           String      @id @default(cuid())
+  kind         CatalogKind
+  merchantId   String
+  title        String
+  description  String?
+  priceThb     BigInt      @default(0)
+  currency     String      @default("THB")
+  status       String      @default("ACTIVE") // ACTIVE | HIDDEN | OUT_OF_STOCK
+  metadataJson Json        @default("{}")
+  isPromoted   Boolean     @default(false)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([kind, status])
+  @@index([merchantId])
+  @@index([updatedAt])
+  @@index([isPromoted])
+}
+
+// ─── Ads inventory + billing (THB invoices — separate from GP) ───────────────
+
+enum AdPlacementType {
+  BANNER
+  SPONSORED_FEED
+  APP_OPEN
+}
+
+enum AdCampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ENDED
+}
+
+enum AdInvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  VOID
+  FAILED
+}
+
+model AdCampaign {
+  id            String           @id @default(cuid())
+  advertiserId  String
+  name          String
+  placement     AdPlacementType
+  status        AdCampaignStatus @default(DRAFT)
+  budgetThb     BigInt           @default(0)
+  spentThb      BigInt           @default(0)
+  startAt       DateTime?
+  endAt         DateTime?
+  targetingJson Json             @default("{}")
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  creatives AdCreative[]
+  invoices  AdInvoice[]
+
+  @@index([advertiserId, status])
+  @@index([placement, status])
+}
+
+model AdCreative {
+  id         String   @id @default(cuid())
+  campaignId String
+  title      String
+  body       String?
+  imageUrl   String?
+  ctaUrl     String?
+  weight     Int      @default(1)
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  campaign AdCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, active])
+}
+
+/// Ad billing invoices (THB via PSP) — NOT Boom Coin GP
+model AdInvoice {
+  id            String          @id @default(cuid())
+  campaignId    String
+  invoiceNumber String          @unique
+  amountThb     BigInt
+  status        AdInvoiceStatus @default(DRAFT)
+  dueAt         DateTime?
+  paidAt        DateTime?
+  pspRef        String?
+  lineItemsJson Json            @default("[]")
+  auditJson     Json            @default("{}")
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  campaign AdCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([campaignId])
+}
+
+model ProductPromotion {
+  id               String    @id @default(cuid())
+  productId        String
+  userId           String
+  shopName         String?
+  productTitle     String
+  productImageUrl  String?
+  productMediaType String?
+  packageType      String
+  priceThb         Int
+  durationDays     Int
+  startDate        DateTime?
+  endDate          DateTime?
+  paymentStatus    String    @default("pending")
+  adStatus         String    @default("pending_review")
+  paymentProofUrl  String?
+  transactionId    String?
+  rejectReason     String?
+  adminNote        String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([adStatus, createdAt])
+  @@index([userId, adStatus])
+  @@index([productId, adStatus])
+  @@index([endDate, adStatus])
+}
+
+model SellerNotification {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  body      String
+  kind      String
+  refId     String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, read])
+}
+
+// ─── Social feed posts (Postgres durable store; Redis optional for hot cache) ─
+// Spec mentioned MongoDB for speed — BoomMall keeps chat/posts on PostgreSQL
+// with Socket.io + Redis adapter for realtime fan-out (no Mongo dependency).
+
+model SocialPost {
+  id            String   @id @default(uuid())
+  authorId      String
+  body          String
+  mediaJson     Json     @default("[]")
+  status        String   @default("ACTIVE") // ACTIVE | HIDDEN | REMOVED
+  likeCount     Int      @default(0)
+  reportCount   Int      @default(0)
+  commentCount  Int      @default(0)
+  shareCount    Int      @default(0)
+  lat           Float?
+  lng           Float?
+  locationLabel String?
+  tagsJson      Json     @default("[]")
+  linkUrl       String?
+  /// nearby | following | foryou | board
+  lane          String   @default("foryou")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([createdAt])
+  @@index([authorId, createdAt])
+  @@index([status, createdAt])
+  @@index([lane, createdAt])
+}
+
+// ─── Unified commerce (Product / SKU / Shared Warehouse / Order) ─────────────
+// Source of truth for app + admin + web. Cart never writes reserved stock.
+
+model CommerceProduct {
+  id          String   @id
+  merchantId  String
+  shopName    String
+  title       String
+  masterSku   String
+  channel     String   @default("B2C")
+  basePrice   Int      @default(0)
+  currency    String   @default("THB")
+  status      String   @default("ACTIVE")
+  isPromoted  Boolean  @default(false)
+  payloadJson Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  variants CommerceSku[]
+
+  @@index([merchantId, status])
+  @@index([shopName])
+  @@index([updatedAt])
+  @@index([isPromoted])
+}
+
+model CommerceSku {
+  id          String   @id
+  productId   String
+  sku         String
+  label       String
+  priceThb    Int      @default(0)
+  status      String   @default("active")
+  payloadJson Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  product CommerceProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  stock   CommerceStock[]
+
+  @@index([productId])
+  @@index([sku])
+}
+
+model CommerceStock {
+  id          String   @id @default(cuid())
+  skuId       String
+  warehouseId String
+  onHand      Int      @default(0)
+  reserved    Int      @default(0)
+  revision    Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  sku CommerceSku @relation(fields: [skuId], references: [id], onDelete: Cascade)
+
+  @@unique([skuId, warehouseId])
+  @@index([warehouseId])
+}
+
+model CommerceOrder {
+  id               String    @id @default(cuid())
+  buyerId          String
+  merchantId       String?
+  /// PENDING_PAYMENT | PAID | SHIPPED | DELIVERED | COMPLETED | CANCELLED | REFUNDED | FAILED
+  status           String    @default("PENDING_PAYMENT")
+  merchandiseThb   Int       @default(0)
+  shippingFeeThb   Int       @default(0)
+  currency         String    @default("THB")
+  linesJson        Json      @default("[]")
+  gpBps            Int?
+  gpAmountThb      Int       @default(0)
+  netToMerchantThb Int?
+  pspRef           String?
+  idempotencyKey   String?   @unique
+  paidAt           DateTime?
+  trackingNumber   String?
+  shippingCarrier  String?
+  /// PENDING | PACKED | SHIPPED | DELIVERED
+  shippingStatus   String?
+  /// PICKED_UP | OUT_FOR_DELIVERY | DELIVERED | RETURNED
+  courierEvent     String?
+  shippedAt        DateTime?
+  deliveredAt      DateTime?
+  disputedAt       DateTime?
+  /// HELD | RELEASE_ELIGIBLE | IN_PAYOUT | PAID_OUT | REFUNDED | DISPUTED
+  settlementStatus  String    @default("HELD")
+  buyerConfirmedAt  DateTime?
+  sellerConfirmedAt DateTime?
+  completedAt       DateTime?
+  /// NONE | REQUESTED | ACCEPTED | REJECTED | REFUNDED
+  returnStatus      String    @default("NONE")
+  returnRequestedAt DateTime?
+  releaseEligibleAt DateTime?
+  payoutBatchId     String?
+  paidOutAt         DateTime?
+  /// { name, phone, line1, district, amphoe, province, postcode, paymentMethod, codAmountThb }
+  shippingJson      Json      @default("{}")
+  /// merchantId|name|phone|address — used to auto-merge same-address PAID orders
+  addressMergeKey   String?
+  shipmentGroupId   String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([buyerId, createdAt])
+  @@index([status, createdAt])
+  @@index([merchantId, createdAt])
+  @@index([shippingStatus])
+  @@index([settlementStatus, releaseEligibleAt])
+  @@index([payoutBatchId])
+  @@index([merchantId, addressMergeKey, status])
+  @@index([shipmentGroupId])
+}
+
+/// One thermal label (4x6) that may cover several same-address orders
+model ShipmentGroup {
+  id              String   @id @default(cuid())
+  merchantId      String
+  addressMergeKey String
+  trackingNumber  String
+  shippingCarrier String   @default("Kerry")
+  orderIdsJson    Json     @default("[]")
+  /// PAID | COD | MIXED
+  paymentKind     String   @default("PAID")
+  codAmountThb    Int      @default(0)
+  printedAt       DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  @@index([merchantId, createdAt])
+  @@index([addressMergeKey])
+  @@unique([merchantId, trackingNumber])
+  @@map("shipment_groups")
+}
+
+/// Audit trail for reserve → pack deduct → cancel/return. Idempotent per order line.
+model CommerceStockLedger {
+  id             String   @id @default(cuid())
+  skuId          String
+  warehouseId    String
+  /// ORDER_RESERVE | SALE | ORDER_CANCEL | RETURN | RESTOCK | MANUAL
+  type           String
+  qty            Int
+  onHandAfter    Int
+  reservedAfter  Int
+  availableAfter Int
+  orderId        String?
+  reason         String?
+  idempotencyKey String   @unique
+  createdAt      DateTime @default(now())
+
+  @@index([skuId, createdAt])
+  @@index([orderId])
+  @@map("commerce_stock_ledger")
+}
+
+/// Courier webhook / simulator events keyed by tracking number.
+model ShipmentTrackingEvent {
+  id             String   @id @default(cuid())
+  trackingNumber String
+  carrier        String   @default("Kerry")
+  /// PICKED_UP | OUT_FOR_DELIVERY | DELIVERED | RETURNED
+  event          String
+  occurredAt     DateTime
+  payloadJson    Json     @default("{}")
+  orderIdsJson   Json     @default("[]")
+  processed      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  @@unique([trackingNumber, event, occurredAt])
+  @@index([trackingNumber, createdAt])
+  @@map("shipment_tracking_events")
+}
+
+/// THB books for the marketplace (not Boom Coin Wallet).
+model PlatformThbLedger {
+  id         String   @id @default(cuid())
+  /// PLATFORM_CASH | PLATFORM_GP | MERCHANT_HELD | MERCHANT_PAYABLE | MERCHANT_QUEUED | BUYER_REFUND
+  account    String
+  merchantId String?
+  orderId    String?
+  batchId    String?
+  /// DEBIT | CREDIT
+  side       String
+  amountThb  Int
+  currency   String   @default("THB")
+  memo       String
+  createdAt  DateTime @default(now())
+
+  @@index([account, createdAt])
+  @@index([orderId])
+  @@index([merchantId, createdAt])
+  @@index([batchId])
+}
+
+model MerchantPayoutAccount {
+  id          String   @id @default(cuid())
+  merchantId  String
+  kind        String
+  accountNo   String
+  accountName String?
+  bankName    String?
+  verified    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([merchantId, kind])
+  @@index([merchantId])
+}
+
+model PayoutBatch {
+  id            String    @id @default(cuid())
+  /// DRAFT | QUEUED | COMPLETED | FAILED
+  status        String    @default("DRAFT")
+  scheduledFor  DateTime
+  totalThb      Int       @default(0)
+  orderCount    Int       @default(0)
+  merchantCount Int       @default(0)
+  runBy         String?
+  note          String?
+  completedAt   DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([status, scheduledFor])
+}
+
+model AnalyticsEvent {
+  id          String   @id @default(cuid())
+  userId      String?
+  name        String
+  entityType  String?
+  entityId    String?
+  payloadJson Json     @default("{}")
+  createdAt   DateTime @default(now())
+
+  @@index([name, createdAt])
+  @@index([userId, createdAt])
+  @@index([entityType, entityId])
+}
+
+model Follow {
+  id              String   @id @default(uuid())
+  followerId      String
+  followingId     String
+  followingHandle String
+  createdAt       DateTime @default(now())
+
+  @@unique([followerId, followingId])
+  @@index([followerId, createdAt])
+  @@index([followingId])
+  @@index([followingHandle])
+}
+
+model SocialLike {
+  id        String   @id @default(uuid())
+  userId    String
+  postId    String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, postId])
+  @@index([postId])
+}
+
+model SocialComment {
+  id        String   @id @default(uuid())
+  postId    String
+  authorId  String
+  parentId  String?
+  body      String
+  likeCount Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([postId, createdAt])
+  @@index([parentId])
+}
+
+model BoardCategory {
+  id          String   @id @default(uuid())
+  slug        String   @unique
+  title       String
+  description String?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  threads BoardThread[]
+}
+
+model BoardThread {
+  id         String   @id @default(uuid())
+  categoryId String
+  authorId   String
+  title      String
+  body       String
+  pinned     Boolean  @default(false)
+  score      Int      @default(0)
+  replyCount Int      @default(0)
+  status     String   @default("ACTIVE")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  category BoardCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  replies  BoardReply[]
+
+  @@index([categoryId, pinned, score])
+  @@index([createdAt])
+  @@index([status, createdAt])
+}
+
+model BoardReply {
+  id        String   @id @default(uuid())
+  threadId  String
+  authorId  String
+  parentId  String?
+  body      String
+  score     Int      @default(0)
+  createdAt DateTime @default(now())
+
+  thread BoardThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId, createdAt])
+  @@index([parentId])
+}
+
+model BoardVote {
+  id         String   @id @default(uuid())
+  userId     String
+  targetType String
+  targetId   String
+  value      Int
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, targetType, targetId])
+  @@index([targetType, targetId])
+}
+
+model PushDevice {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  platform  String   @default("ios")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+/// กระเป๋าเงินร้าน (THB escrow) — ไม่ใช่ Boom Coin Wallet
+model SellerWallet {
+  id                String   @id @default(cuid())
+  sellerId          String   @unique @map("seller_id")
+  /// หน่วยสตางค์ (1 บาท = 100)
+  availableBalance  Int      @default(0) @map("available_balance")
+  pendingBalance    Int      @default(0) @map("pending_balance")
+  isCorporate       Boolean  @default(false) @map("is_corporate")
+  bankName          String?  @map("bank_name")
+  bankAccountNo     String?  @map("bank_account_no")
+  bankAccountName   String?  @map("bank_account_name")
+  bankCode          String?  @map("bank_code")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  transactions FinanceWalletTransaction[]
+  withdrawals  WithdrawalRequest[]
+
+  @@map("seller_wallets")
+}
+
+/// Ledger เงินเข้า-ออกของร้าน (GP / VAT / WHT)
+model FinanceWalletTransaction {
+  id           String   @id @default(cuid())
+  walletId     String   @map("wallet_id")
+  sellerId     String   @map("seller_id")
+  orderId      String?  @map("order_id")
+  withdrawalId String?  @map("withdrawal_id")
+  /// SETTLEMENT | RELEASE | WITHDRAW | WITHDRAW_REJECT | REVERSAL
+  type         String
+  grossAmount  Int      @map("gross_amount")
+  gpFee        Int      @map("gp_fee")
+  vatAmount    Int      @map("vat_amount")
+  whtAmount    Int      @map("wht_amount")
+  netAmount    Int      @map("net_amount")
+  gpRateBps    Int      @map("gp_rate_bps")
+  balanceAfter Int?     @map("balance_after")
+  memo         String   @default("")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  wallet SellerWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, type])
+  @@index([sellerId, createdAt])
+  @@index([walletId, createdAt])
+  @@map("wallet_transactions")
+}
+
+model WithdrawalRequest {
+  id          String    @id @default(cuid())
+  walletId    String    @map("wallet_id")
+  sellerId    String    @map("seller_id")
+  amount      Int
+  /// PENDING | APPROVED | TRANSFERRED | REJECTED
+  status      String    @default("PENDING")
+  /// MANUAL | AUTO
+  payoutChannel String  @default("MANUAL") @map("payout_channel")
+  payoutProvider String? @map("payout_provider")
+  payoutRef     String? @map("payout_ref")
+  /// เหตุที่บังคับ Manual เช่น mode_manual | over_limit | auto_failed | risk_flag
+  manualReason  String? @map("manual_reason")
+  bankName    String?   @map("bank_name")
+  bankAccountNo String? @map("bank_account_no")
+  bankAccountName String? @map("bank_account_name")
+  note        String?
+  proofOfTransfer String? @map("proof_of_transfer")
+  reviewedBy  String?   @map("reviewed_by")
+  reviewedAt  DateTime? @map("reviewed_at")
+  transferredAt DateTime? @map("transferred_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  wallet SellerWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([sellerId, createdAt])
+  @@index([payoutChannel, status, createdAt])
+  @@map("withdrawal_requests")
+}
+
+/// บัญชีกลางแพลตฟอร์ม + กติกา escrow
+model PlatformSettings {
+  id                 String   @id @default("GLOBAL")
+  defaultGpPercent   Float    @default(5) @map("default_gp_percent")
+  autoCompleteDays   Int      @default(7) @map("auto_complete_days")
+  /// MANUAL = แอดมินโอนแนบสลิป | AUTO = โอนผ่าน Payout Gateway เมื่อเข้าเงื่อนไข
+  payoutMode         String   @default("MANUAL") @map("payout_mode")
+  /// เพดานออโต้ต่อครั้ง (สตางค์) — เกินบังคับ Manual
+  autoPayoutMaxLimit Int      @default(2000000) @map("auto_payout_max_limit")
+  bankName           String?  @map("bank_name")
+  bankAccountNo      String?  @map("bank_account_no")
+  bankAccountName    String?  @map("bank_account_name")
+  bankCode           String?  @map("bank_code")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+  updatedBy          String?  @map("updated_by")
+
+  @@map("platform_settings")
+}
+
+/// ร้านค้า + กระเป๋า escrow (ยอดเป็นสตางค์)
+model Store {
+  id                String   @id
+  name              String   @default("")
+  customGpPercent   Float?   @map("custom_gp_percent")
+  availableBalance  Int      @default(0) @map("available_balance")
+  pendingBalance    Int      @default(0) @map("pending_balance")
+  isCorporate       Boolean  @default(false) @map("is_corporate")
+  /// เลขประจำตัวผู้เสียภาษี / เลขบัตร 13 หลัก — ใช้ส่งสรรพากร
+  taxId             String?  @map("tax_id")
+  /// ที่อยู่จดทะเบียน / ที่อยู่ติดต่อบนใบสรุปยอด
+  address           String?
+  bankName          String?  @map("bank_name")
+  bankAccountNo     String?  @map("bank_account_no")
+  bankAccountName   String?  @map("bank_account_name")
+  bankCode          String?  @map("bank_code")
+  /// เวลาอัปเดตบัญชีธนาคารล่าสุด — ใช้ cooling-off 24 ชม. ก่อนถอน
+  bankUpdatedAt     DateTime? @map("bank_updated_at")
+  /// scrypt hash ของ PIN 6 หลัก (รูปแบบเดียวกับรหัสผ่านบัญชี)
+  paymentPinHash    String?  @map("payment_pin_hash")
+  pinFailedAttempts Int      @default(0) @map("pin_failed_attempts")
+  pinLockedUntil    DateTime? @map("pin_locked_until")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  escrows OrderEscrow[]
+
+  @@map("stores")
+}
+
+model OrderEscrow {
+  id                 String    @id @default(cuid())
+  orderId            String    @unique @map("order_id")
+  storeId            String    @map("store_id")
+  /// สตางค์
+  grossAmount        Int       @map("gross_amount")
+  shippingFee        Int       @default(0) @map("shipping_fee")
+  gpPercent          Float     @map("gp_percent")
+  gpAmount           Int       @map("gp_amount")
+  netMerchantAmount  Int       @map("net_merchant_amount")
+  releaseDueDate     DateTime? @map("release_due_date")
+  /// HELD | RELEASED | CANCELLED | REFUNDED
+  releaseStatus      String    @default("HELD") @map("release_status")
+  releasedAt         DateTime? @map("released_at")
+  payoutProof        String?   @map("payout_proof")
+  paidOutAt          DateTime? @map("paid_out_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  store Store @relation(fields: [storeId], references: [id])
+
+  @@index([storeId, releaseStatus])
+  @@index([releaseStatus, releaseDueDate])
+  @@map("order_escrows")
 }

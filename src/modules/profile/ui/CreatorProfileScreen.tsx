@@ -14,12 +14,12 @@ import {
 } from '@gorhom/bottom-sheet';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
 import { useChatStore } from '@/modules/chat/state/chat-store';
+import { jumpToChatThread } from '@/shared/navigation/safeNavigate';
 import { useFollowStore } from '@/modules/social/state/follow-store';
 import { normalizeAuthorHandle } from '@/modules/feed/domain/selectFeedByAuthor';
 import { buildCreatorPortfolio } from '@/modules/profile/data/mockCreatorPortfolio';
 import type { FeedItem } from '@/modules/feed/domain/types';
 import { Avatar } from '@/shared/components/Avatar';
-import { BoomCoinAmountView } from '@/modules/wallet/ui/BoomCoinAmountView';
 import { ReportBlockSheet } from '@/modules/safety/ui/ReportBlockSheet';
 import { useModerationStore } from '@/modules/safety/state/moderation-store';
 import { colors } from '@/shared/theme/colors';
@@ -198,20 +198,13 @@ function CreatorProfileBody({
   const baseFollowers = 800 + (seed % 68000);
   /** TikTok: เลขผู้ติดตามขยับทันทีเมื่อกด Follow */
   const followersCount = baseFollowers + (following ? 1 : 0);
-  /** ได้รับ Coin = ยอดทิปจริงจากคลิปของครีเอเตอร์ (ขึ้นเมื่อมีคนกดเหรียญ) */
-  const coinsReceived = useMemo(
-    () => realCreatorItems.reduce((sum, item) => sum + (item.tips ?? 0), 0),
-    [realCreatorItems],
-  );
   const productsCount = useMemo(
     () =>
       Math.max(
         12,
-        creatorItems.filter((i) => (i.product?.basePrice ?? 0) > 0).length ||
-          Math.floor(coinsReceived / 10_000) ||
-          12,
+        creatorItems.filter((i) => (i.product?.basePrice ?? 0) > 0).length || 12,
       ),
-    [creatorItems, coinsReceived],
+    [creatorItems],
   );
   const bioText =
     contextItem?.caption?.trim() ||
@@ -247,14 +240,10 @@ function CreatorProfileBody({
     const feedParam = feedId ?? contextItem?.id;
     close();
     requestAnimationFrame(() => {
-      router.push({
-        pathname: '/(tabs)/chat/[conversationId]' as const,
-        params: {
-          conversationId,
-          from: 'creator',
-          handle,
-          ...(feedParam ? { feedId: feedParam } : {}),
-        },
+      jumpToChatThread(conversationId, {
+        from: 'creator',
+        handle,
+        ...(feedParam ? { feedId: feedParam } : {}),
       });
     });
   };
@@ -334,22 +323,8 @@ function CreatorProfileBody({
           <Text style={styles.statLabel}>ผู้ติดตาม</Text>
         </View>
         <View style={styles.statCell}>
-          <BoomCoinAmountView
-            amount={coinsReceived}
-            variant="compact"
-            label="ได้รับ Coin"
-            iconSize={22}
-            valueSize={17}
-            animate
-            onPress={() =>
-              Alert.alert(
-                'ได้รับ Coin',
-                'ยอดสะสมจากผู้สนับสนุนในคลิป — ขึ้นเมื่อมีคนกดเหรียญ (แทนหัวใจ) · ไม่ใช่ยอด Wallet ส่วนตัว',
-              )
-            }
-            valueStyle={styles.statValue}
-            labelStyle={styles.statLabel}
-          />
+          <Text style={styles.statValue}>{formatCompact(followingCount + followersCount)}</Text>
+          <Text style={styles.statLabel}>ชุมชน</Text>
         </View>
         <View style={styles.statCell}>
           <Text style={styles.statValue}>{formatCompact(productsCount)}</Text>
@@ -456,7 +431,7 @@ function CreatorProfileBody({
           <View style={{ flex: 1 }}>
             <Text style={styles.publicInfoTitle}>{shopName}</Text>
             <Text style={styles.publicInfoDesc}>
-              {tier} · บัญชียืนยันตัวตนแล้วบน BoomMall — ข้อมูล Vault ส่วนตัวของร้านนี้ถูกเก็บเป็นความลับ
+              {tier} · ข้อมูล Vault ส่วนตัวของร้านนี้ถูกเก็บเป็นความลับ
             </Text>
           </View>
         </View>

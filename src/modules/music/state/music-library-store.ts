@@ -97,6 +97,8 @@ type MusicLibraryState = {
   removeUpload: (trackId: string) => Promise<void>;
   /** Remove from list: uploads deleted; catalog soft-hidden */
   removeFromList: (track: MusicTrack) => Promise<void>;
+  removeWatchEntry: (id: string) => void;
+  clearWatchHistory: () => void;
   genreLabel: (genre: MusicGenre) => string;
 };
 
@@ -423,5 +425,13 @@ export const useMusicLibraryStore = create<MusicLibraryState>((set, get) => ({
       : [...get().hiddenIds, track.id];
     const pinnedIds = get().pinnedIds.filter((id) => id !== track.id);
     commit(set, get, { hiddenIds, pinnedIds });
+  },
+
+  removeWatchEntry: (id) => {
+    commit(set, get, { watchHistory: get().watchHistory.filter((h) => h.id !== id) });
+  },
+
+  clearWatchHistory: () => {
+    commit(set, get, { watchHistory: [] });
   },
 }));

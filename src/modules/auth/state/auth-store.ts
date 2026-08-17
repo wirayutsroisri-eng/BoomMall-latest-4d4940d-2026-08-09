@@ -2,8 +2,9 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
+import { ENABLE_OFFLINE_LOCAL_SESSION } from '@/shared/compliance/appStoreGates';
 
-export type SocialProvider = 'apple' | 'google' | 'line';
+export type SocialProvider = 'apple' | 'google' | 'line' | 'facebook' | 'email';
 
 export type AuthUser = {
   id: string;
@@ -69,6 +70,13 @@ export const useAuthStore = create<AuthState>()(
         } catch {
           user = null;
         }
+        const isLocal = Boolean(token?.startsWith('local.'));
+        if (isLocal && !ENABLE_OFFLINE_LOCAL_SESSION) {
+          await saveSecure(null);
+          await AsyncStorage.removeItem(USER_KEY);
+          set({ sessionToken: null, user: null, hydrated: true });
+          return;
+        }
         set({ sessionToken: token, user: token && user ? user : null, hydrated: true });
       },
       isAuthenticated: () => Boolean(get().sessionToken && get().user),
@@ -83,6 +91,16 @@ export const useAuthStore = create<AuthState>()(
 
 export function getApiBase() {
   return process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '') ?? '';
+}
+
+/** Bearer JWT in store builds. `x-user-id` is LAN-only and ignored in production. */
+export function authHeaders(extra?: Record<string, string>): Record<string, string> {
+  const token = useAuthStore.getState().sessionToken;
+  const userId = useAuthStore.getState().user?.id;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...extra };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (ENABLE_OFFLINE_LOCAL_SESSION && userId) headers['x-user-id'] = userId;
+  return headers;
 }
 
 function utf8ToBase64(value: string) {
@@ -112,7 +130,9 @@ export async function exchangeSocialLogin(input: {
 }): Promise<{ sessionToken: string; user: AuthUser }> {
   const base = getApiBase();
   if (!base) {
-    // Offline / no API — local session still enforces login gate for UGC
+    if (!ENABLE_OFFLINE_LOCAL_SESSION) {
+      throw new Error('ยังไม่ได้ตั้งค่าเซิร์ฟเวอร์ — ไม่สามารถสมัครหรือเข้าสู่ระบบได้');
+    }
     const user: AuthUser = {
       id: `${input.provider}_${input.providerUserId}`.slice(0, 64),
       displayName: input.displayName,
@@ -130,6 +150,45 @@ export async function exchangeSocialLogin(input: {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.ok === false) {
+    throw new Error(json?.error?.message ?? `Login failed (${res.status})`);
+  }
+  return {
+    sessionToken: json.data.sessionToken as string,
+    user: json.data.user as AuthUser,
+  };
+}
+
+export async function exchangeEmailLogin(input: {
+  email: string;
+  password: string;
+  displayName?: string;
+  mode: 'login' | 'register';
+}): Promise<{ sessionToken: string; user: AuthUser }> {
+  const base = getApiBase();
+  if (!base) {
+    if (!ENABLE_OFFLINE_LOCAL_SESSION) {
+      throw new Error('ยังไม่ได้ตั้งค่าเซิร์ฟเวอร์ — ไม่สามารถสมัครหรือเข้าสู่ระบบได้');
+    }
+    const user: AuthUser = {
+      id: `email_${input.email}`.slice(0, 64),
+      displayName: input.displayName || input.email.split('@')[0] || 'User',
+      provider: 'email',
+      status: 'active',
+    };
+    return { sessionToken: `local.${utf8ToBase64(user.id)}`, user };
+  }
+  const path = input.mode === 'register' ? '/api/v1/auth/register' : '/api/v1/auth/login';
+  const res = await fetch(`${base}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: input.email,
+      password: input.password,
+      displayName: input.displayName,
+    }),
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok || json.ok === false) {

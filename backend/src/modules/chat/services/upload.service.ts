@@ -1,0 +1,107 @@
+/**
+ * S3-compatible object storage (AWS / MinIO / Cloudflare R2).
+ * Clients PUT bytes to a presigned URL so chat API never carries the file.
+ */
+
+import { randomBytes } from 'node:crypto';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { AppError } from '../../../lib/errors';
+import { chatMediaExtension, normalizeChatMime } from '../mediaTypes';
+
+export type ObjectStorageConfig = {
+  bucket: string;
+  region: string;
+  endpoint?: string;
+  accessKeyId?: string;
+  secretAccessKey?: string;
+  cdnBaseUrl?: string;
+};
+
+let cachedClient: S3Client | null = null;
+let cachedConfig: ObjectStorageConfig | null | undefined;
+
+export function objectStorageConfig(): ObjectStorageConfig | null {
+  if (cachedConfig !== undefined) return cachedConfig;
+  const bucket = process.env.AWS_S3_BUCKET?.trim() || process.env.S3_BUCKET?.trim();
+  if (!bucket) {
+    cachedConfig = null;
+    return null;
+  }
+  const endpoint = process.env.S3_ENDPOINT?.trim() || undefined;
+  const accessKeyId = process.env.AWS_ACCESS_KEY_ID?.trim() || undefined;
+  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY?.trim() || undefined;
+  if (endpoint && (!accessKeyId || !secretAccessKey)) {
+    cachedConfig = null;
+    return null;
+  }
+  cachedConfig = {
+    bucket,
+    region: process.env.AWS_REGION?.trim() || 'ap-southeast-1',
+    endpoint,
+    accessKeyId,
+    secretAccessKey,
+    cdnBaseUrl: process.env.CDN_BASE_URL?.trim().replace(/\/$/, '') || undefined,
+  };
+  return cachedConfig;
+}
+
+export function isObjectStorageConfigured() {
+  return Boolean(objectStorageConfig());
+}
+
+function s3(): { client: S3Client; config: ObjectStorageConfig } {
+  const config = objectStorageConfig();
+  if (!config) throw new AppError('CHAT_MEDIA_LOCAL', 'Object storage is not configured', 501);
+  if (!cachedClient) {
+    cachedClient = new S3Client({
+      region: config.region,
+      ...(config.endpoint ? { endpoint: config.endpoint, forcePathStyle: true } : {}),
+      ...(config.accessKeyId && config.secretAccessKey
+        ? { credentials: { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey } }
+        : {}),
+    });
+  }
+  return { client: cachedClient, config };
+}
+
+function publicObjectUrl(config: ObjectStorageConfig, key: string) {
+  if (config.cdnBaseUrl) return `${config.cdnBaseUrl}/${key}`;
+  if (config.endpoint) {
+    const base = config.endpoint.replace(/\/$/, '');
+    return `${base}/${config.bucket}/${key}`;
+  }
+  return `https://${config.bucket}.s3.${config.region}.amazonaws.com/${key}`;
+}
+
+function safeUserSegment(userId: string) {
+  const cleaned = userId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+  return cleaned || 'user';
+}
+
+export class UploadService {
+  static async generatePresignedUploadUrl(userId: string, filename: string, mimeType: string) {
+    const mime = normalizeChatMime(mimeType);
+    const ext = chatMediaExtension(mime);
+    if (!ext) throw new AppError('VALIDATION', 'unsupported media type', 415);
+
+    const { client, config } = s3();
+    const key = `chat-media/${safeUserSegment(userId)}/${Date.now()}-${randomBytes(16).toString('hex')}.${ext}`;
+    const command = new PutObjectCommand({
+      Bucket: config.bucket,
+      Key: key,
+      ContentType: mime,
+    });
+    const uploadUrl = await getSignedUrl(client, command, { expiresIn: 900 });
+
+    return {
+      uploadUrl,
+      publicUrl: publicObjectUrl(config, key),
+      fileKey: key,
+      mimeType: mime,
+      headers: { 'Content-Type': mime },
+      expiresIn: 900,
+      originalFilename: filename.replace(/[/\\]/g, '').slice(0, 180) || `file.${ext}`,
+    };
+  }
+}

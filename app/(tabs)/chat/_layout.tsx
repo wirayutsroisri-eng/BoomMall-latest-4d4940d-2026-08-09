@@ -1,14 +1,15 @@
 import React from 'react';
 import { Stack } from 'expo-router';
 import { dismissibleModalOptions } from '@/shared/components/DragDownDismiss';
-import { colors } from '@/shared/theme/colors';
+import { chatInboxPalette } from '@/modules/chat/ui/chatDayNight';
 
 export default function ChatLayout() {
+  const palette = chatInboxPalette();
   return (
     <Stack
       screenOptions={{
         headerShown: false,
-        contentStyle: { backgroundColor: '#000000' },
+        contentStyle: { backgroundColor: palette.canvas },
       }}
     >
       <Stack.Screen name="index" />

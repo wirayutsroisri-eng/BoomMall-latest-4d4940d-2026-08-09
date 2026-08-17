@@ -31,7 +31,7 @@ const CONTEXTS: CreateContext[] = [
   {
     key: 'demand',
     title: 'ประกาศหางาน / หาช่าง',
-    subtitle: 'เว็บบอร์ด · ให้บูมบอทจับคู่ผู้รับงาน',
+    subtitle: 'หางาน · ให้บูมบอทจับคู่ผู้รับงาน',
     icon: 'construct-outline',
     accent: '#2E8CFF',
     onPress: () => {
@@ -41,7 +41,7 @@ const CONTEXTS: CreateContext[] = [
   {
     key: 'supply',
     title: 'รับงาน / เสนอบริการ',
-    subtitle: 'บัตรรับงานบนเว็บบอร์ด · รอจับคู่',
+    subtitle: 'หางาน · รอจับคู่',
     icon: 'briefcase-outline',
     accent: '#F5A524',
     onPress: () => {
@@ -86,7 +86,7 @@ export function CreateHubScreen() {
         </Pressable>
         <View style={styles.headerText}>
           <Text style={styles.title}>สร้างอะไรดี?</Text>
-          <Text style={styles.sub}>แยกตามบริบท — ไม่ปนเว็บบอร์ดกับลงขายสินค้า</Text>
+          <Text style={styles.sub}>แยกตามบริบท — ไม่ปนหางานกับลงขายสินค้า</Text>
         </View>
         <View style={{ width: 40 }} />
       </View>

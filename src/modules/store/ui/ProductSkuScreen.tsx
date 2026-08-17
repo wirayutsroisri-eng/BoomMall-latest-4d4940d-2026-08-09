@@ -24,6 +24,7 @@ import type { SkuVariant, StockLedgerEntry, WarehouseId, WarehouseStock } from '
 import { useWarehouseStore, MY_SHOP_ID } from '@/modules/warehouse/state/warehouse-store';
 import { LedgerRow } from './LedgerScreen';
 import { colors } from '@/shared/theme/colors';
+import { promptText } from '@/shared/components/AppPrompt';
 
 function formatTHB(n: number) {
   return `฿${n.toLocaleString('th-TH')}`;
@@ -163,103 +164,104 @@ export function ProductSkuScreen() {
 
   const promptSellable = (variant: SkuVariant, currentAvailable: number) => {
     if (!canEditStock) return;
-    Alert.prompt(
-      'จำนวนที่ขายได้',
-      `${variant.label} — ตอนนี้ขายได้ ${currentAvailable} ชิ้น`,
-      (text) => {
-        const next = Number(text);
-        if (!Number.isFinite(next) || next < 0) return;
-        setSellableQty(variant, next);
-      },
-      'plain-text',
-      String(currentAvailable),
-      'number-pad',
-    );
+    void promptText({
+      title: 'จำนวนที่ขายได้',
+      message: `${variant.label} — ตอนนี้ขายได้ ${currentAvailable} ชิ้น`,
+      defaultValue: String(currentAvailable),
+      keyboardType: 'number-pad',
+    }).then((text) => {
+      const next = Number(text);
+      if (!Number.isFinite(next) || next < 0) return;
+      setSellableQty(variant, next);
+    });
   };
 
-  const promptAddVariant = () => {
+  const promptAddVariant = async () => {
     if (!canEditStock) return;
-    Alert.prompt('ชื่อรุ่น', 'เช่น 30Ah หรือ สีดำ', (label) => {
-      const name = label?.trim();
-      if (!name) return;
-      Alert.prompt(
-        'ราคา (บาท)',
-        `รุ่น ${name}`,
-        (priceText) => {
-          const price = Number(priceText);
-          if (!Number.isFinite(price) || price <= 0) {
-            Alert.alert('ราคายังไม่ถูก', 'ใส่ตัวเลขมากกว่า 0 นะ');
-            return;
-          }
-          Alert.prompt(
-            'มีกี่ชิ้น',
-            'จำนวนที่พร้อมขาย',
-            (qtyText) => {
-              const onHand = Number(qtyText);
-              if (!Number.isFinite(onHand) || onHand < 0) {
-                Alert.alert('จำนวนยังไม่ถูก', 'ใส่ตัวเลข 0 ขึ้นไป');
-                return;
-              }
-              const idNew = addVariantToMaster(master.id, {
-                label: name,
-                price,
-                onHand,
-                warehouseId: defaultWarehouseId(),
-              });
-              if (idNew) {
-                void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              } else {
-                Alert.alert('เพิ่มไม่ได้', 'ลองใหม่อีกครั้ง');
-              }
-            },
-            'plain-text',
-            '10',
-            'number-pad',
-          );
-        },
-        'plain-text',
-        String(master.basePrice || 1000),
-        'number-pad',
-      );
+    const label = await promptText({
+      title: 'ชื่อรุ่น',
+      message: 'เช่น 30Ah หรือ สีดำ',
+      placeholder: '30Ah',
     });
+    const name = label?.trim();
+    if (!name) return;
+    const priceText = await promptText({
+      title: 'ราคา (บาท)',
+      message: `รุ่น ${name}`,
+      defaultValue: String(master.basePrice || 1000),
+      keyboardType: 'number-pad',
+    });
+    const price = Number(priceText);
+    if (!Number.isFinite(price) || price <= 0) {
+      if (priceText != null) Alert.alert('ราคายังไม่ถูก', 'ใส่ตัวเลขมากกว่า 0 นะ');
+      return;
+    }
+    const qtyText = await promptText({
+      title: 'มีกี่ชิ้น',
+      message: 'จำนวนที่พร้อมขาย',
+      defaultValue: '10',
+      keyboardType: 'number-pad',
+    });
+    const onHand = Number(qtyText);
+    if (!Number.isFinite(onHand) || onHand < 0) {
+      if (qtyText != null) Alert.alert('จำนวนยังไม่ถูก', 'ใส่ตัวเลข 0 ขึ้นไป');
+      return;
+    }
+    const idNew = addVariantToMaster(master.id, {
+      label: name,
+      price,
+      onHand,
+      warehouseId: defaultWarehouseId(),
+    });
+    if (idNew) {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else {
+      Alert.alert('เพิ่มไม่ได้', 'ลองใหม่อีกครั้ง');
+    }
   };
 
   const promptLowStockAmount = (variant: SkuVariant) => {
     const current = variant.lowStockThreshold ?? DEFAULT_LOW_STOCK_THRESHOLD;
-    Alert.prompt(
-      'แจ้งเมื่อเหลือกี่ชิ้น',
-      'ระบบจะเตือนเมื่อขายได้เหลือไม่เกินจำนวนนี้',
-      (text) => {
-        const next = Number(text);
-        if (!Number.isFinite(next) || next < 0) return;
-        setLowStockThreshold(variant.id, next);
-        void Haptics.selectionAsync();
-      },
-      'plain-text',
-      String(current > 0 ? current : DEFAULT_LOW_STOCK_THRESHOLD),
-      'number-pad',
-    );
+    void promptText({
+      title: 'แจ้งเมื่อเหลือกี่ชิ้น',
+      message: 'ระบบจะเตือนเมื่อขายได้เหลือไม่เกินจำนวนนี้',
+      defaultValue: String(current > 0 ? current : DEFAULT_LOW_STOCK_THRESHOLD),
+      keyboardType: 'number-pad',
+    }).then((text) => {
+      const next = Number(text);
+      if (!Number.isFinite(next) || next < 0) return;
+      setLowStockThreshold(variant.id, next);
+      void Haptics.selectionAsync();
+    });
   };
 
-  // Advanced-only helpers (unchanged behavior)
   const doRestock = (variant: SkuVariant, warehouseId: WarehouseId) => {
-    Alert.prompt(`เติมสต็อก · ${variant.sku}`, `คลัง ${warehouseId}`, (text) => {
+    void promptText({
+      title: `เติมสต็อก · ${variant.sku}`,
+      message: `คลัง ${warehouseId}`,
+      keyboardType: 'number-pad',
+    }).then((text) => {
       const qty = Number(text);
       if (!Number.isFinite(qty) || qty <= 0) return;
       const result = restock(variant.id, warehouseId, qty, 'เติมสต็อก (ขั้นสูง)');
       if (result.ok) void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       else Alert.alert('เติมไม่สำเร็จ', result.reason);
-    }, 'plain-text', '', 'number-pad');
+    });
   };
 
   const doAdjust = (variant: SkuVariant, warehouseId: WarehouseId, currentOnHand: number) => {
-    Alert.prompt(`ปรับ On Hand · ${variant.sku}`, `ปัจจุบัน ${currentOnHand}`, (text) => {
+    void promptText({
+      title: `ปรับ On Hand · ${variant.sku}`,
+      message: `ปัจจุบัน ${currentOnHand}`,
+      defaultValue: String(currentOnHand),
+      keyboardType: 'number-pad',
+    }).then((text) => {
       const next = Number(text);
       if (!Number.isFinite(next) || next < 0) return;
       const result = adjustStock(variant.id, warehouseId, next, `ปรับยอด (${currentOnHand} → ${next})`);
       if (result.ok) void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       else Alert.alert('ปรับไม่สำเร็จ', result.reason === 'INSUFFICIENT' ? 'ต่ำกว่า Reserved' : result.reason);
-    }, 'plain-text', String(currentOnHand), 'number-pad');
+    });
   };
 
   const doTransfer = (variant: SkuVariant, fromWarehouseId: WarehouseId) => {
@@ -267,14 +269,19 @@ export function ProductSkuScreen() {
     Alert.alert('โอนสต็อก', `จาก ${fromWarehouseId}`, [
       ...targets.map((w) => ({
         text: w.name,
-        onPress: () =>
-          Alert.prompt(`โอนไป ${w.name}`, 'จำนวน', (text) => {
+        onPress: () => {
+          void promptText({
+            title: `โอนไป ${w.name}`,
+            message: 'จำนวน',
+            keyboardType: 'number-pad',
+          }).then((text) => {
             const qty = Number(text);
             if (!Number.isFinite(qty) || qty <= 0) return;
             const result = transferStock(variant.id, fromWarehouseId, w.id, qty);
             if (result.ok) void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             else Alert.alert('โอนไม่สำเร็จ', result.reason === 'INSUFFICIENT' ? 'สต็อกไม่พอ' : result.reason);
-          }, 'plain-text', '', 'number-pad'),
+          });
+        },
       })),
       { text: 'ยกเลิก', style: 'cancel' },
     ]);
@@ -348,6 +355,16 @@ export function ProductSkuScreen() {
         return (
           <View key={variant.id} style={styles.variantCard}>
             <View style={styles.variantTop}>
+              <Image
+                source={{
+                  uri:
+                    variant.imageUri ??
+                    master.imageUri ??
+                    master.imageUris?.[0] ??
+                    masterContentImage(master.id),
+                }}
+                style={styles.variantThumb}
+              />
               <View style={{ flex: 1 }}>
                 <Text style={styles.variantName}>{variant.label}</Text>
                 <Text style={styles.variantPrice}>{formatTHB(variant.price)}</Text>
@@ -599,7 +616,13 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     gap: 10,
   },
-  variantTop: { flexDirection: 'row', alignItems: 'flex-start' },
+  variantTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  variantThumb: {
+    width: 52,
+    height: 52,
+    borderRadius: 12,
+    backgroundColor: colors.brand.forest,
+  },
   variantName: { fontSize: 20, fontWeight: '900', color: colors.text.primary },
   variantPrice: {
     marginTop: 2,

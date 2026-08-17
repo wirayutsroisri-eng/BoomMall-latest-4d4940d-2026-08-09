@@ -5,20 +5,17 @@
  */
 export const STORE_COMPLIANCE_MODE = true;
 
-/** Boom Wallet screen + profile wallet entry (top-up / balance UI) */
-export const ENABLE_BOOM_WALLET_UI = !STORE_COMPLIANCE_MODE;
+/** ตัด Boom Coin ทั้งก้อน — ห้ามเปิดจนกว่าจะมี IAP จริง */
+export const ENABLE_BOOM_WALLET_UI = false;
 
-/** Digital currency purchase / tip / top-up — needs StoreKit IAP first */
-export const ENABLE_BOOM_COIN_PURCHASE_UI = !STORE_COMPLIANCE_MODE;
+/** Digital currency purchase / tip / top-up — ตัดออก ไม่ผ่าน App Store */
+export const ENABLE_BOOM_COIN_PURCHASE_UI = false;
 
-/**
- * Empty coin on feed (social reaction).
- * Off under compliance mode — Apple treats coin/currency chrome as digital goods risk.
- */
-export const ENABLE_FEED_COIN_REACTION = !STORE_COMPLIANCE_MODE;
+/** เหรียญบนฟีดตัดออก */
+export const ENABLE_FEED_COIN_REACTION = false;
 
-/** Paid tip creators with Boom Coin from wallet (consumable digital) */
-export const ENABLE_CONTENT_TIPS = !STORE_COMPLIANCE_MODE;
+/** ทิปด้วยเหรียญตัดออก */
+export const ENABLE_CONTENT_TIPS = false;
 
 /** Fake checkout that claims payment success without a PSP */
 export const ENABLE_CHECKOUT_PLACE_ORDER = !STORE_COMPLIANCE_MODE;
@@ -38,3 +35,15 @@ export const ENABLE_SIMULATED_CAMERA_TOOLS = !STORE_COMPLIANCE_MODE;
 
 /** Coming-soon shop chrome that only shows Alert */
 export const ENABLE_COMING_SOON_SHOP_CHROME = !STORE_COMPLIANCE_MODE;
+
+/** Fake LIVE tab / warehouse demo accept without a real backend path */
+export const ENABLE_FAKE_LIVE_AND_DEMO_ACCEPT = !STORE_COMPLIANCE_MODE;
+
+/**
+ * LINE Login — no server id_token exchange yet. Keep off until verifier ships.
+ * Apple (iOS) + Google (when client id set) + email are the store-safe set.
+ */
+export const ENABLE_LINE_LOGIN = false;
+
+/** Mint local sessions without API — LAN-only; never in store builds */
+export const ENABLE_OFFLINE_LOCAL_SESSION = !STORE_COMPLIANCE_MODE;

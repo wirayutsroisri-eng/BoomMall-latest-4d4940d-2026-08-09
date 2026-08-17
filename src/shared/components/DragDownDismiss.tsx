@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo } from 'react';
-import { Dimensions, StyleProp, StyleSheet, ViewStyle } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import { Dimensions, Pressable, StyleProp, StyleSheet, ViewStyle } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
   SharedValue,
@@ -33,6 +33,8 @@ type Props = {
   rootStyle?: StyleProp<ViewStyle>;
   /** Dim layer behind sheet while dragging (for transparent modals) */
   showDim?: boolean;
+  /** Tap the dimmed area to close. Defaults to true when showDim. */
+  dimPressToDismiss?: boolean;
   /** Wrap with GestureHandlerRootView (needed inside RN Modal) */
   rootInModal?: boolean;
 };
@@ -51,23 +53,26 @@ export function DragDownDismiss({
   style,
   rootStyle,
   showDim = false,
+  dimPressToDismiss,
   rootInModal = false,
 }: Props) {
   const dismissY = useSharedValue(0);
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
 
   useEffect(() => {
     dismissY.value = 0;
   }, [dismissY]);
 
   const finishDismiss = useCallback(() => {
-    dismissY.value = 0;
-    onDismiss();
-  }, [dismissY, onDismiss]);
+    onDismissRef.current();
+  }, []);
 
   const pan = useMemo(
     () =>
       Gesture.Pan()
         .enabled(enabled)
+        .maxPointers(1)
         .activeOffsetY(12)
         .failOffsetX([-28, 28])
         .onUpdate((e) => {
@@ -77,7 +82,6 @@ export function DragDownDismiss({
             dismissY.value = 0;
             return;
           }
-          // Only pull down (positive Y); ignore upward scroll
           dismissY.value = Math.max(0, e.translationY);
         })
         .onEnd((e) => {
@@ -85,35 +89,48 @@ export function DragDownDismiss({
           const shouldClose =
             dismissY.value > dismissDistance || e.velocityY > dismissVelocity;
           if (shouldClose) {
-            dismissY.value = withTiming(SCREEN_H, { duration: 180 }, (finished) => {
+            dismissY.value = withTiming(SCREEN_H, { duration: 200 }, (finished) => {
               if (finished) runOnJS(finishDismiss)();
             });
           } else {
-            dismissY.value = withSpring(0, { damping: 22, stiffness: 220 });
+            dismissY.value = withSpring(0, {
+              damping: 28,
+              stiffness: 260,
+              mass: 0.7,
+              overshootClamping: true,
+            });
           }
         }),
     [dismissDistance, dismissVelocity, dismissY, enabled, finishDismiss, scrollY],
   );
 
-  const sheetStyle = useAnimatedStyle(() => {
-    const y = dismissY.value;
-    const progress = Math.min(1, y / (SCREEN_H * 0.45));
-    return {
-      transform: [
-        { translateY: y },
-        { scale: interpolate(progress, [0, 1], [1, 0.94]) },
-      ],
-      borderRadius: interpolate(progress, [0, 1], [0, 16]),
-    };
-  });
+  const sheetStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: dismissY.value }],
+  }));
 
   const dimStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(dismissY.value, [0, SCREEN_H * 0.4], [1, 0.2], 'clamp'),
+    opacity: interpolate(dismissY.value, [0, SCREEN_H * 0.55], [1, 0], 'clamp'),
   }));
+
+  const tapDim = dimPressToDismiss ?? showDim;
+
+  const closeFromDim = useCallback(() => {
+    dismissY.value = withTiming(SCREEN_H, { duration: 180 }, (finished) => {
+      if (finished) runOnJS(finishDismiss)();
+    });
+  }, [dismissY, finishDismiss]);
 
   const body = (
     <>
-      {showDim ? <Animated.View pointerEvents="none" style={[styles.dim, dimStyle]} /> : null}
+      {showDim ? (
+        <Pressable
+          style={styles.dimHit}
+          onPress={tapDim ? closeFromDim : undefined}
+          accessibilityLabel="ปิด"
+        >
+          <Animated.View pointerEvents="none" style={[styles.dim, dimStyle]} />
+        </Pressable>
+      ) : null}
       <GestureDetector gesture={pan}>
         <Animated.View style={[styles.sheet, style, sheetStyle]}>{children}</Animated.View>
       </GestureDetector>
@@ -136,11 +153,16 @@ export const dismissibleModalOptions = {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  dimHit: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 0,
+  },
   dim: {
-    ...StyleSheet.absoluteFill,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: '#000',
   },
   sheet: {
-    overflow: 'hidden',
+    overflow: 'visible',
+    zIndex: 2,
   },
 });

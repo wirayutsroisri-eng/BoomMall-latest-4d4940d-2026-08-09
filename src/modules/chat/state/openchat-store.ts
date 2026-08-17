@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { mockOpenChatGroups } from '../data/mockChatData';
 import type { OpenChatGroup } from '../domain/types';
 
 type OpenChatState = {
@@ -8,7 +7,7 @@ type OpenChatState = {
 };
 
 export const useOpenChatStore = create<OpenChatState>((set) => ({
-  groups: mockOpenChatGroups,
+  groups: [],
   toggleJoin: (groupId) =>
     set((state) => ({
       groups: state.groups.map((g) =>

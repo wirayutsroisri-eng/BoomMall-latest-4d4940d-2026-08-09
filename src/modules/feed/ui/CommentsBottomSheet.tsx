@@ -32,6 +32,7 @@ export const CommentsBottomSheet = forwardRef<BottomSheetModal, Props>(
     const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
     const blockedUserIds = useModerationStore((s) => s.blockedUserIds);
     const [draft, setDraft] = useState('');
+    const [replyTo, setReplyTo] = useState<FeedComment | null>(null);
 
     const snapPoints = useMemo(() => ['62%', '90%'], []);
     const comments = useMemo(() => {
@@ -52,14 +53,15 @@ export const CommentsBottomSheet = forwardRef<BottomSheetModal, Props>(
       const text = draft.trim();
       if (!text || !feedId) return;
       if (!isAuthenticated()) return;
-      addComment(feedId, text, profile.displayName, myInitial);
+      addComment(feedId, text, profile.displayName, myInitial, replyTo?.id);
       setDraft('');
+      setReplyTo(null);
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }, [addComment, draft, feedId, isAuthenticated, myInitial, profile.displayName]);
+    }, [addComment, draft, feedId, isAuthenticated, myInitial, profile.displayName, replyTo]);
 
     const renderItem = useCallback(
       ({ item }: { item: FeedComment }) => (
-        <View style={styles.row}>
+        <View style={[styles.row, item.parentId ? styles.replyRow : null]}>
           <Avatar
             initial={item.authorInitial}
             size={36}
@@ -72,7 +74,9 @@ export const CommentsBottomSheet = forwardRef<BottomSheetModal, Props>(
             <Text style={styles.text}>{item.text}</Text>
             <View style={styles.metaRow}>
               <Text style={styles.time}>{item.createdAt}</Text>
-              <Text style={styles.reply}>ตอบกลับ</Text>
+              <Pressable onPress={() => setReplyTo(item)}>
+                <Text style={styles.reply}>ตอบกลับ</Text>
+              </Pressable>
             </View>
           </View>
           <Pressable
@@ -118,7 +122,7 @@ export const CommentsBottomSheet = forwardRef<BottomSheetModal, Props>(
           <Avatar uri={profile.avatarUri} initial={myInitial} size={30} radius={11} />
           <TextInput
             style={styles.input}
-            placeholder="เพิ่มความคิดเห็น..."
+            placeholder={replyTo ? `ตอบกลับ ${replyTo.author}` : 'เพิ่มความคิดเห็น...'}
             placeholderTextColor={colors.text.muted}
             value={draft}
             onChangeText={setDraft}
@@ -168,6 +172,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
     marginBottom: 18,
+  },
+  replyRow: {
+    paddingLeft: 28,
   },
   body: { flex: 1 },
   author: {

@@ -12,7 +12,7 @@ const TOC = [
 ] as const;
 
 export function HandbookPage() {
-  const { isAdmin, session } = useAdminAuth();
+  const { session } = useAdminAuth();
   const [denied, setDenied] = useState<string | null>(null);
   const [checking, setChecking] = useState(true);
 
@@ -20,8 +20,8 @@ export function HandbookPage() {
     void (async () => {
       setChecking(true);
       try {
-        if (!isAdmin) {
-          setDenied('ต้องเป็นบัญชี ADMIN');
+        if (!session?.permissions.handbook) {
+          setDenied('ต้องใช้รหัสแพลตฟอร์มหรือการเงิน');
           return;
         }
         await fetchHandbookAccess();
@@ -32,7 +32,7 @@ export function HandbookPage() {
         setChecking(false);
       }
     })();
-  }, [isAdmin]);
+  }, [session]);
 
   function onPrint() {
     window.print();

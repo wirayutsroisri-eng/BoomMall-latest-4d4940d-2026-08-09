@@ -7,26 +7,16 @@ import { Avatar } from '@/shared/components/Avatar';
 import { DragDownDismiss } from '@/shared/components/DragDownDismiss';
 import { colors } from '@/shared/theme/colors';
 
-type Mode = 'call' | 'quotation';
-
 type Props = {
   visible: boolean;
-  mode: Mode;
   contacts: Conversation[];
   onClose: () => void;
-  onPickForCall?: (peerName: string, type: 'voice' | 'video') => void;
-  onPickForQuotation?: (conversationId: string) => void;
+  onPick: (conversationId: string) => void;
+  onAddFriend: () => void;
 };
 
-/** Bottom-sheet-style contact picker used by the [+] menu's "Start Call" and "Smart Quotation" quick actions. */
-export function ContactPickerSheet({
-  visible,
-  mode,
-  contacts,
-  onClose,
-  onPickForCall,
-  onPickForQuotation,
-}: Props) {
+/** Inbox [+] → แชทใหม่: pick a 1:1 thread or add a friend. */
+export function ContactPickerSheet({ visible, contacts, onClose, onPick, onAddFriend }: Props) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <GestureHandlerRootView style={styles.flex}>
@@ -34,15 +24,40 @@ export function ContactPickerSheet({
           <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="ปิด" />
           <DragDownDismiss onDismiss={onClose} style={styles.sheet}>
             <View style={styles.grabber} />
-            <Text style={styles.title}>
-              {mode === 'call' ? 'เลือกผู้ติดต่อเพื่อเริ่มการโทร' : 'เลือกผู้ติดต่อเพื่อออกใบเสนอราคา'}
-            </Text>
+            <Text style={styles.title}>แชทใหม่</Text>
+            <Text style={styles.subtitle}>เลือกผู้ติดต่อเพื่อเริ่มบทสนทนา 1:1</Text>
             <FlatList
               data={contacts}
               keyExtractor={(c) => c.id}
               style={styles.list}
+              ListEmptyComponent={
+                <View style={styles.empty}>
+                  <Ionicons name="people-outline" size={28} color={colors.text.muted} />
+                  <Text style={styles.emptyText}>ยังไม่มีผู้ติดต่อ</Text>
+                  <Pressable
+                    style={styles.addFriendBtn}
+                    onPress={() => {
+                      onClose();
+                      onAddFriend();
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="เพิ่มเพื่อน"
+                  >
+                    <Ionicons name="person-add" size={16} color={colors.brand.ink} />
+                    <Text style={styles.addFriendText}>เพิ่มเพื่อน</Text>
+                  </Pressable>
+                </View>
+              }
               renderItem={({ item }) => (
-                <View style={styles.row}>
+                <Pressable
+                  style={styles.row}
+                  onPress={() => {
+                    onClose();
+                    onPick(item.id);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`แชทกับ ${item.peerName}`}
+                >
                   <Avatar
                     uri={item.avatarUri}
                     initial={item.peerName.slice(0, 1)}
@@ -50,41 +65,18 @@ export function ContactPickerSheet({
                     size={44}
                     radius={14}
                   />
-                  <Text style={styles.name} numberOfLines={1}>{item.peerName}</Text>
-                  {mode === 'call' ? (
-                    <View style={styles.callBtns}>
-                      <Pressable
-                        style={styles.callBtn}
-                        onPress={() => {
-                          onClose();
-                          onPickForCall?.(item.peerName, 'voice');
-                        }}
-                      >
-                        <Ionicons name="call" size={16} color={colors.brand.ink} />
-                      </Pressable>
-                      <Pressable
-                        style={[styles.callBtn, styles.videoBtn]}
-                        onPress={() => {
-                          onClose();
-                          onPickForCall?.(item.peerName, 'video');
-                        }}
-                      >
-                        <Ionicons name="videocam" size={16} color={colors.text.inverse} />
-                      </Pressable>
-                    </View>
-                  ) : (
-                    <Pressable
-                      style={styles.quoteBtn}
-                      onPress={() => {
-                        onClose();
-                        onPickForQuotation?.(item.id);
-                      }}
-                    >
-                      <Ionicons name="receipt" size={14} color={colors.brand.ink} />
-                      <Text style={styles.quoteBtnText}>ออกใบเสนอราคา</Text>
-                    </Pressable>
-                  )}
-                </View>
+                  <View style={styles.meta}>
+                    <Text style={styles.name} numberOfLines={1}>
+                      {item.peerName}
+                    </Text>
+                    {item.peerHandle ? (
+                      <Text style={styles.handle} numberOfLines={1}>
+                        {item.peerHandle}
+                      </Text>
+                    ) : null}
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={colors.text.muted} />
+                </Pressable>
               )}
               ItemSeparatorComponent={() => <View style={styles.sep} />}
             />
@@ -123,7 +115,13 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     fontSize: 16,
     color: colors.text.primary,
+  },
+  subtitle: {
+    marginTop: 4,
     marginBottom: 8,
+    color: colors.text.secondary,
+    fontSize: 12,
+    fontWeight: '600',
   },
   list: {
     marginTop: 4,
@@ -134,43 +132,46 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 10,
   },
-  name: {
+  meta: {
     flex: 1,
+  },
+  name: {
     fontWeight: '700',
     color: colors.text.primary,
     fontSize: 14,
   },
-  callBtns: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  callBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: colors.brand.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  videoBtn: {
-    backgroundColor: colors.brand.ink,
-  },
-  quoteBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
-    backgroundColor: colors.brand.primary,
-  },
-  quoteBtnText: {
-    color: colors.brand.ink,
-    fontWeight: '800',
+  handle: {
+    marginTop: 2,
+    color: colors.text.secondary,
     fontSize: 12,
   },
   sep: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: colors.border.soft,
+  },
+  empty: {
+    alignItems: 'center',
+    paddingVertical: 28,
+    gap: 8,
+  },
+  emptyText: {
+    color: colors.text.muted,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  addFriendBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: colors.brand.primary,
+  },
+  addFriendText: {
+    color: colors.brand.ink,
+    fontWeight: '800',
+    fontSize: 13,
   },
 });

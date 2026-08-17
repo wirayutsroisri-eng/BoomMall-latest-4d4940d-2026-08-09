@@ -6,7 +6,8 @@ export type PaymentMethodId =
   | 'promptpay'
   | 'cod'
   | 'mobile_banking'
-  | 'bank_account';
+  | 'bank_account'
+  | 'truemoney';
 
 export type ShippingMethodId = 'standard' | 'express' | 'locker';
 
@@ -72,12 +73,13 @@ export const PAYMENT_OPTIONS: Array<{
   subtitle?: string;
   activate?: boolean;
 }> = [
+  { id: 'truemoney', label: 'TrueMoney Wallet', activate: true },
   { id: 'boommall_pay', label: 'ยอดเงิน BoomMall Pay', activate: true },
   { id: 'bank_account', label: 'ตัดบัญชีธนาคาร', activate: true },
-  { id: 'card', label: 'บัตรเครดิต/บัตรเดบิต', subtitle: '*9318' },
-  { id: 'promptpay', label: 'QR พร้อมเพย์' },
+  { id: 'card', label: 'บัตรเครดิต/บัตรเดบิต', activate: true },
+  { id: 'promptpay', label: 'QR พร้อมเพย์', activate: true },
   { id: 'cod', label: 'เก็บเงินปลายทาง' },
-  { id: 'mobile_banking', label: 'Mobile Banking' },
+  { id: 'mobile_banking', label: 'Mobile Banking', activate: true },
 ];
 
 export const useCheckoutStore = create<CheckoutState>((set) => ({
@@ -90,8 +92,8 @@ export const useCheckoutStore = create<CheckoutState>((set) => ({
     province: 'จังหวัดจันทบุรี',
     postcode: '22000',
   },
-  paymentMethod: 'card',
-  cardLabel: '*9318',
+  paymentMethod: 'cod',
+  cardLabel: '',
   shippingMethod: 'standard',
   shopVoucherOn: true,
   platformVoucherOn: true,

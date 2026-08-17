@@ -17,59 +17,63 @@ export function LoginScreen({ redirectTo }: Props) {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4">
+    <div className="flex min-h-screen items-center justify-center bg-[var(--bg)] px-4">
       <form
         onSubmit={(e) => void onSubmit(e)}
-        className="w-full max-w-md rounded-3xl border border-[#122820]/10 bg-white/90 p-8 shadow-lg backdrop-blur"
+        className="w-full max-w-[420px] rounded-[24px] border border-[var(--line)] bg-white p-8 shadow-[var(--shadow-md)]"
       >
-        <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#00a86b]">
-          BoomMall Internal
+        <p className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--accent)]">
+          BoomMall Admin OS
         </p>
-        <h1 className="font-display mt-2 text-3xl font-extrabold text-[#0b1f17]">
-          Admin Portal
+        <h1 className="font-display mt-2 text-[1.85rem] font-extrabold tracking-tight text-[var(--ink)]">
+          เข้าสู่ระบบหลังบ้าน
         </h1>
-        <p className="mt-2 text-sm text-[#122820]/70">
-          เข้าสู่ระบบด้วย Admin API Key — สิทธิ์ <strong>ADMIN</strong> เท่านั้น
-          {redirectTo?.includes('handbook')
-            ? ' (คู่มือ Boom Coin จำกัดสิทธิ์ ADMIN)'
-            : ''}
+        <p className="mt-2 text-[15px] leading-relaxed text-[var(--ink-secondary)]">
+          ระบบแอดมินชุดเดียว แยกจากแอปมือถือ — ตอนนี้ใช้มาสเตอร์คีย์เข้าทั้งระบบได้ก่อน
+          {redirectTo?.includes('handbook') ? ' · คู่มือจำกัดสิทธิ์การเงิน/แพลตฟอร์ม' : ''}
         </p>
 
-        <label className="mt-6 block text-xs font-semibold text-[#122820]/60">
-          Admin API Key
+        <label className="mt-7 block text-xs font-semibold text-[var(--ink-tertiary)]">
+          รหัสเข้าถึง
           <input
             type="password"
             autoComplete="current-password"
-            className="mt-1 w-full rounded-xl border border-[#122820]/15 px-3 py-2.5 text-sm"
+            className="mt-1.5 w-full rounded-[12px] border border-[var(--line-strong)] bg-[var(--bg)] px-3.5 py-3 text-[15px] text-[var(--ink)] outline-none focus:border-[var(--accent)]"
             value={key}
             onChange={(e) => setKey(e.target.value)}
-            placeholder="ADMIN_API_KEY"
+            placeholder="มาสเตอร์คีย์ หรือรหัสแผนก"
             required
           />
         </label>
 
-        <label className="mt-4 block text-xs font-semibold text-[#122820]/60">
-          ชื่อผู้ใช้ (สำหรับ Audit Log)
+        <label className="mt-4 block text-xs font-semibold text-[var(--ink-tertiary)]">
+          ชื่อผู้ใช้ (Audit Log)
           <input
-            className="mt-1 w-full rounded-xl border border-[#122820]/15 px-3 py-2.5 text-sm"
+            className="mt-1.5 w-full rounded-[12px] border border-[var(--line-strong)] bg-[var(--bg)] px-3.5 py-3 text-[15px] text-[var(--ink)] outline-none focus:border-[var(--accent)]"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="admin"
+            placeholder="ชื่อที่บันทึกใน log"
           />
         </label>
 
         {error ? (
-          <div className="mt-4 rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+          <div className="mt-4 rounded-[12px] border border-[var(--danger)]/20 bg-[var(--danger-soft)] px-3 py-2.5 text-sm text-[var(--danger)]">
             {error}
           </div>
         ) : null}
 
+        <ul className="mt-5 space-y-1 text-[12px] leading-relaxed text-[var(--ink-tertiary)]">
+          <li>มาสเตอร์คีย์ — ทั้งระบบ (ใช้ก่อน แยกแผนกทีหลัง)</li>
+          <li>แพลตฟอร์ม — ทุกแผนกยกเว้น emergency</li>
+          <li>Safety · Ads · Feed · ร้านค้า · การเงิน — เห็นเฉพาะงานของแผนก</li>
+        </ul>
+
         <button
           type="submit"
           disabled={busy || !key.trim()}
-          className="mt-6 w-full rounded-xl bg-[#122820] py-3 text-sm font-bold text-white hover:bg-[#0b1f17] disabled:opacity-50"
+          className="btn-primary mt-7 w-full !py-3.5"
         >
-          {busy ? 'กำลังตรวจสอบ…' : 'เข้าสู่ระบบ ADMIN'}
+          {busy ? 'กำลังตรวจสอบ…' : 'เข้าสู่ระบบ'}
         </button>
       </form>
     </div>

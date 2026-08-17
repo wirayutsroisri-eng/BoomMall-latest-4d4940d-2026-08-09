@@ -17,11 +17,14 @@ import {
   DEFAULT_LOW_STOCK_THRESHOLD,
   stockStatusOf,
 } from '@/modules/commerce/domain/stock-core';
+import { coverMedia, resolveProductMedia } from '@/modules/commerce/domain/product-media';
 import type { MasterSku, SkuVariant, StockStatus } from '@/modules/commerce/domain/types';
+import { ProductVideoThumb } from '@/modules/store/ui/sell/ProductVideoThumb';
+import { DragDownDismiss } from '@/shared/components/DragDownDismiss';
 import { colors } from '@/shared/theme/colors';
 
 const SCREEN_H = Dimensions.get('window').height;
-const SHEET_H = Math.round(SCREEN_H * 0.56);
+const SHEET_H = Math.round(SCREEN_H * 0.62);
 
 type Props = {
   visible: boolean;
@@ -33,6 +36,8 @@ type Props = {
   onClose: () => void;
   onOpenFull: () => void;
   onClone?: () => void;
+  onPromote?: () => void;
+  canEdit?: boolean;
 };
 
 const STATUS_COPY: Record<StockStatus, { label: string; color: string }> = {
@@ -55,6 +60,8 @@ export function ProductQuickPreviewSheet({
   onClose,
   onOpenFull,
   onClone,
+  onPromote,
+  canEdit,
 }: Props) {
   const insets = useSafeAreaInsets();
 
@@ -85,12 +92,13 @@ export function ProductQuickPreviewSheet({
     );
   }
 
-  const imageUri = product.imageUri ?? masterContentImage(product.id);
+  const cover = coverMedia(resolveProductMedia(product));
+  const imageUri = cover?.type === 'image' ? cover.uri : masterContentImage(product.id);
   const status = STATUS_COPY[derived.tone];
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.root}>
+      <DragDownDismiss onDismiss={onClose} rootInModal style={styles.root}>
         <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="ปิด" />
         <View style={[styles.sheet, { height: SHEET_H, paddingBottom: Math.max(insets.bottom, 12) }]}>
           <View style={styles.handle} />
@@ -101,7 +109,11 @@ export function ProductQuickPreviewSheet({
           >
             <View style={styles.hero}>
               <LinearGradient colors={['#0B3D2E', '#1A7A55']} style={StyleSheet.absoluteFill} />
-              <Image source={{ uri: imageUri }} style={styles.heroImage} resizeMode="cover" />
+              {cover?.type === 'video' ? (
+                <ProductVideoThumb uri={cover.uri} style={styles.heroImage} autoPlay />
+              ) : (
+                <Image source={{ uri: imageUri }} style={styles.heroImage} resizeMode="cover" />
+              )}
               <LinearGradient
                 colors={['transparent', 'rgba(7,20,15,0.55)']}
                 style={styles.heroFade}
@@ -122,6 +134,12 @@ export function ProductQuickPreviewSheet({
                   <Text style={styles.chipTextMuted} numberOfLines={1}>
                     {sourceWarehouse}
                   </Text>
+                </View>
+              ) : null}
+              {product.isPromoted ? (
+                <View style={[styles.chip, styles.promoChip]}>
+                  <Ionicons name="megaphone" size={12} color="#fff" />
+                  <Text style={styles.promoChipText}>กำลังโฆษณา</Text>
                 </View>
               ) : null}
             </View>
@@ -149,22 +167,32 @@ export function ProductQuickPreviewSheet({
             {onClone ? (
               <Pressable style={styles.cloneLink} onPress={onClone}>
                 <Ionicons name="copy-outline" size={14} color={colors.brand.primaryDark} />
-                <Text style={styles.cloneLinkText}>โคลนเป็นสินค้าใหม่</Text>
+                <Text style={styles.cloneLinkText}>คัดลอกสินค้า</Text>
               </Pressable>
             ) : null}
           </ScrollView>
 
           <View style={styles.actions}>
+            {onPromote ? (
+              <Pressable style={styles.promoteBtn} onPress={onPromote}>
+                <Ionicons name="megaphone-outline" size={16} color={colors.brand.primaryDark} />
+                <Text style={styles.promoteBtnText}>
+                  {product.isPromoted ? 'ดู/จัดการโฆษณา' : 'ดันฟีดสินค้า'}
+                </Text>
+              </Pressable>
+            ) : null}
+            <View style={styles.actionRow}>
             <Pressable style={styles.secondaryBtn} onPress={onClose}>
               <Text style={styles.secondaryBtnText}>ปิด</Text>
             </Pressable>
             <Pressable style={styles.primaryBtn} onPress={onOpenFull}>
-              <Text style={styles.primaryBtnText}>แก้ไขสินค้า</Text>
+              <Text style={styles.primaryBtnText}>{canEdit ? 'แก้ไขสินค้า' : 'ดูสินค้า'}</Text>
               <Ionicons name="arrow-forward" size={16} color="#fff" />
             </Pressable>
+            </View>
           </View>
         </View>
-      </View>
+      </DragDownDismiss>
     </Modal>
   );
 }
@@ -239,11 +267,33 @@ const styles = StyleSheet.create({
   },
   cloneLinkText: { fontSize: 13, fontWeight: '700', color: colors.brand.primaryDark },
   actions: {
-    flexDirection: 'row',
-    gap: 10,
     paddingHorizontal: 16,
     paddingTop: 8,
+    gap: 8,
   },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  promoteBtn: {
+    height: 42,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.brand.primaryDark,
+    backgroundColor: '#F3FBF7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
+  },
+  promoteBtnText: { fontSize: 14, fontWeight: '800', color: colors.brand.primaryDark },
+  promoChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.brand.primaryDark,
+  },
+  promoChipText: { fontSize: 12, fontWeight: '700', color: '#fff' },
   secondaryBtn: {
     flex: 0.42,
     height: 46,

@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
   FlatList,
   StyleSheet,
   useWindowDimensions,
@@ -17,25 +16,34 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
 import { useCallStore } from '@/modules/chat/state/call-store';
 import type { FeedItem, FeedTab } from '@/modules/feed/domain/types';
-import { selectFeedByTab } from '@/modules/feed/domain/selectFeedByTab';
+import { selectFeedByTab, pinPromotedFeedItems } from '@/modules/feed/domain/selectFeedByTab';
+import { CHANTHABURI } from '@/modules/matching/domain/geo';
+import { useInventoryStore } from '@/modules/commerce/state/inventory-store';
+import { resolveShopMaster } from '@/modules/shop/domain/product-display';
+import { SellerNotifyBanner } from '@/modules/store/ui/SellerNotifyBanner';
 import { useFollowStore } from '@/modules/social/state/follow-store';
 import { FeedHeader } from './FeedHeader';
 import { FeedReelCard } from './FeedReelCard';
+import { FeedLongPressSheet } from './FeedLongPressSheet';
+import { FeedShareSheet } from './FeedShareSheet';
 import { CommunityBoardList } from './CommunityBoardList';
 import { ProductBottomSheet } from './ProductBottomSheet';
 import { CommentsBottomSheet } from './CommentsBottomSheet';
 import { usePresenceSession } from '@/modules/chat/ui/usePresenceSession';
 import { MatchingNotifyBanner } from '@/modules/matching/ui/MatchingNotifyBanner';
 import { colors } from '@/shared/theme/colors';
-import { ENABLE_CALLS, ENABLE_FEED_COIN_REACTION } from '@/shared/compliance/appStoreGates';
+import { ENABLE_CALLS } from '@/shared/compliance/appStoreGates';
 import { ReportBlockSheet } from '@/modules/safety/ui/ReportBlockSheet';
 import { useModerationStore } from '@/modules/safety/state/moderation-store';
 import { useAuthStore } from '@/modules/auth/state/auth-store';
 import { SocialLoginGate } from '@/modules/auth/ui/SocialLoginGate';
 import { IOS_SPRING } from './feedMotion';
+import { useFeedChromeStore } from '@/modules/feed/state/feed-chrome-store';
+import { syncFeedInterested, syncFeedLike, syncFeedNotInterested, syncFeedShare } from '@/modules/feed/data/feedEngageApi';
+import { recordActivity } from '@/modules/account/state/activity-store';
 
-/** ซ้าย → ขวา (reel pager): ใกล้คุณ | กำลังติดตาม | สำหรับคุณ — เว็บบอร์ดแยก UI */
-const TAB_ORDER: FeedTab[] = ['nearby', 'following', 'foryou'];
+/** ซ้าย → ขวา ตามหัวแท็บ: หางาน | ใกล้คุณ | กำลังติดตาม | สำหรับคุณ */
+const TAB_ORDER: FeedTab[] = ['board', 'nearby', 'following', 'foryou'];
 
 function openCreatorRoute(handle: string, feedId?: string) {
   const h = handle.replace(/^@/, '');
@@ -52,8 +60,9 @@ export function HomeFeedScreen() {
   const allItems = useFeedStore((s) => s.items);
   const followingMap = useFollowStore((s) => s.following);
   const setTab = useFeedStore((s) => s.setTab);
-  const tipClip = useFeedStore((s) => s.tipClip);
+  const toggleLike = useFeedStore((s) => s.toggleLike);
   const toggleSave = useFeedStore((s) => s.toggleSave);
+  const bumpShare = useFeedStore((s) => s.bumpShare);
   const activeProductId = useFeedStore((s) => s.activeProductId);
   const openProductSheet = useFeedStore((s) => s.openProductSheet);
   const openComments = useFeedStore((s) => s.openComments);
@@ -64,39 +73,70 @@ export function HomeFeedScreen() {
   const [viewportHeight, setViewportHeight] = useState(0);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [reportTarget, setReportTarget] = useState<FeedItem | null>(null);
+  const [menuItem, setMenuItem] = useState<FeedItem | null>(null);
+  const [shareItem, setShareItem] = useState<FeedItem | null>(null);
   const [loginOpen, setLoginOpen] = useState(false);
   const onBoard = tab === 'board';
   const blockedUserIds = useModerationStore((s) => s.blockedUserIds);
   const hiddenContentIds = useModerationStore((s) => s.hiddenContentIds);
   const removedContentIds = useModerationStore((s) => s.removedContentIds);
+  const hideContent = useModerationStore((s) => s.hideContent);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const authHydrated = useAuthStore((s) => s.hydrated);
+  const chromeHidden = useFeedChromeStore((s) => s.chromeHidden);
+  const autoAdvance = useFeedChromeStore((s) => s.autoAdvance);
+  const playbackRate = useFeedChromeStore((s) => s.playbackRate);
 
   /** กำลังดูคลิปในฟีด → heartbeat ออนไลน์ (ขอบเขียวโมเมนต์ของเรา) */
   usePresenceSession('feed', feedFocused && !onBoard && Boolean(activeItemId));
   const sheetRef = useRef<BottomSheetModal>(null);
   const commentsSheetRef = useRef<BottomSheetModal>(null);
   const activeIndexRef = useRef(0);
+  const listRefs = useRef<Partial<Record<FeedTab, FlatList<FeedItem> | null>>>({});
   const reelTab = onBoard ? 'foryou' : tab;
-  const tabIndex = Math.max(0, TAB_ORDER.indexOf(reelTab));
+  const tabIndex = Math.max(0, TAB_ORDER.indexOf(tab));
   const pagerX = useSharedValue(-tabIndex * screenWidth);
+
+  const promotedMasters = useInventoryStore((s) => s.masters);
+  const promotedIds = useMemo(
+    () => new Set(promotedMasters.filter((m) => m.isPromoted).map((m) => m.id)),
+    [promotedMasters],
+  );
 
   const feedsByTab = useMemo(() => {
     const blocked = new Set(blockedUserIds.map((id) => id.toLowerCase()));
     const suppressed = new Set([...hiddenContentIds, ...removedContentIds]);
     const map = {} as Record<FeedTab, FeedItem[]>;
-    for (const t of [...TAB_ORDER, 'board'] as FeedTab[]) {
-      map[t] = selectFeedByTab(allItems, t, followingMap).filter((item) => {
+    for (const t of TAB_ORDER) {
+      const lane = selectFeedByTab(allItems, t, followingMap, CHANTHABURI, 10).filter((item) => {
         if (suppressed.has(item.id)) return false;
         const handle = item.authorHandle.replace(/^@/, '').toLowerCase();
         return !blocked.has(handle) && !blocked.has(item.authorHandle.toLowerCase());
       });
+      map[t] = t === 'foryou' ? pinPromotedFeedItems(lane, promotedIds) : lane;
     }
     return map;
-  }, [allItems, followingMap, blockedUserIds, hiddenContentIds, removedContentIds]);
+  }, [allItems, followingMap, blockedUserIds, hiddenContentIds, removedContentIds, promotedIds]);
 
   const items = feedsByTab[reelTab] ?? [];
   const boardItems = feedsByTab.board ?? [];
+  const allItemsRef = useRef(allItems);
+  allItemsRef.current = allItems;
+
+  useEffect(() => {
+    if (!activeItemId) return;
+    const timer = setTimeout(() => {
+      const item = allItemsRef.current.find((i) => i.id === activeItemId);
+      if (!item) return;
+      recordActivity({
+        category: 'watch',
+        title: item.caption?.trim() || item.product?.name || 'คลิป',
+        subtitle: item.author,
+        targetId: item.id,
+      });
+    }, 2800);
+    return () => clearTimeout(timer);
+  }, [activeItemId]);
 
   const pagerStyle = useAnimatedStyle(() => ({
     flex: 1,
@@ -132,6 +172,7 @@ export function HomeFeedScreen() {
   const onViewableItemsChangedByLane = useMemo(() => {
     const handlers = {} as Record<FeedTab, (info: { viewableItems: ViewToken[] }) => void>;
     for (const laneTab of TAB_ORDER) {
+      if (laneTab === 'board') continue;
       handlers[laneTab] = ({ viewableItems }) => {
         if (activeTabRef.current !== laneTab) return;
         if (viewableItems[0]?.index != null) {
@@ -166,15 +207,22 @@ export function HomeFeedScreen() {
     [openProductSheet],
   );
 
-  /** Empty feed coin — increments reaction count only (no wallet / no value) */
-  const tipOneCoin = useCallback(
+  const likeClip = useCallback(
     (item: FeedItem) => {
-      if (!ENABLE_FEED_COIN_REACTION) return;
-      tipClip(item.id, 1);
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      if (authHydrated && !isAuthenticated()) {
+        setLoginOpen(true);
+        return;
+      }
+      const nextLiked = !item.liked;
+      toggleLike(item.id);
+      void syncFeedLike(item.id, nextLiked);
     },
-    [tipClip],
+    [authHydrated, isAuthenticated, toggleLike],
   );
+
+  const openLongPressMenu = useCallback((item: FeedItem) => {
+    setMenuItem(item);
+  }, []);
 
   const openProfile = useCallback((item: FeedItem) => {
     if (item.isUserPost) {
@@ -194,6 +242,17 @@ export function HomeFeedScreen() {
     [setTab, tab],
   );
 
+  useEffect(() => {
+    if (!autoAdvance || onBoard || !activeItemId || viewportHeight <= 0) return;
+    const idx = items.findIndex((i) => i.id === activeItemId);
+    if (idx < 0 || idx >= items.length - 1) return;
+    const ms = Math.max(2800, Math.round(15000 / playbackRate));
+    const t = setTimeout(() => {
+      listRefs.current[reelTab]?.scrollToIndex({ index: idx + 1, animated: true });
+    }, ms);
+    return () => clearTimeout(t);
+  }, [autoAdvance, playbackRate, activeItemId, onBoard, items, reelTab, viewportHeight]);
+
   const openAuthor = useCallback(
     (item: FeedItem) => {
       openProfile(item);
@@ -212,20 +271,18 @@ export function HomeFeedScreen() {
         item={item}
         height={viewportHeight}
         isActive={laneTab === tab && item.id === activeItemId}
-        onTip={ENABLE_FEED_COIN_REACTION ? () => tipOneCoin(item) : undefined}
         onComment={() => openCommentsSheet(item.id)}
-        onVaultSave={() => toggleSave(item.id)}
-        onShare={() => Alert.alert('แชร์', `แชร์คลิปของ ${item.author}`)}
-        onReport={
-          item.isUserPost
-            ? undefined
-            : () => {
-                void Haptics.selectionAsync();
-                setReportTarget(item);
-              }
-        }
+        onShare={() => setShareItem(item)}
+        onLike={() => likeClip(item)}
+        liked={item.liked}
+        likes={item.likes}
+        onLongPressMenu={() => openLongPressMenu(item)}
         onAvatar={() => openAuthor(item)}
-        onProduct={() => openProduct(item.product.id)}
+        onProduct={
+          resolveShopMaster(item.product, promotedMasters)
+            ? () => openProduct(item.product.id)
+            : undefined
+        }
         onCall={
           ENABLE_CALLS
             ? () => {
@@ -246,17 +303,18 @@ export function HomeFeedScreen() {
     [
       activeItemId,
       commitTabIndex,
+      likeClip,
       openAuthor,
       openCommentsSheet,
+      openLongPressMenu,
       openProduct,
       openProfile,
       pagerX,
+      promotedMasters,
       screenWidth,
       setActive,
       startCall,
       tab,
-      tipOneCoin,
-      toggleSave,
       viewportHeight,
     ],
   );
@@ -265,79 +323,136 @@ export function HomeFeedScreen() {
     <View style={[styles.root, onBoard && styles.rootBoard]} onLayout={onLayout}>
       <StatusBar style={onBoard ? 'dark' : 'light'} />
       <View style={[styles.feedClip, onBoard && styles.feedClipBoard]}>
-        {onBoard ? (
-          <CommunityBoardList
-            items={boardItems}
-            topInset={insets.top}
-            onOpenPost={openCommentsSheet}
-          />
-        ) : (
-          <Animated.View style={pagerStyle}>
-            {TAB_ORDER.map((laneTab) => {
-              const laneItems = feedsByTab[laneTab] ?? [];
+        <Animated.View style={pagerStyle}>
+          {TAB_ORDER.map((laneTab) => {
+            if (laneTab === 'board') {
               return (
                 <View key={laneTab} style={{ width: screenWidth, flex: 1 }}>
-                  {viewportHeight > 0 ? (
-                    <FlatList
-                      data={laneItems}
-                      keyExtractor={(item) => `${laneTab}:${item.id}`}
-                      renderItem={({ item }) => renderLaneItem(laneTab, item)}
-                      pagingEnabled
-                      scrollEnabled={laneTab === tab}
-                      decelerationRate="fast"
-                      showsVerticalScrollIndicator={false}
-                      snapToInterval={viewportHeight}
-                      snapToAlignment="start"
-                      disableIntervalMomentum
-                      windowSize={laneTab === tab ? 3 : 1}
-                      maxToRenderPerBatch={laneTab === tab ? 2 : 1}
-                      initialNumToRender={1}
-                      removeClippedSubviews
-                      getItemLayout={(_, index) => ({
-                        length: viewportHeight,
-                        offset: viewportHeight * index,
-                        index,
-                      })}
-                      onViewableItemsChanged={onViewableItemsChangedByLane[laneTab]}
-                      viewabilityConfig={viewabilityConfig}
-                    />
-                  ) : null}
+                  <CommunityBoardList
+                    items={boardItems}
+                    topInset={insets.top}
+                    onOpenPost={openCommentsSheet}
+                    pagerX={pagerX}
+                    screenWidth={screenWidth}
+                    tabCount={TAB_ORDER.length}
+                    onCommitTabIndex={commitTabIndex}
+                  />
                 </View>
               );
-            })}
-          </Animated.View>
-        )}
+            }
+            const laneItems = feedsByTab[laneTab] ?? [];
+            return (
+              <View key={laneTab} style={{ width: screenWidth, flex: 1 }}>
+                {viewportHeight > 0 ? (
+                  <FlatList
+                    ref={(node) => {
+                      listRefs.current[laneTab] = node;
+                    }}
+                    data={laneItems}
+                    keyExtractor={(item) => `${laneTab}:${item.id}`}
+                    renderItem={({ item }) => renderLaneItem(laneTab, item)}
+                    pagingEnabled
+                    scrollEnabled={laneTab === tab}
+                    decelerationRate="fast"
+                    showsVerticalScrollIndicator={false}
+                    snapToInterval={viewportHeight}
+                    snapToAlignment="start"
+                    disableIntervalMomentum
+                    windowSize={laneTab === tab ? 3 : 1}
+                    maxToRenderPerBatch={laneTab === tab ? 2 : 1}
+                    initialNumToRender={1}
+                    removeClippedSubviews
+                    getItemLayout={(_, index) => ({
+                      length: viewportHeight,
+                      offset: viewportHeight * index,
+                      index,
+                    })}
+                    onViewableItemsChanged={onViewableItemsChangedByLane[laneTab]}
+                    viewabilityConfig={viewabilityConfig}
+                  />
+                ) : null}
+              </View>
+            );
+          })}
+        </Animated.View>
 
-        <FeedHeader
-          tab={tab}
-          onChangeTab={(next) => {
-            void Haptics.selectionAsync();
-            setTab(next);
-            if (next === 'board') return;
-            const i = TAB_ORDER.indexOf(next);
-            if (i < 0) return;
-            pagerX.value = withSpring(-i * screenWidth, IOS_SPRING);
-          }}
-          onPressSearch={() => router.push('/search')}
-        />
+        {!chromeHidden || onBoard ? (
+          <FeedHeader
+            tab={tab}
+            onChangeTab={(next) => {
+              void Haptics.selectionAsync();
+              setTab(next);
+              const i = TAB_ORDER.indexOf(next);
+              if (i < 0) return;
+              pagerX.value = withSpring(-i * screenWidth, IOS_SPRING);
+            }}
+            onPressSearch={() => router.push('/search')}
+            onPressMore={
+              onBoard
+                ? undefined
+                : () => {
+                    const item = items.find((i) => i.id === activeItemId) ?? items[0];
+                    if (!item) return;
+                    void Haptics.selectionAsync();
+                    openLongPressMenu(item);
+                  }
+            }
+          />
+        ) : null}
       </View>
 
-      <ProductBottomSheet
-        ref={sheetRef}
-        product={activeProduct}
-        onCheckout={(variant, qty, total) => {
-          sheetRef.current?.dismiss();
-          Alert.alert(
-            'ยังไม่พร้อมชำระเงิน',
-            `${variant.label} × ${qty}\nยอดโดยประมาณ ฿${total.toLocaleString('th-TH')}\n\nยังไม่มีการเรียกเก็บเงิน — รอเชื่อม Payment Gateway`,
-          );
-        }}
-      />
+      <ProductBottomSheet ref={sheetRef} product={activeProduct} />
 
       <CommentsBottomSheet
         ref={commentsSheetRef}
         feedId={activeCommentsFeedId}
         commentCount={activeCommentsItem?.comments ?? 0}
+      />
+
+      <FeedLongPressSheet
+        visible={Boolean(menuItem)}
+        item={menuItem}
+        canReport={Boolean(menuItem) && !menuItem?.isUserPost}
+        saved={Boolean(menuItem?.saved)}
+        onClose={() => setMenuItem(null)}
+        onInterested={() => {
+          if (!menuItem) return;
+          void syncFeedInterested(menuItem.id);
+          setMenuItem(null);
+        }}
+        onNotInterested={() => {
+          if (!menuItem) return;
+          hideContent(menuItem.id);
+          void syncFeedNotInterested(menuItem.id);
+          setMenuItem(null);
+        }}
+        onSave={() => {
+          if (!menuItem) return;
+          toggleSave(menuItem.id);
+          setMenuItem(null);
+        }}
+        onReport={() => {
+          const target = menuItem;
+          setMenuItem(null);
+          if (!target || target.isUserPost) return;
+          setTimeout(() => setReportTarget(target), 280);
+        }}
+        onShare={() => {
+          const target = menuItem;
+          setMenuItem(null);
+          if (!target) return;
+          setTimeout(() => setShareItem(target), 280);
+        }}
+      />
+
+      <FeedShareSheet
+        visible={Boolean(shareItem)}
+        item={shareItem}
+        onClose={() => setShareItem(null)}
+        onShared={(item) => {
+          bumpShare(item.id);
+          void syncFeedShare(item.id);
+        }}
       />
 
       <ReportBlockSheet
@@ -356,6 +471,7 @@ export function HomeFeedScreen() {
       />
 
       <MatchingNotifyBanner />
+      <SellerNotifyBanner />
     </View>
   );
 }

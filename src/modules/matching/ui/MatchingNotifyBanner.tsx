@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { router } from 'expo-router';
+import { jumpToChatInbox, jumpToChatThread } from '@/shared/navigation/safeNavigate';
 import * as Haptics from 'expo-haptics';
 import { useMatchingNotifyStore } from '@/modules/matching/state/matching-notify-store';
 import { colors } from '@/shared/theme/colors';
@@ -30,9 +30,9 @@ export function MatchingNotifyBanner() {
         const conversationId = banner.conversationId;
         dismissBanner();
         if (conversationId) {
-          router.push(`/(tabs)/chat/${encodeURIComponent(conversationId)}`);
+          jumpToChatThread(conversationId);
         } else {
-          router.push('/(tabs)/chat');
+          jumpToChatInbox();
         }
       }}
     >

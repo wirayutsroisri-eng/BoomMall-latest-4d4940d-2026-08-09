@@ -4,9 +4,13 @@ export type MessageKind =
   | 'product'
   | 'system'
   | 'image'
+  | 'file'
   | 'voice'
   | 'content_ref'
-  | 'job_match';
+  | 'job_match'
+  | 'order_ref';
+
+export type MessageDeliveryStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
 
 export type QuotationStatus = 'pending' | 'paid' | 'expired';
 
@@ -22,10 +26,17 @@ export type QuotationCard = {
 
 export type ProductCard = {
   id: string;
+  variantId?: string;
   title: string;
   sku: string;
   price: number;
   currency: 'THB';
+  imageUri?: string;
+  shopName?: string;
+  shopId?: string;
+  soldCount?: number;
+  shippingHint?: string;
+  returnHint?: string;
   convertedToPayment?: boolean;
 };
 
@@ -43,6 +54,23 @@ export type ContentReferenceCard = {
   authorHandle: string;
 };
 
+/** Seller→buyer order snapshot pinned / sent when chatting from an order card */
+export type OrderSnapshotCard = {
+  orderId: string;
+  buyerId: string;
+  shopId: string;
+  title: string;
+  option?: string;
+  qty: number;
+  amount: number;
+  currency: 'THB';
+  imageUri?: string;
+  paymentKind: 'PAID' | 'COD';
+  orderStatus: string;
+  orderStatusLabel: string;
+  extraCount?: number;
+};
+
 /** Auto-matched job card from Community Board Smart Matching */
 export type JobMatchCard = {
   id: string;
@@ -54,6 +82,17 @@ export type JobMatchCard = {
   actionLabel: string;
 };
 
+export type MessageQuote = {
+  messageId: string;
+  kind: MessageKind;
+  text?: string;
+  imageUri?: string;
+  fileName?: string;
+  senderName?: string;
+  senderAvatarUri?: string;
+  senderAvatarColor?: string;
+};
+
 export type ChatMessage = {
   id: string;
   conversationId: string;
@@ -61,6 +100,13 @@ export type ChatMessage = {
   kind: MessageKind;
   text?: string;
   imageUri?: string;
+  /** 2–4 photos sent together as one LINE-style album bubble */
+  imageUris?: string[];
+  /** Document / any non-image file attached in chat */
+  fileUri?: string;
+  fileName?: string;
+  mimeType?: string;
+  fileSize?: number;
   /** Voice message: local/recorded file uri + duration in whole seconds */
   audioUri?: string;
   durationSec?: number;
@@ -68,9 +114,27 @@ export type ChatMessage = {
   product?: ProductCard;
   contentRef?: ContentReferenceCard;
   jobMatch?: JobMatchCard;
+  orderRef?: OrderSnapshotCard;
   createdAt: string;
   /** ISO or display — WeChat-style read receipt */
   readAt?: string | null;
+  /** Durable send state. sending/failed are client-only; sent+ come from the API. */
+  deliveryStatus?: MessageDeliveryStatus;
+  /** Server UUID (source of truth). `id` may be the clientMsgId while sending. */
+  serverId?: string;
+  clientMsgId?: string;
+  /** Monotonic per-conversation sequence from Postgres. */
+  serverSequence?: string;
+  /** ISO timestamp used for sync/pagination. `createdAt` stays a display string. */
+  createdAtIso?: string;
+  /** WeChat 「อ้างอิง」 — reply anchored to a prior message */
+  quote?: MessageQuote;
+  isFavorite?: boolean;
+  isReminded?: boolean;
+  /** ISO timestamp when a local reminder should fire */
+  remindAt?: string | null;
+  /** expo-notifications identifier for cancel/reschedule */
+  reminderId?: string | null;
 };
 
 /**
@@ -149,6 +213,12 @@ export type Conversation = {
   avatarUri?: string;
   /** peer is typing */
   peerTyping?: boolean;
+  /** Shop / Page id when this thread is a customer↔shop inbox */
+  shopId?: string;
+  /** Buyer sees the shop; seller sees the customer — same Facebook-style inbox */
+  inboxRole?: 'buyer' | 'seller';
+  /** Server conversation id when the local row was created before the API returned */
+  remoteId?: string;
   /** LINE-style chat classification for the Filter Chips — defaults to 'friend' when omitted */
   kind?: ConversationKind;
   /** Only meaningful when kind === 'group' */
@@ -159,6 +229,10 @@ export type Conversation = {
   pinnedAt?: number | null;
   /** Long-press → "ปิดเสียง" — muted chats keep receiving messages silently */
   isMuted?: boolean;
+  /** WeChat 「การเตือน」 — mention/reminder alerts, independent of mute */
+  alertsOn?: boolean;
+  /** Chat canvas color (hex). Undefined = app default */
+  wallpaper?: string;
   /** Long-press → "ซ่อน / จัดเก็บ" — archived chats drop out of every list until restored */
   isArchived?: boolean;
 };

@@ -13,7 +13,6 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { colors } from '@/shared/theme/colors';
-import { ENABLE_CALLS } from '@/shared/compliance/appStoreGates';
 
 export type AttachmentAction =
   | 'camera'
@@ -23,12 +22,14 @@ export type AttachmentAction =
   | 'location'
   | 'coupon'
   | 'order'
-  | 'call';
+  | 'quotation';
 
 type Props = {
   visible: boolean;
   onClose: () => void;
   onSelect: (action: AttachmentAction) => void;
+  /** Shop/merchant threads only — Smart Quotation Card. */
+  showQuotation?: boolean;
 };
 
 const SPRING = { damping: 22, stiffness: 280, mass: 0.7 };
@@ -36,22 +37,24 @@ const PANEL_HEIGHT = 208;
 
 const ALL_ACTIONS: Array<{
   key: AttachmentAction;
-  emoji: string;
+  emoji?: string;
+  icon?: keyof typeof Ionicons.glyphMap;
   label: string;
   iconBg: string;
 }> = [
   { key: 'camera', emoji: '📸', label: 'กล้อง', iconBg: '#E8F1FF' },
   { key: 'gallery', emoji: '🖼️', label: 'รูป & วิดีโอ', iconBg: '#EAF8F1' },
+  { key: 'file', emoji: '📁', label: 'ไฟล์', iconBg: '#EEF1F6' },
   { key: 'reply', emoji: '💬', label: 'ข้อความตอบกลับ', iconBg: '#F0ECFF' },
   { key: 'coupon', emoji: '🏷️', label: 'คูปอง', iconBg: '#FFF7E0' },
-  { key: 'order', emoji: '🛒', label: 'Order', iconBg: '#E8F7F0' },
-  { key: 'call', emoji: '📞', label: 'คำขอการโทร', iconBg: '#EAF3FF' },
+  { key: 'order', icon: 'cart-outline', label: 'Order', iconBg: '#E8F7F0' },
+  { key: 'quotation', icon: 'receipt-outline', label: 'ใบเสนอราคา', iconBg: '#E8F7F0' },
 ];
 
-/** Hide unfinished attachment types (file/location) and gated calls — App Store 2.1 */
-function visibleActions() {
+/** Hide unfinished attachment types (location). Calls live in the 1:1 header. */
+function visibleActions(showQuotation: boolean) {
   return ALL_ACTIONS.filter((a) => {
-    if (a.key === 'call') return ENABLE_CALLS;
+    if (a.key === 'quotation') return showQuotation;
     return true;
   });
 }
@@ -60,7 +63,7 @@ function visibleActions() {
  * LINE OA–style attachment panel — expands below the composer with iOS spring
  * physics, safe-area padding, and a soft glass surface.
  */
-export function AttachmentSheet({ visible, onClose, onSelect }: Props) {
+export function AttachmentSheet({ visible, onClose, onSelect, showQuotation = false }: Props) {
   const insets = useSafeAreaInsets();
   const progress = useSharedValue(0);
 
@@ -99,7 +102,7 @@ export function AttachmentSheet({ visible, onClose, onSelect }: Props) {
           </View>
 
           <View style={styles.grid}>
-            {visibleActions().map((item) => (
+            {visibleActions(showQuotation).map((item) => (
               <Pressable
                 key={item.key}
                 style={styles.cell}
@@ -109,7 +112,11 @@ export function AttachmentSheet({ visible, onClose, onSelect }: Props) {
                 }}
               >
                 <View style={[styles.iconCircle, { backgroundColor: item.iconBg }]}>
-                  <Text style={styles.emoji}>{item.emoji}</Text>
+                  {item.icon ? (
+                    <Ionicons name={item.icon} size={24} color="#3A3A3A" />
+                  ) : (
+                    <Text style={styles.emoji}>{item.emoji}</Text>
+                  )}
                 </View>
                 <Text style={styles.label} numberOfLines={2}>
                   {item.label}

@@ -5,8 +5,10 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useChatStore } from '@/modules/chat/state/chat-store';
+import { jumpToChatThread } from '@/shared/navigation/safeNavigate';
 import { Avatar } from '@/shared/components/Avatar';
 import { colors } from '@/shared/theme/colors';
+import { useRecordSearch } from '@/modules/account/ui/useRecordSearch';
 import { searchDirectory } from '@/modules/search/data/mockSearchDirectory';
 import type { SearchResult } from '@/modules/search/domain/types';
 
@@ -22,6 +24,7 @@ function normalizeHandle(h: string) {
 export function SearchScreen() {
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
+  useRecordSearch(query, 'ผู้ใช้');
   const conversations = useChatStore((s) => s.conversations);
   const addFriend = useChatStore((s) => s.addFriend);
 
@@ -35,7 +38,7 @@ export function SearchScreen() {
 
   const openChat = (conversationId: string) => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push(`/(tabs)/chat/${conversationId}`);
+    jumpToChatThread(conversationId);
   };
 
   const sendFriendRequest = (result: SearchResult) => {

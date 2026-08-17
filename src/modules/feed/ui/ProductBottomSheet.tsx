@@ -1,6 +1,8 @@
 import React, { forwardRef, useCallback, useMemo, useState } from 'react';
 import {
+  Alert,
   Dimensions,
+  Image,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Pressable,
@@ -17,64 +19,110 @@ import {
 } from '@gorhom/bottom-sheet';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { colors } from '@/shared/theme/colors';
-import type { FeedProduct, ProductVariant } from '@/modules/feed/domain/types';
+import type { FeedProduct } from '@/modules/feed/domain/types';
+import type { SkuVariant, WarehouseId } from '@/modules/commerce/domain/types';
+import { displayMediaUri } from '@/modules/commerce/data/product-media';
+import { useInventoryStore } from '@/modules/commerce/state/inventory-store';
+import { useCartStore } from '@/modules/commerce/state/cart-store';
+import { useChatStore } from '@/modules/chat/state/chat-store';
+import { jumpToChatThread } from '@/shared/navigation/safeNavigate';
+import {
+  SHIPPING_OPTIONS,
+  useCheckoutStore,
+} from '@/modules/commerce/state/checkout-store';
+import { ProductVideoThumb } from '@/modules/store/ui/sell/ProductVideoThumb';
+import {
+  buildGallery,
+  formatTHB,
+  resolveShopMaster,
+  shopKeyOf,
+  variantListLabel,
+  chatProductCardOf,
+} from '@/modules/shop/domain/product-display';
 
 type Props = {
   product: FeedProduct | null;
-  onCheckout?: (variant: ProductVariant, qty: number, total: number) => void;
 };
 
-type ShippingOption = {
-  id: string;
-  label: string;
-  eta: string;
-  fee: number;
-};
+function dismissSheet(ref: React.ForwardedRef<BottomSheetModal>) {
+  if (ref && typeof ref !== 'function') ref.current?.dismiss();
+}
 
-const SHIPPING_OPTIONS: ShippingOption[] = [
-  { id: 'standard', label: 'จัดส่งมาตรฐาน', eta: '3–5 วัน · ฟรีค่าส่ง', fee: 0 },
-  { id: 'express', label: 'จัดส่งด่วน', eta: '1–2 วัน', fee: 59 },
-];
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const CAROUSEL_HEIGHT = 260;
-
-function unitPriceFor(variant: ProductVariant, qty: number) {
+function unitPriceFor(variant: SkuVariant, qty: number) {
   if (!variant.wholesaleTiers?.length) return variant.price;
   const sorted = [...variant.wholesaleTiers].sort((a, b) => b.minQty - a.minQty);
   const tier = sorted.find((t) => qty >= t.minQty);
   return tier?.unitPrice ?? variant.price;
 }
 
-function slideGradients(seed: string): Array<[string, string]> {
-  const palettes: Array<[string, string]> = [
-    ['#0B3D2E', '#00D68F'],
-    ['#0A2A22', '#00A86B'],
-    ['#101010', '#1F5F45'],
-  ];
-  const offset = seed.length % palettes.length;
-  return [...palettes.slice(offset), ...palettes.slice(0, offset)];
-}
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const CAROUSEL_HEIGHT = 260;
 
 export const ProductBottomSheet = forwardRef<BottomSheetModal, Props>(
-  function ProductBottomSheet({ product, onCheckout }, ref) {
+  function ProductBottomSheet({ product }, ref) {
     const snapPoints = useMemo(() => ['82%'], []);
+    const masters = useInventoryStore((s) => s.masters);
+    const allVariants = useInventoryStore((s) => s.variants);
+    const available = useInventoryStore((s) => s.available);
+    const totalAvailable = useInventoryStore((s) => s.totalAvailable);
+    const listStockRows = useInventoryStore((s) => s.listStockRows);
+    const addToCart = useCartStore((s) => s.addToCart);
+    const startShopConversation = useChatStore((s) => s.startShopConversation);
+    const sendProductCard = useChatStore((s) => s.sendProductCard);
+    const toggleAll = useCartStore((s) => s.toggleAll);
+    const toggleLine = useCartStore((s) => s.toggleLine);
+    const cartQtyOf = useCartStore((s) => s.qtyOf);
+    const shippingMethod = useCheckoutStore((s) => s.shippingMethod);
+    const setShippingMethod = useCheckoutStore((s) => s.setShippingMethod);
+
+    const master = useMemo(() => resolveShopMaster(product, masters), [product, masters]);
+    const variants = useMemo(
+      () =>
+        master
+          ? allVariants.filter((v) => v.masterSkuId === master.id && v.status !== 'hidden')
+          : [],
+      [allVariants, master],
+    );
+    const gallery = useMemo(
+      () => (master ? buildGallery(master, variants) : []),
+      [master, variants],
+    );
+
     const [variantId, setVariantId] = useState<string | null>(null);
     const [qty, setQty] = useState(1);
-    const [shippingId, setShippingId] = useState<string>('standard');
     const [slideIndex, setSlideIndex] = useState(0);
 
     const activeVariant =
-      product?.variants.find((v) => v.id === variantId) ?? product?.variants[0] ?? null;
-    const shipping = SHIPPING_OPTIONS.find((s) => s.id === shippingId) ?? SHIPPING_OPTIONS[0];
-    const slides = useMemo(() => slideGradients(product?.id ?? 'x'), [product?.id]);
-
+      variants.find((v) => v.id === variantId) ?? variants[0] ?? null;
+    const shipping =
+      SHIPPING_OPTIONS.find((s) => s.id === shippingMethod) ?? SHIPPING_OPTIONS[0];
+    const stock = activeVariant ? totalAvailable(activeVariant.id) : 0;
+    const inCart = activeVariant ? cartQtyOf(activeVariant.id) : 0;
+    const remaining = Math.max(0, stock - inCart);
     const moq = activeVariant?.moq ?? 1;
-    const safeQty = Math.max(qty, moq);
-    const unit = activeVariant ? unitPriceFor(activeVariant, safeQty) : 0;
-    const total = unit * safeQty + shipping.fee;
+    const safeQty = Math.min(remaining, Math.max(qty, remaining > 0 ? moq : 0));
+    const unit = activeVariant ? unitPriceFor(activeVariant, Math.max(safeQty, 1)) : 0;
+    const shipFee = shipping.free ? 0 : shipping.fee;
+    const total = unit * Math.max(safeQty, 0) + (safeQty > 0 ? shipFee : 0);
+
+    const warehouseFor = useCallback(
+      (variant: SkuVariant): WarehouseId => {
+        const rows = listStockRows(variant.id);
+        const ready = rows.find((r) => available(variant.id, r.warehouseId) > 0) ?? rows[0];
+        return (ready?.warehouseId ?? 'WH-CTI-MAIN') as WarehouseId;
+      },
+      [available, listStockRows],
+    );
+
+    const resetForProduct = useCallback(() => {
+      const first = variants[0];
+      setVariantId(first?.id ?? null);
+      setQty(first?.moq ?? 1);
+      setSlideIndex(0);
+    }, [variants]);
 
     const renderBackdrop = useCallback(
       (props: BottomSheetBackdropProps) => (
@@ -86,7 +134,90 @@ export const ProductBottomSheet = forwardRef<BottomSheetModal, Props>(
     const onScrollSlides = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
       const idx = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
       setSlideIndex(idx);
-    }, []);
+      const slide = gallery[idx];
+      if (!slide?.variantId) return;
+      const match = variants.find((v) => v.id === slide.variantId);
+      if (match) {
+        setVariantId(match.id);
+        setQty(match.moq ?? 1);
+      }
+    }, [gallery, variants]);
+
+    const pickVariant = (next: SkuVariant) => {
+      setVariantId(next.id);
+      setQty(next.moq ?? 1);
+      const idx = gallery.findIndex((s) => s.variantId === next.id);
+      if (idx >= 0) setSlideIndex(idx);
+      void Haptics.selectionAsync();
+    };
+
+    const addCurrent = () => {
+      if (!activeVariant) return { ok: false as const, message: 'ยังไม่มีตัวเลือก' };
+      if (safeQty < 1) return { ok: false as const, message: 'สต็อกไม่พอ หรืออยู่ในตะกร้าครบแล้ว' };
+      return addToCart({
+        variantId: activeVariant.id,
+        warehouseId: warehouseFor(activeVariant),
+        qty: safeQty,
+        unitPrice: unit,
+      });
+    };
+
+    const onAddCart = () => {
+      const res = addCurrent();
+      if (!res.ok) {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Alert.alert('ใส่ตะกร้าไม่สำเร็จ', res.message);
+        return;
+      }
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    };
+
+    const onBuyNow = () => {
+      const res = addCurrent();
+      if (!res.ok) {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Alert.alert('ยังสั่งไม่ได้', res.message);
+        return;
+      }
+      if (!activeVariant) return;
+      toggleAll(false);
+      toggleLine(activeVariant.id, warehouseFor(activeVariant));
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      dismissSheet(ref);
+      router.push('/shop/checkout');
+    };
+
+    const onChat = () => {
+      if (!master || !activeVariant) return;
+      const shopId = master.ownerShopId?.trim() || shopKeyOf(master);
+      const conversationId = startShopConversation({
+        shopId,
+        shopName: master.shopName,
+        sellerId: shopId,
+      });
+      sendProductCard(conversationId, chatProductCardOf(master, activeVariant));
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      dismissSheet(ref);
+      jumpToChatThread(conversationId);
+    };
+
+    const openPdp = () => {
+      if (!master) {
+        router.push('/(tabs)/shop');
+        return;
+      }
+      dismissSheet(ref);
+      router.push({ pathname: '/shop/product/[id]', params: { id: master.id, pick: '1' } });
+    };
+
+    const openShop = () => {
+      if (!master) {
+        router.push('/(tabs)/shop');
+        return;
+      }
+      dismissSheet(ref);
+      router.push({ pathname: '/shop/store/[shopKey]', params: { shopKey: shopKeyOf(master) } });
+    };
 
     return (
       <BottomSheetModal
@@ -97,16 +228,17 @@ export const ProductBottomSheet = forwardRef<BottomSheetModal, Props>(
         backgroundStyle={styles.sheet}
         handleIndicatorStyle={styles.handle}
         onChange={(index) => {
-          if (index >= 0 && product) {
-            setVariantId(product.variants[0]?.id ?? null);
-            setQty(product.variants[0]?.moq ?? 1);
-            setShippingId('standard');
-            setSlideIndex(0);
-          }
+          if (index >= 0) resetForProduct();
         }}
       >
-        {!product || !activeVariant ? (
-          <Text style={styles.empty}>ไม่มีสินค้า</Text>
+        {!master || !activeVariant ? (
+          <View style={styles.emptyWrap}>
+            <Text style={styles.empty}>สินค้านี้ยังไม่ได้ลงขายในร้านค้า</Text>
+            <Text style={styles.emptyHint}>ลงสินค้าจากหน้าร้านก่อน จึงจะซื้อจากคลิปได้</Text>
+            <Pressable style={styles.emptyBtn} onPress={openShop}>
+              <Text style={styles.emptyBtnText}>ไปหน้าร้าน</Text>
+            </Pressable>
+          </View>
         ) : (
           <>
             <BottomSheetScrollView
@@ -121,58 +253,81 @@ export const ProductBottomSheet = forwardRef<BottomSheetModal, Props>(
                   onMomentumScrollEnd={onScrollSlides}
                   style={{ height: CAROUSEL_HEIGHT }}
                 >
-                  {slides.map((g, i) => (
-                    <LinearGradient
-                      key={i}
-                      colors={g}
-                      style={[styles.slide, { width: SCREEN_WIDTH }]}
-                    >
+                  {gallery.map((slide) => (
+                    <View key={slide.key} style={[styles.slide, { width: SCREEN_WIDTH }]}>
+                      {slide.type === 'video' ? (
+                        <ProductVideoThumb
+                          uri={displayMediaUri(slide.uri)}
+                          style={styles.slideMedia}
+                          contentFit="cover"
+                          interactive={false}
+                        />
+                      ) : (
+                        <Image
+                          source={{ uri: displayMediaUri(slide.uri) }}
+                          style={styles.slideMedia}
+                          resizeMode="cover"
+                        />
+                      )}
                       <View style={styles.slideBadge}>
-                        <Text style={styles.slideBadgeText}>{product.tier}</Text>
+                        <Text style={styles.slideBadgeText}>{master.channel}</Text>
                       </View>
-                    </LinearGradient>
+                    </View>
                   ))}
                 </ScrollView>
-                <View style={styles.dots}>
-                  {slides.map((_, i) => (
-                    <View key={i} style={[styles.dot, i === slideIndex && styles.dotActive]} />
-                  ))}
-                </View>
+                {gallery.length > 1 ? (
+                  <View style={styles.dots}>
+                    {gallery.map((slide, i) => (
+                      <View key={slide.key} style={[styles.dot, i === slideIndex && styles.dotActive]} />
+                    ))}
+                  </View>
+                ) : null}
               </View>
 
               <View style={styles.body}>
-                <Text style={styles.tier}>{product.tier} · {product.shopName}</Text>
-                <Text style={styles.title}>{product.name}</Text>
+                <Pressable onPress={openShop} hitSlop={6}>
+                  <Text style={styles.tier}>
+                    {master.channel} · {master.shopName}
+                  </Text>
+                </Pressable>
+                <Pressable onPress={openPdp}>
+                  <Text style={styles.title}>{master.title}</Text>
+                </Pressable>
 
                 <View style={styles.priceRow}>
-                  <Text style={styles.priceNow}>฿{unit.toLocaleString('th-TH')}</Text>
+                  <Text style={styles.priceNow}>{formatTHB(unit)}</Text>
                   {activeVariant.wholesaleTiers?.length ? (
                     <Text style={styles.priceHint}>ราคาส่งเมื่อซื้อจำนวนมาก</Text>
                   ) : null}
                 </View>
 
-                <Text style={styles.section}>เลือกสเปก</Text>
+                <View style={styles.sectionHead}>
+                  <Text style={styles.section}>เลือกสเปก</Text>
+                  <Pressable onPress={openPdp} hitSlop={8} accessibilityLabel="ดูตัวเลือกทั้งหมดในร้าน">
+                    <Text style={styles.moreLink}>ดูทั้งหมด</Text>
+                  </Pressable>
+                </View>
                 <View style={styles.chips}>
-                  {product.variants.map((v) => {
+                  {variants.map((v) => {
                     const selected = v.id === activeVariant.id;
+                    const left = Math.max(0, totalAvailable(v.id) - cartQtyOf(v.id));
                     return (
                       <Pressable
                         key={v.id}
-                        onPress={() => {
-                          setVariantId(v.id);
-                          setQty(v.moq ?? 1);
-                          void Haptics.selectionAsync();
-                        }}
-                        style={[styles.chip, selected && styles.chipActive]}
+                        onPress={() => pickVariant(v)}
+                        style={[styles.chip, selected && styles.chipActive, left <= 0 && styles.chipOut]}
                       >
-                        <Text style={[styles.chipText, selected && styles.chipTextActive]}>
-                          {v.label}
+                        <Text style={[styles.chipText, selected && styles.chipTextActive]} numberOfLines={2}>
+                          {variantListLabel(v)}
                         </Text>
-                        {v.voltage ? (
-                          <Text style={styles.chipMeta}>{v.voltage}{v.capacityAh ? ` · ${v.capacityAh}Ah` : ''}</Text>
+                        {v.attrs.voltage ? (
+                          <Text style={styles.chipMeta}>
+                            {v.attrs.voltage}
+                            {v.attrs.capacityAh ? ` · ${v.attrs.capacityAh}Ah` : ''}
+                          </Text>
                         ) : null}
-                        {v.stock <= 3 ? (
-                          <Text style={styles.stockWarn}>เหลือ {v.stock}</Text>
+                        {left <= 3 ? (
+                          <Text style={styles.stockWarn}>{left <= 0 ? 'หมด' : `เหลือ ${left}`}</Text>
                         ) : null}
                       </Pressable>
                     );
@@ -184,7 +339,7 @@ export const ProductBottomSheet = forwardRef<BottomSheetModal, Props>(
                     <Text style={styles.section}>ราคาส่งขั้นบันได (MOQ {moq})</Text>
                     {activeVariant.wholesaleTiers.map((t) => (
                       <Text key={t.minQty} style={styles.tierRow}>
-                        ≥ {t.minQty} ชิ้น → ฿{t.unitPrice.toLocaleString('th-TH')}/ชิ้น
+                        ≥ {t.minQty} ชิ้น → {formatTHB(t.unitPrice)}/ชิ้น
                       </Text>
                     ))}
                   </View>
@@ -193,13 +348,14 @@ export const ProductBottomSheet = forwardRef<BottomSheetModal, Props>(
                 <Text style={styles.section}>ตัวเลือกการจัดส่ง</Text>
                 <View style={styles.shippingBox}>
                   {SHIPPING_OPTIONS.map((opt) => {
-                    const selected = opt.id === shippingId;
+                    const selected = opt.id === shippingMethod;
+                    const fee = opt.free ? 0 : opt.fee;
                     return (
                       <Pressable
                         key={opt.id}
                         style={styles.shippingRow}
                         onPress={() => {
-                          setShippingId(opt.id);
+                          setShippingMethod(opt.id);
                           void Haptics.selectionAsync();
                         }}
                       >
@@ -212,9 +368,7 @@ export const ProductBottomSheet = forwardRef<BottomSheetModal, Props>(
                           <Text style={styles.shippingLabel}>{opt.label}</Text>
                           <Text style={styles.shippingEta}>{opt.eta}</Text>
                         </View>
-                        <Text style={styles.shippingFee}>
-                          {opt.fee > 0 ? `+฿${opt.fee}` : 'ฟรี'}
-                        </Text>
+                        <Text style={styles.shippingFee}>{fee > 0 ? `+${formatTHB(fee)}` : 'ฟรี'}</Text>
                       </Pressable>
                     );
                   })}
@@ -232,37 +386,35 @@ export const ProductBottomSheet = forwardRef<BottomSheetModal, Props>(
                     <Text style={styles.qtyValue}>{safeQty}</Text>
                     <Pressable
                       style={styles.qtyBtn}
-                      onPress={() => setQty((q) => Math.min(activeVariant.stock, q + 1))}
+                      onPress={() => setQty((q) => Math.min(remaining, q + 1))}
                     >
                       <Text style={styles.qtyBtnText}>+</Text>
                     </Pressable>
                   </View>
                 </View>
+                {inCart > 0 ? (
+                  <Text style={styles.cartHint}>อยู่ในตะกร้า {inCart} ชิ้น · เหลือใส่ได้อีก {remaining}</Text>
+                ) : (
+                  <Text style={styles.cartHint}>มีสินค้า {stock.toLocaleString('th-TH')} ชิ้น</Text>
+                )}
               </View>
             </BottomSheetScrollView>
 
             <View style={styles.footer}>
               <View style={styles.footerTotal}>
                 <Text style={styles.unitLabel}>ยอดรวม</Text>
-                <Text style={styles.total}>฿{total.toLocaleString('th-TH')}</Text>
+                <Text style={styles.total}>{formatTHB(total)}</Text>
               </View>
               <View style={styles.footerBtns}>
-                <Pressable
-                  style={styles.cartBtn}
-                  onPress={() => {
-                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  }}
-                >
+                <Pressable style={styles.chatBtn} onPress={onChat} accessibilityLabel="แชทร้าน">
+                  <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.text.inverse} />
+                  <Text style={styles.chatBtnText}>แชท</Text>
+                </Pressable>
+                <Pressable style={styles.cartBtn} onPress={onAddCart}>
                   <Ionicons name="cart-outline" size={18} color={colors.accent.warning} />
                   <Text style={styles.cartBtnText}>ใส่ตะกร้า</Text>
                 </Pressable>
-                <Pressable
-                  onPress={() => {
-                    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                    onCheckout?.(activeVariant, safeQty, total);
-                  }}
-                  style={styles.buyBtnWrap}
-                >
+                <Pressable onPress={onBuyNow} style={styles.buyBtnWrap}>
                   <LinearGradient
                     colors={['#FF7A45', '#FE2C55']}
                     start={{ x: 0, y: 0 }}
@@ -291,19 +443,47 @@ const styles = StyleSheet.create({
   content: {
     paddingBottom: 24,
   },
+  emptyWrap: {
+    paddingHorizontal: 24,
+    paddingTop: 48,
+    alignItems: 'center',
+    gap: 8,
+  },
   empty: {
+    color: colors.text.inverse,
+    textAlign: 'center',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  emptyHint: {
     color: colors.text.muted,
     textAlign: 'center',
-    marginTop: 40,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  emptyBtn: {
+    marginTop: 12,
+    backgroundColor: colors.brand.primary,
+    borderRadius: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+  },
+  emptyBtnText: {
+    color: '#04140E',
+    fontWeight: '800',
   },
   carouselWrap: {},
   slide: {
     height: CAROUSEL_HEIGHT,
-    alignItems: 'flex-start',
-    justifyContent: 'flex-end',
-    padding: 16,
+    backgroundColor: '#111',
+  },
+  slideMedia: {
+    ...StyleSheet.absoluteFillObject,
   },
   slideBadge: {
+    position: 'absolute',
+    left: 16,
+    bottom: 16,
     backgroundColor: 'rgba(0,0,0,0.35)',
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -362,9 +542,21 @@ const styles = StyleSheet.create({
     color: colors.text.muted,
     fontSize: 12,
   },
+  sectionHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
   section: {
     color: colors.text.onDark,
     fontWeight: '700',
+    marginBottom: 8,
+  },
+  moreLink: {
+    color: colors.brand.primary,
+    fontSize: 12,
+    fontWeight: '800',
     marginBottom: 8,
   },
   chips: {
@@ -380,11 +572,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     minWidth: 96,
+    maxWidth: '100%',
   },
   chipActive: {
     borderColor: colors.brand.primary,
     backgroundColor: 'rgba(0,214,143,0.12)',
   },
+  chipOut: { opacity: 0.45 },
   chipText: {
     color: colors.text.onDark,
     fontWeight: '700',
@@ -446,7 +640,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   qtyControls: {
     flexDirection: 'row',
@@ -472,6 +666,12 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     minWidth: 28,
     textAlign: 'center',
+  },
+  cartHint: {
+    color: colors.text.muted,
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 8,
   },
   footer: {
     flexDirection: 'row',
@@ -499,7 +699,22 @@ const styles = StyleSheet.create({
   footerBtns: {
     flex: 1,
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
+  },
+  chatBtn: {
+    width: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.28)',
+    borderRadius: 14,
+    paddingVertical: 10,
+  },
+  chatBtnText: {
+    color: colors.text.inverse,
+    fontWeight: '800',
+    fontSize: 10,
   },
   cartBtn: {
     flex: 1,

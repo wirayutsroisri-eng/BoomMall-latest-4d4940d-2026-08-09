@@ -11,10 +11,12 @@ import {
   WAREHOUSES,
   DEFAULT_CUSTOM_FIELDS,
 } from '../data/catalog';
-import { persistProductImages } from '../data/product-media';
+import { persistProductImages, persistProductMedia } from '../data/product-media';
+import { firstImageUri, fromLegacyImages, imageUrisOf } from '../domain/product-media';
 import {
   applyAdjust,
   applyCommitSale,
+  applyDirectSale,
   applyRelease,
   applyReserve,
   applyRestock,
@@ -38,7 +40,18 @@ import type {
   WarehouseStock,
 } from '../domain/types';
 
-function stockKey(variantId: string, warehouseId: WarehouseId) {
+type CommerceHooks = {
+  onUpsert?: (masterId: string) => void;
+  onDelete?: (masterId: string) => void;
+};
+
+let commerceHooks: CommerceHooks = {};
+
+export function setCommerceHooks(hooks: CommerceHooks) {
+  commerceHooks = hooks;
+}
+
+function stockKey(variantId: string, warehouseId: string) {
   return `${variantId}::${warehouseId}`;
 }
 
@@ -67,6 +80,13 @@ type InventoryState = {
     orderRef?: string,
   ) => StockMutationResult;
   commitSale: (
+    variantId: string,
+    warehouseId: WarehouseId,
+    qty: number,
+    orderRef?: string,
+  ) => StockMutationResult;
+  /** Deduct on-hand at purchase — cart itself never reserves. */
+  sellAvailable: (
     variantId: string,
     warehouseId: WarehouseId,
     qty: number,
@@ -109,6 +129,7 @@ type InventoryState = {
   createMasterWithVariants: (
     input: Omit<CreateMasterInput, 'variants'> & {
       imageUris?: string[];
+      media?: CreateMasterInput['media'];
       variants: CreateMasterInput['variants'];
     },
   ) => string;
@@ -121,8 +142,22 @@ type InventoryState = {
       onHand: number;
       warehouseId?: WarehouseId;
       sku?: string;
+      imageUri?: string;
+      attrs?: SkuVariant['attrs'];
     },
   ) => string | null;
+  /** Replace the variant list (label / price / stock) without flattening to one price */
+  replaceMasterVariants: (
+    masterId: string,
+    rows: Array<{
+      id?: string;
+      label: string;
+      price: number;
+      stock: number;
+      imageUri?: string | null;
+      attrs?: SkuVariant['attrs'];
+    }>,
+  ) => UpdateProductResult;
   /** สร้างแถวสต็อก 0 ถ้ายังไม่มี (ไม่แตะ reserved/ledger) */
   ensureStockRow: (variantId: string, warehouseId: WarehouseId) => void;
   /**
@@ -137,7 +172,14 @@ type InventoryState = {
   updateProduct: (masterId: string, patch: UpdateProductInput) => UpdateProductResult;
   /** Soft-delete product + variants + stock rows owned by this master */
   deleteProduct: (masterId: string) => UpdateProductResult;
+  setProductPromoted: (masterId: string, isPromoted: boolean) => void;
+  syncPromotedFromIds: (activeProductIds: string[]) => void;
   addCustomFieldDef: (def: CustomFieldDef) => void;
+  hydrateFromServer: (input: {
+    masters: MasterSku[];
+    variants: SkuVariant[];
+    stock: WarehouseStock[];
+  }) => void;
 };
 
 const allSeedMasters = [...seedMasterSkus, ...externalMasterSkus];
@@ -152,12 +194,6 @@ type PersistedInventory = Pick<
   InventoryState,
   'masters' | 'variants' | 'stockByKey' | 'customFieldDefs' | 'ledger'
 >;
-
-/** Saved rows win; seed rows added later in code are appended so they still show up. */
-function mergeById<T extends { id: string }>(seeds: T[], saved: T[]): T[] {
-  const savedIds = new Set(saved.map((row) => row.id));
-  return [...saved, ...seeds.filter((row) => !savedIds.has(row.id))];
-}
 
 export const useInventoryStore = create<InventoryState>()(
   persist(
@@ -225,6 +261,18 @@ export const useInventoryStore = create<InventoryState>()(
           if (!result.ok) return result;
           commitRow(key, result.next);
           journal([result.entry]);
+          return { ok: true, revision: result.next.revision, available: availableOf(result.next) };
+        },
+
+        sellAvailable: (variantId, warehouseId, qty, orderRef) => {
+          lock();
+          const key = stockKey(variantId, warehouseId);
+          const result = applyDirectSale(get().stockByKey[key], qty, orderRef);
+          if (!result.ok) return result;
+          commitRow(key, result.next);
+          journal([result.entry]);
+          const masterId = get().variants.find((v) => v.id === variantId)?.masterSkuId;
+          if (masterId) commerceHooks.onUpsert?.(masterId);
           return { ok: true, revision: result.next.revision, available: availableOf(result.next) };
         },
 
@@ -300,10 +348,23 @@ export const useInventoryStore = create<InventoryState>()(
 
         createMasterWithVariants: (input) => {
           const now = Date.now();
-          const imageUris = input.imageUris?.length
-            ? persistProductImages(input.imageUris, `ms-${now}`)
-            : undefined;
-          const bundle = buildMasterWithVariants(input, now, imageUris);
+          const media = persistProductMedia(
+            input.media?.length ? input.media : fromLegacyImages(input.imageUris),
+            `ms-${now}`,
+          );
+          const variants = input.variants.map((v, index) => ({
+            ...v,
+            imageUri: v.imageUri
+              ? (persistProductImages([v.imageUri], `ms-${now}-v${index}`)[0] ?? v.imageUri)
+              : undefined,
+          }));
+          const specImages = persistProductMedia(input.specImages ?? [], `ms-${now}-spec`);
+          const usageImages = persistProductMedia(input.usageImages ?? [], `ms-${now}-usage`);
+          const bundle = buildMasterWithVariants(
+            { ...input, variants, media, specImages, usageImages },
+            now,
+            imageUrisOf(media),
+          );
 
           const stockPatch: Record<string, WarehouseStock> = {};
           for (const row of bundle.stockRows) {
@@ -315,6 +376,7 @@ export const useInventoryStore = create<InventoryState>()(
             stockByKey: { ...s.stockByKey, ...stockPatch },
           }));
           journal(bundle.ledgerDrafts);
+          commerceHooks.onUpsert?.(bundle.master.id);
           return bundle.master.id;
         },
 
@@ -332,6 +394,10 @@ export const useInventoryStore = create<InventoryState>()(
               onHand: input.onHand,
               warehouseId,
               sku: input.sku,
+              imageUri: input.imageUri
+                ? (persistProductImages([input.imageUri], `sv-${now}`)[0] ?? input.imageUri)
+                : undefined,
+              attrs: input.attrs,
             },
             now,
           );
@@ -342,7 +408,144 @@ export const useInventoryStore = create<InventoryState>()(
             stockByKey: { ...s.stockByKey, [key]: built.stockRow },
           }));
           if (built.ledgerDraft) journal([built.ledgerDraft]);
+          commerceHooks.onUpsert?.(masterId);
           return built.variant.id;
+        },
+
+        replaceMasterVariants: (masterId, rows) => {
+          const master = get().masters.find((m) => m.id === masterId);
+          if (!master) return { ok: false, reason: 'ไม่พบสินค้า' };
+          if (!rows.length) {
+            return { ok: false, reason: 'เพิ่มอย่างน้อย 1 ตัวเลือกย่อย หรือปิดสวิตช์ตัวเลือกย่อย' };
+          }
+
+          for (const row of rows) {
+            if (!row.label.trim()) {
+              return { ok: false, reason: 'ใส่ชื่อตัวเลือกย่อยทุกใบ' };
+            }
+            if (!Number.isFinite(row.price) || row.price <= 0) {
+              return { ok: false, reason: 'ราคาต้องมากกว่า 0' };
+            }
+            if (!Number.isInteger(row.stock) || row.stock < 0) {
+              return { ok: false, reason: 'สต็อกต้องเป็นจำนวนเต็มไม่ติดลบ' };
+            }
+          }
+
+          const existing = get().variants.filter((v) => v.masterSkuId === masterId);
+          const keep = new Set(rows.map((r) => r.id).filter((id): id is string => Boolean(id)));
+          for (const v of existing) {
+            if (!keep.has(v.id) && get().totalReserved(v.id) > 0) {
+              return { ok: false, reason: `ลบ "${v.label}" ไม่ได้ — มียอดจองค้าง` };
+            }
+          }
+
+          const removeIds = new Set(
+            existing.filter((v) => !keep.has(v.id)).map((v) => v.id),
+          );
+
+          lock();
+
+          if (removeIds.size) {
+            set((s) => {
+              const nextStock: Record<string, WarehouseStock> = {};
+              for (const [key, row] of Object.entries(s.stockByKey)) {
+                if (!removeIds.has(row.variantId)) nextStock[key] = row;
+              }
+              return {
+                variants: s.variants.filter((v) => !removeIds.has(v.id)),
+                stockByKey: nextStock,
+                masters: s.masters.map((m) =>
+                  m.id === masterId
+                    ? { ...m, variantIds: m.variantIds.filter((id) => !removeIds.has(id)) }
+                    : m,
+                ),
+              };
+            });
+          }
+
+          const prices: number[] = [];
+          for (const row of rows) {
+            const price = Math.round(row.price);
+            prices.push(price);
+            const live = get().variants.find((v) => v.id === row.id);
+            if (row.id && live) {
+              const persistedPhoto = row.imageUri
+                ? (persistProductImages([row.imageUri], `${masterId}-${row.id}`)[0] ?? row.imageUri)
+                : undefined;
+              set((s) => ({
+                variants: s.variants.map((v) =>
+                  v.id === row.id
+                    ? {
+                        ...v,
+                        label: row.label.trim(),
+                        price,
+                        status: 'active',
+                        ...(persistedPhoto !== undefined ? { imageUri: persistedPhoto } : {}),
+                        ...(row.attrs !== undefined ? { attrs: row.attrs } : {}),
+                      }
+                    : v,
+                ),
+              }));
+
+              const current = get().totalAvailable(row.id);
+              const delta = row.stock - current;
+              if (delta === 0) continue;
+
+              const ranked = [...get().listStockRows(row.id)].sort(
+                (a, b) => availableOf(b) - availableOf(a),
+              );
+              const warehouseId = ranked[0]?.warehouseId ?? 'WH-CTI-MAIN';
+              if (!ranked.length) get().ensureStockRow(row.id, warehouseId);
+
+              if (delta > 0) {
+                const result = get().restock(row.id, warehouseId, delta, 'แก้ตัวเลือกย่อย');
+                if (!result.ok) return { ok: false, reason: 'เพิ่มสต็อกไม่สำเร็จ' };
+              } else {
+                let need = -delta;
+                const fresh = [...get().listStockRows(row.id)].sort(
+                  (a, b) => availableOf(b) - availableOf(a),
+                );
+                for (const stockRow of fresh) {
+                  const avail = availableOf(stockRow);
+                  if (avail <= 0) continue;
+                  const take = Math.min(avail, need);
+                  const result = get().adjustStock(
+                    stockRow.variantId,
+                    stockRow.warehouseId,
+                    stockRow.onHand - take,
+                    'แก้ตัวเลือกย่อย',
+                  );
+                  if (!result.ok) {
+                    return { ok: false, reason: 'ลดสต็อกไม่สำเร็จ (มียอดจอง)' };
+                  }
+                  need -= take;
+                  if (need <= 0) break;
+                }
+                if (need > 0) {
+                  return { ok: false, reason: 'ลดสต็อกไม่ครบ — มียอดจองค้างอยู่' };
+                }
+              }
+            } else {
+              const created = get().addVariantToMaster(masterId, {
+                label: row.label.trim(),
+                price,
+                onHand: row.stock,
+                imageUri: row.imageUri ?? undefined,
+                attrs: row.attrs,
+              });
+              if (!created) return { ok: false, reason: 'เพิ่มตัวเลือกย่อยไม่สำเร็จ' };
+            }
+          }
+
+          const minPrice = Math.min(...prices);
+          set((s) => ({
+            masters: s.masters.map((m) =>
+              m.id === masterId ? { ...m, basePrice: minPrice } : m,
+            ),
+          }));
+
+          commerceHooks.onUpsert?.(masterId);
+          return { ok: true };
         },
 
         ensureStockRow: (variantId, warehouseId) => {
@@ -463,6 +666,7 @@ export const useInventoryStore = create<InventoryState>()(
             }
           }
 
+          commerceHooks.onUpsert?.(masterId);
           return { ok: true };
         },
 
@@ -539,9 +743,19 @@ export const useInventoryStore = create<InventoryState>()(
 
           lock();
 
-          const imageUris =
-            patch.imageUris != null
-              ? persistProductImages(patch.imageUris, masterId)
+          const media =
+            patch.media != null
+              ? persistProductMedia(patch.media, masterId)
+              : patch.imageUris != null
+                ? persistProductMedia(fromLegacyImages(patch.imageUris), masterId)
+                : undefined;
+          const specImages =
+            patch.specImages != null
+              ? persistProductMedia(patch.specImages, `${masterId}-spec`)
+              : undefined;
+          const usageImages =
+            patch.usageImages != null
+              ? persistProductMedia(patch.usageImages, `${masterId}-usage`)
               : undefined;
 
           const siblingVariants = get().variants.filter((v) => v.masterSkuId === masterId);
@@ -563,12 +777,26 @@ export const useInventoryStore = create<InventoryState>()(
                 ...(patch.description !== undefined
                   ? { description: patch.description.trim() || undefined }
                   : {}),
+                ...(patch.usageGuide !== undefined
+                  ? { usageGuide: patch.usageGuide.trim() || undefined }
+                  : {}),
+                ...(specImages !== undefined
+                  ? { specImages: specImages.length ? specImages : undefined }
+                  : {}),
+                ...(usageImages !== undefined
+                  ? { usageImages: usageImages.length ? usageImages : undefined }
+                  : {}),
+                ...(patch.channel !== undefined ? { channel: patch.channel } : {}),
                 ...(patch.price != null ? { basePrice: Math.round(patch.price) } : {}),
                 ...(patch.customFields !== undefined
                   ? { customFields: patch.customFields }
                   : {}),
-                ...(imageUris !== undefined
-                  ? { imageUris, imageUri: imageUris[0] }
+                ...(media !== undefined
+                  ? {
+                      media,
+                      imageUris: imageUrisOf(media),
+                      imageUri: firstImageUri(media),
+                    }
                   : {}),
               };
             }),
@@ -592,6 +820,7 @@ export const useInventoryStore = create<InventoryState>()(
             }
           }
 
+          commerceHooks.onUpsert?.(masterId);
           return { ok: true };
         },
 
@@ -618,7 +847,28 @@ export const useInventoryStore = create<InventoryState>()(
             };
           });
 
+          commerceHooks.onDelete?.(masterId);
           return { ok: true };
+        },
+
+        setProductPromoted: (masterId, isPromoted) => {
+          set((s) => ({
+            masters: s.masters.map((m) =>
+              m.id === masterId && m.isPromoted !== isPromoted ? { ...m, isPromoted } : m,
+            ),
+          }));
+          commerceHooks.onUpsert?.(masterId);
+        },
+
+        syncPromotedFromIds: (activeProductIds) => {
+          const ids = new Set(activeProductIds);
+          set((s) => ({
+            masters: s.masters.map((m) => {
+              const next = ids.has(m.id);
+              if (Boolean(m.isPromoted) === next) return m;
+              return { ...m, isPromoted: next };
+            }),
+          }));
         },
 
         addCustomFieldDef: (def) =>
@@ -627,10 +877,30 @@ export const useInventoryStore = create<InventoryState>()(
               ? s.customFieldDefs
               : [...s.customFieldDefs, def],
           })),
+
+        hydrateFromServer: (input) => {
+          const serverMasterIds = new Set(input.masters.map((m) => m.id));
+          const serverVariantIds = new Set(input.variants.map((v) => v.id));
+          set((s) => {
+            const localMasters = s.masters.filter((m) => !serverMasterIds.has(m.id));
+            const localVariants = s.variants.filter(
+              (v) => !serverVariantIds.has(v.id) && !serverMasterIds.has(v.masterSkuId),
+            );
+            const nextStock = { ...s.stockByKey };
+            for (const row of input.stock) {
+              nextStock[stockKey(row.variantId, row.warehouseId)] = row;
+            }
+            return {
+              masters: [...input.masters, ...localMasters],
+              variants: [...input.variants, ...localVariants],
+              stockByKey: nextStock,
+            };
+          });
+        },
       };
     },
     {
-      name: 'boommall-inventory-storage',
+      name: 'boommall-inventory-storage-v3',
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state): PersistedInventory => ({
         masters: state.masters,
@@ -641,15 +911,12 @@ export const useInventoryStore = create<InventoryState>()(
       }),
       merge: (persisted, current) => {
         const saved = (persisted ?? {}) as Partial<PersistedInventory>;
+        // Empty shop / real catalog: trust AsyncStorage only — never revive demo seeds
         return {
           ...current,
-          masters: saved.masters ? mergeById(current.masters, saved.masters) : current.masters,
-          variants: saved.variants
-            ? mergeById(current.variants, saved.variants)
-            : current.variants,
-          stockByKey: saved.stockByKey
-            ? { ...current.stockByKey, ...saved.stockByKey }
-            : current.stockByKey,
+          masters: saved.masters ?? current.masters,
+          variants: saved.variants ?? current.variants,
+          stockByKey: saved.stockByKey ?? current.stockByKey,
           ledger: saved.ledger ?? current.ledger,
           customFieldDefs: saved.customFieldDefs
             ? [

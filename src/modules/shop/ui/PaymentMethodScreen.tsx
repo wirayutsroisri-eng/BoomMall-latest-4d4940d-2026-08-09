@@ -1,5 +1,5 @@
-import React from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useMemo } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,8 +9,9 @@ import {
   type PaymentMethodId,
   useCheckoutStore,
 } from '@/modules/commerce/state/checkout-store';
+import { useBuyerPaymentStore } from '@/modules/account/state/buyer-payment-store';
+import { buyerHint, type BuyerPaymentKind } from '@/modules/account/domain/buyer-payment';
 import { colors } from '@/shared/theme/colors';
-import { ENABLE_CHECKOUT_PLACE_ORDER } from '@/shared/compliance/appStoreGates';
 
 const ORANGE = '#EE4D2D';
 
@@ -21,60 +22,48 @@ const ICONS: Record<PaymentMethodId, keyof typeof Ionicons.glyphMap> = {
   promptpay: 'qr-code-outline',
   cod: 'cash-outline',
   mobile_banking: 'phone-portrait-outline',
+  truemoney: 'phone-portrait-outline',
 };
+
+const KIND_BY_METHOD: Partial<Record<PaymentMethodId, BuyerPaymentKind>> = {
+  truemoney: 'truemoney',
+  promptpay: 'promptpay',
+  bank_account: 'bank_account',
+  mobile_banking: 'bank_account',
+  card: 'card',
+  boommall_pay: 'boommall_pay',
+};
+
+function enrollKind(id: PaymentMethodId): BuyerPaymentKind | undefined {
+  return KIND_BY_METHOD[id];
+}
 
 export function PaymentMethodScreen() {
   const insets = useSafeAreaInsets();
   const paymentMethod = useCheckoutStore((s) => s.paymentMethod);
-  const cardLabel = useCheckoutStore((s) => s.cardLabel);
   const setPaymentMethod = useCheckoutStore((s) => s.setPaymentMethod);
+  const instruments = useBuyerPaymentStore((s) => s.instruments);
+  const byKind = useMemo(() => new Map(instruments.map((a) => [a.kind, a])), [instruments]);
 
-  const primary = PAYMENT_OPTIONS.filter((p) =>
-    ['boommall_pay', 'bank_account', 'card'].includes(p.id),
-  );
-  const other = PAYMENT_OPTIONS.filter(
-    (p) => !['boommall_pay', 'bank_account', 'card'].includes(p.id),
-  );
+  const ready = (id: PaymentMethodId) => {
+    if (id === 'cod') return true;
+    const kind = enrollKind(id);
+    return kind ? byKind.has(kind) : false;
+  };
+
+  useEffect(() => {
+    if (!ready(paymentMethod)) setPaymentMethod('cod');
+  }, [paymentMethod, setPaymentMethod, instruments]);
 
   const select = (id: PaymentMethodId) => {
+    if (!ready(id)) return;
     void Haptics.selectionAsync();
-    setPaymentMethod(id, id === 'card' ? cardLabel : undefined);
+    setPaymentMethod(id);
   };
 
-  const confirm = () => {
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    router.back();
-  };
-
-  const renderRow = (id: PaymentMethodId, label: string, opts?: { activate?: boolean; subtitle?: string }) => {
-    const selected = paymentMethod === id;
-    return (
-      <Pressable key={id} style={styles.row} onPress={() => select(id)}>
-        <Ionicons name={ICONS[id]} size={22} color={selected ? ORANGE : colors.text.secondary} />
-        <View style={{ flex: 1, gap: 4 }}>
-          <Text style={styles.label}>{label}</Text>
-          <View style={styles.badges}>
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>ส่งฟรี</Text>
-            </View>
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>ลด ฿394.00</Text>
-            </View>
-          </View>
-        </View>
-        {opts?.activate ? (
-          <View style={styles.activateBtn}>
-            <Text style={styles.activateText}>เปิดใช้งาน</Text>
-          </View>
-        ) : null}
-        {opts?.subtitle ? <Text style={styles.subtitle}>{opts.subtitle}</Text> : null}
-        {selected ? (
-          <Ionicons name="checkmark-circle" size={22} color={ORANGE} />
-        ) : (
-          <View style={styles.radio} />
-        )}
-      </Pressable>
-    );
+  const enroll = (id: PaymentMethodId) => {
+    const kind = enrollKind(id);
+    router.push({ pathname: '/settings/payments', params: kind ? { kind } : {} });
   };
 
   return (
@@ -84,41 +73,57 @@ export function PaymentMethodScreen() {
           <Ionicons name="chevron-back" size={24} color={ORANGE} />
         </Pressable>
         <Text style={styles.title}>ช่องทางการชำระเงิน</Text>
-        <View style={{ width: 24 }} />
+        <Pressable onPress={() => router.push('/settings/payments')}>
+          <Text style={styles.manage}>จัดการ</Text>
+        </Pressable>
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}>
+        <Text style={styles.lead}>จ่ายเข้าบัญชี BoomMall — ร้านเห็นยอดหลังหัก GP ในสมุดบัญชี</Text>
         <View style={styles.card}>
-          {primary.map((p) =>
-            renderRow(p.id, p.label, {
-              activate: p.activate,
-              subtitle: p.id === 'card' ? cardLabel : p.subtitle,
-            }),
-          )}
-          {ENABLE_CHECKOUT_PLACE_ORDER ? (
-            <Pressable
-              style={styles.row}
-              onPress={() =>
-                Alert.alert('ผูกบัญชีธนาคาร', 'จะเปิดใช้เมื่อ Payment Gateway พร้อม')
-              }
-            >
-              <Ionicons name="add-circle-outline" size={22} color={colors.text.muted} />
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.label, { color: colors.text.muted }]}>ผูกบัญชีธนาคาร</Text>
-              </View>
-              <Text style={styles.bankHint}>SCB · KBank · +7</Text>
-            </Pressable>
-          ) : null}
-        </View>
-
-        <Text style={styles.section}>ช่องทางการชำระเงินอื่น</Text>
-        <View style={styles.card}>
-          {other.map((p) => renderRow(p.id, p.label))}
+          {PAYMENT_OPTIONS.map((p) => {
+            const selected = paymentMethod === p.id;
+            const on = ready(p.id);
+            const kind = enrollKind(p.id);
+            const hint = kind ? buyerHint(byKind.get(kind)) : p.id === 'cod' ? 'จ่ายตอนรับของ' : undefined;
+            return (
+              <Pressable
+                key={p.id}
+                style={styles.row}
+                onPress={() => (on ? select(p.id) : enroll(p.id))}
+              >
+                <Ionicons
+                  name={ICONS[p.id]}
+                  size={22}
+                  color={selected ? ORANGE : colors.text.secondary}
+                />
+                <View style={{ flex: 1, gap: 3 }}>
+                  <Text style={styles.label}>{p.label}</Text>
+                  {hint ? <Text style={styles.hint}>{hint}</Text> : null}
+                </View>
+                {!on && p.activate ? (
+                  <View style={styles.enrollBtn}>
+                    <Text style={styles.enrollText}>สมัคร</Text>
+                  </View>
+                ) : selected ? (
+                  <Ionicons name="checkmark-circle" size={22} color={ORANGE} />
+                ) : (
+                  <View style={styles.radio} />
+                )}
+              </Pressable>
+            );
+          })}
         </View>
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}>
-        <Pressable style={styles.confirmBtn} onPress={confirm}>
+        <Pressable
+          style={styles.confirmBtn}
+          onPress={() => {
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            router.back();
+          }}
+        >
           <Text style={styles.confirmText}>ยืนยัน</Text>
         </Pressable>
       </View>
@@ -136,19 +141,20 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   title: { fontSize: 17, fontWeight: '900', color: colors.text.primary },
+  manage: { fontSize: 13, fontWeight: '800', color: ORANGE },
+  lead: {
+    marginHorizontal: 12,
+    marginBottom: 10,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.text.secondary,
+    lineHeight: 18,
+  },
   card: {
     marginHorizontal: 12,
     backgroundColor: '#fff',
     borderRadius: 12,
     paddingVertical: 4,
-    marginBottom: 12,
-  },
-  section: {
-    marginHorizontal: 16,
-    marginBottom: 8,
-    fontSize: 13,
-    fontWeight: '900',
-    color: colors.text.primary,
   },
   row: {
     flexDirection: 'row',
@@ -160,23 +166,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border.soft,
   },
   label: { fontSize: 13, fontWeight: '800', color: colors.text.primary },
-  badges: { flexDirection: 'row', gap: 4 },
-  badge: {
-    backgroundColor: '#FFECE8',
-    borderRadius: 4,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-  },
-  badgeText: { color: ORANGE, fontSize: 9, fontWeight: '900' },
-  activateBtn: {
-    borderWidth: 1,
-    borderColor: ORANGE,
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  activateText: { color: ORANGE, fontSize: 11, fontWeight: '900' },
-  subtitle: { fontSize: 12, fontWeight: '700', color: colors.text.secondary, marginRight: 4 },
+  hint: { fontSize: 12, fontWeight: '600', color: colors.text.secondary },
   radio: {
     width: 18,
     height: 18,
@@ -184,7 +174,13 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: colors.border.strong,
   },
-  bankHint: { fontSize: 11, color: colors.text.muted, fontWeight: '700' },
+  enrollBtn: {
+    backgroundColor: ORANGE,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  enrollText: { color: '#fff', fontWeight: '800', fontSize: 12 },
   footer: {
     position: 'absolute',
     left: 0,

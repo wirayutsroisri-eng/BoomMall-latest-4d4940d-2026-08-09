@@ -54,6 +54,8 @@ export function BoardCreateModal() {
   const [budget, setBudget] = useState('');
   const [category, setCategory] = useState(CATEGORIES[0] ?? 'ตัดหญ้า');
   const [imageUri, setImageUri] = useState<string | undefined>();
+  const [imageWidth, setImageWidth] = useState<number | undefined>();
+  const [imageHeight, setImageHeight] = useState<number | undefined>();
   const [searchRadius, setSearchRadius] = useState<SearchRadiusOption>(DEFAULT_SEARCH_RADIUS);
   const [submitting, setSubmitting] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
@@ -73,6 +75,8 @@ export function BoardCreateModal() {
     const first = items.find((i) => i.mediaType === 'photo') ?? items[0];
     if (!first) return;
     setImageUri(first.uri);
+    setImageWidth(first.width || undefined);
+    setImageHeight(first.height || undefined);
     void Haptics.selectionAsync();
   };
 
@@ -91,6 +95,8 @@ export function BoardCreateModal() {
       price,
       channel: 'C2C',
       imageUri,
+      imageWidth,
+      imageHeight,
       gps: CHANTHABURI,
       searchRadius,
       boardSide: side,

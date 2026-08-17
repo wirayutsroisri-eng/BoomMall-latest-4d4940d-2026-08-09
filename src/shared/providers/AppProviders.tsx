@@ -7,7 +7,19 @@ import { useKnowledgeStore } from '@/modules/knowledge/state/knowledge-store';
 import { useBoomWalletStore } from '@/modules/wallet/state/boom-wallet-store';
 import { useMusicLibraryStore } from '@/modules/music/state/music-library-store';
 import { useAuthStore } from '@/modules/auth/state/auth-store';
+import { seedActivityFromApp } from '@/modules/account/state/seedActivity';
+import { useFollowStore } from '@/modules/social/state/follow-store';
+import { useChatStore } from '@/modules/chat/state/chat-store';
+import { subscribeChatReminderTaps } from '@/modules/chat/data/chatReminder';
+import { startChatRealtime, isChatSocketConnected } from '@/modules/chat/data/chatSocket';
 import { syncModerationContentBlocks } from '@/modules/safety/syncModerationContentBlocks';
+import { setCommerceHooks } from '@/modules/commerce/state/inventory-store';
+import {
+  pullCommerceCatalog,
+  pushCommerceDelete,
+  pushCommerceProduct,
+} from '@/modules/commerce/data/commerceSync';
+import { AppPromptHost } from '@/shared/components/AppPrompt';
 
 type Props = {
   children: React.ReactNode;
@@ -21,19 +33,62 @@ export function AppProviders({ children }: Props) {
   const hydrateAuth = useAuthStore((s) => s.hydrate);
 
   useEffect(() => {
+    setCommerceHooks({
+      onUpsert: pushCommerceProduct,
+      onDelete: pushCommerceDelete,
+    });
     void hydrateVault();
     void hydrateKnowledge();
     hydrateWallet();
     void hydrateMusic();
-    void hydrateAuth();
+    void hydrateAuth().then(() => {
+      void pullCommerceCatalog();
+      void useFollowStore.getState().hydrateFromServer();
+      void useChatStore.getState().hydrateInbox().finally(() => {
+        seedActivityFromApp();
+      });
+      startChatRealtime({
+        onMessage: (msg) => useChatStore.getState().applyRemoteMessage(msg),
+        onRead: (payload) =>
+          useChatStore.getState().applyReceipt({ ...payload, kind: 'read' }),
+        onDelivered: (payload) =>
+          useChatStore.getState().applyReceipt({ ...payload, kind: 'delivered' }),
+        onTyping: (payload) => {
+          const conv = useChatStore
+            .getState()
+            .conversations.find((c) => c.id === payload.conversationId || c.remoteId === payload.conversationId);
+          if (conv) useChatStore.getState().setPeerTyping(conv.id, payload.typing);
+        },
+        onReconnect: () => {
+          void useChatStore.getState().hydrateInbox();
+          const active = useChatStore.getState().activeConversationId;
+          if (active) void useChatStore.getState().hydrateThread(active);
+        },
+      });
+    });
     void syncModerationContentBlocks();
-    const id = setInterval(() => void syncModerationContentBlocks(), 20_000);
-    return () => clearInterval(id);
+    const reminderUnsub = subscribeChatReminderTaps();
+    const id = setInterval(() => {
+      void syncModerationContentBlocks();
+      void pullCommerceCatalog();
+      if (!isChatSocketConnected()) {
+        void useChatStore.getState().hydrateInbox();
+        const active = useChatStore.getState().activeConversationId;
+        if (active) void useChatStore.getState().hydrateThread(active);
+      }
+    }, 8_000);
+    return () => {
+      clearInterval(id);
+      reminderUnsub();
+    };
   }, [hydrateVault, hydrateKnowledge, hydrateWallet, hydrateMusic, hydrateAuth]);
 
   return (
     <GestureHandlerRootView style={styles.root}>
-      <BottomSheetModalProvider>{children}</BottomSheetModalProvider>
+      <BottomSheetModalProvider>
+        {children}
+        <AppPromptHost />
+      </BottomSheetModalProvider>
     </GestureHandlerRootView>
   );
 }

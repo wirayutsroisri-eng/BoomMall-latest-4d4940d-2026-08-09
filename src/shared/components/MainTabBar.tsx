@@ -2,9 +2,12 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
+import { usePathname } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
+import { useChatStore } from '@/modules/chat/state/chat-store';
+import { useFeedStore } from '@/modules/feed/state/feed-store';
 import { Avatar } from '@/shared/components/Avatar';
 import { colors } from '@/shared/theme/colors';
 
@@ -16,9 +19,30 @@ const LABELS: Record<string, string> = {
   profile: 'โปรไฟล์',
 };
 
+/** Inbox keeps the tab bar; a thread (and group room) hides it for more chat space. */
+export function isChatWindow(pathname: string) {
+  const parts = pathname.split('/').filter((p) => p && p !== '(tabs)');
+  const i = parts.indexOf('chat');
+  if (i < 0) return false;
+  const rest = parts.slice(i + 1);
+  if (!rest.length || rest[0] === 'index' || rest[0] === 'add-friend') return false;
+  return true;
+}
+
 export function MainTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
+  const pathname = usePathname();
   const profile = useLoyaltyStore((s) => s.profile);
+  const feedTab = useFeedStore((s) => s.tab);
+  const onJobs = feedTab === 'board';
+  const chatUnread = useChatStore((s) =>
+    s.conversations.reduce(
+      (n, c) => n + (!c.isArchived && !c.isMuted && !c.isHidden ? c.unread : 0),
+      0,
+    ),
+  );
+
+  if (isChatWindow(pathname)) return null;
 
   return (
     <View style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, 8) }]}>
@@ -45,17 +69,13 @@ export function MainTabBar({ state, descriptors, navigation }: BottomTabBarProps
               key={route.key}
               accessibilityRole="button"
               accessibilityState={focused ? { selected: true } : {}}
+              accessibilityLabel={onJobs ? 'รับงาน' : 'สร้าง'}
               onPress={onPress}
-              style={styles.createHit}
+              style={styles.item}
               hitSlop={8}
             >
-              <View style={styles.createWrap}>
-                <View style={styles.createBarCyan} />
-                <View style={styles.createBarPink} />
-                <View style={styles.createBtn}>
-                  <Ionicons name="camera" size={22} color={colors.text.inverse} />
-                </View>
-              </View>
+              <Ionicons name="camera-outline" size={38} color="#fff" />
+              <Text style={[styles.label, styles.createLabelSpacer]}>.</Text>
             </Pressable>
           );
         }
@@ -65,7 +85,7 @@ export function MainTabBar({ state, descriptors, navigation }: BottomTabBarProps
             case 'index':
               return focused ? 'home' : 'home-outline';
             case 'shop':
-              return focused ? 'compass' : 'compass-outline';
+              return focused ? 'storefront' : 'storefront-outline';
             case 'chat':
               return focused ? 'chatbubble' : 'chatbubble-outline';
             default:
@@ -94,11 +114,20 @@ export function MainTabBar({ state, descriptors, navigation }: BottomTabBarProps
                 borderColor={colors.text.inverse}
               />
             ) : (
-              <Ionicons
-                name={iconName}
-                size={26}
-                color={focused ? colors.text.inverse : 'rgba(255,255,255,0.5)'}
-              />
+              <View>
+                <Ionicons
+                  name={iconName}
+                  size={26}
+                  color={focused ? colors.text.inverse : 'rgba(255,255,255,0.5)'}
+                />
+                {route.name === 'chat' && chatUnread > 0 ? (
+                  <View style={styles.unreadBadge}>
+                    <Text style={styles.unreadBadgeText}>
+                      {chatUnread > 9 ? '9+' : String(chatUnread)}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
             )}
             <Text style={[styles.label, focused && styles.labelActive]}>
               {LABELS[route.name] ?? route.name}
@@ -133,47 +162,28 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: 'rgba(255,255,255,0.5)',
   },
+  createLabelSpacer: {
+    opacity: 0,
+  },
   labelActive: {
     color: colors.text.inverse,
     fontWeight: '800',
   },
-  createHit: {
-    width: 64,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  createWrap: {
-    width: 48,
-    height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  createBarCyan: {
+  unreadBadge: {
     position: 'absolute',
-    left: 5,
-    top: -2,
-    width: 34,
-    height: 28,
-    borderRadius: 9,
-    backgroundColor: colors.brand.cyan,
-  },
-  createBarPink: {
-    position: 'absolute',
-    right: 5,
-    bottom: -2,
-    width: 34,
-    height: 28,
-    borderRadius: 9,
-    backgroundColor: colors.brand.pink,
-  },
-  createBtn: {
-    width: 46,
-    height: 32,
-    borderRadius: 9,
-    backgroundColor: colors.brand.ink,
+    top: -4,
+    right: -10,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    backgroundColor: colors.accent.live,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  unreadBadgeText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '800',
   },
 });

@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { DragDownDismiss } from '@/shared/components/DragDownDismiss';
 import { colors } from '@/shared/theme/colors';
@@ -29,19 +30,27 @@ export function ReportBlockSheet({
   targetLabel,
   blockUserId,
 }: Props) {
+  const insets = useSafeAreaInsets();
   const submitReport = useModerationStore((s) => s.submitReport);
   const blockUser = useModerationStore((s) => s.blockUser);
   const authUser = useAuthStore((s) => s.user);
-  const [reason, setReason] = useState<string>(REPORT_REASONS[0]);
+  const [otherOpen, setOtherOpen] = useState(false);
   const [details, setDetails] = useState('');
 
-  const onSubmit = () => {
+  useEffect(() => {
+    if (!visible) {
+      setOtherOpen(false);
+      setDetails('');
+    }
+  }, [visible]);
+
+  const finishSubmit = (reason: string, extra?: string) => {
     submitReport({
       kind,
       targetId,
       targetLabel,
       reason,
-      details: details.trim() || undefined,
+      details: extra?.trim() || undefined,
     });
     void import('@/modules/safety/syncModerationContentBlocks').then(({ submitReportToServer }) =>
       submitReportToServer({
@@ -49,7 +58,7 @@ export function ReportBlockSheet({
         targetId,
         targetLabel,
         reason,
-        details: details.trim() || undefined,
+        details: extra?.trim() || undefined,
         reporterRef: authUser?.id ?? 'mobile-anon',
       }),
     );
@@ -57,6 +66,7 @@ export function ReportBlockSheet({
 
     const finish = () => {
       setDetails('');
+      setOtherOpen(false);
       onClose();
     };
 
@@ -81,101 +91,136 @@ export function ReportBlockSheet({
     ]);
   };
 
+  const pickReason = (reason: string) => {
+    void Haptics.selectionAsync();
+    if (reason === 'อื่นๆ') {
+      setOtherOpen(true);
+      return;
+    }
+    finishSubmit(reason);
+  };
+
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <GestureHandlerRootView style={styles.flex}>
-        <View style={styles.backdrop}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-          <DragDownDismiss onDismiss={onClose} style={styles.sheet}>
-            <View style={styles.handle} />
-            <Text style={styles.title}>รายงานเนื้อหา</Text>
-            {targetLabel ? (
-              <Text style={styles.sub} numberOfLines={2}>
-                {targetLabel}
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+      <DragDownDismiss onDismiss={onClose} showDim rootInModal rootStyle={styles.dismissRoot}>
+        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
+          <View style={styles.handle} />
+          <Text style={styles.navTitle}>รายงาน</Text>
+          {otherOpen ? (
+            <>
+              <Pressable style={styles.backRow} onPress={() => setOtherOpen(false)} hitSlop={8}>
+                <Ionicons name="chevron-back" size={20} color={colors.text.primary} />
+                <Text style={styles.backText}>กลับ</Text>
+              </Pressable>
+              <Text style={styles.heading}>อธิบายเพิ่มเติม</Text>
+              <Text style={styles.sub}>
+                บอกทีมตรวจสอบว่าเกิดอะไรขึ้น ข้อมูลนี้ส่งเข้าคิว moderation จริง
               </Text>
-            ) : null}
-
-            <Text style={styles.label}>เหตุผล</Text>
-            <View style={styles.reasonWrap}>
-              {REPORT_REASONS.map((r) => (
-                <Pressable
-                  key={r}
-                  style={[styles.reasonChip, reason === r && styles.reasonChipOn]}
-                  onPress={() => setReason(r)}
-                >
-                  <Text style={[styles.reasonText, reason === r && styles.reasonTextOn]}>{r}</Text>
-                </Pressable>
-              ))}
-            </View>
-
-            <Text style={styles.label}>รายละเอียด (ไม่บังคับ)</Text>
-            <TextInput
-              style={styles.input}
-              value={details}
-              onChangeText={setDetails}
-              placeholder="อธิบายเพิ่มเติม"
-              placeholderTextColor={colors.text.muted}
-              multiline
-            />
-
-            <Pressable style={styles.submit} onPress={onSubmit}>
-              <Text style={styles.submitText}>ส่งรายงาน</Text>
-            </Pressable>
-          </DragDownDismiss>
+              <TextInput
+                style={styles.input}
+                value={details}
+                onChangeText={setDetails}
+                placeholder="รายละเอียด (ไม่บังคับ)"
+                placeholderTextColor={colors.text.muted}
+                multiline
+              />
+              <Pressable style={styles.submit} onPress={() => finishSubmit('อื่นๆ', details)}>
+                <Text style={styles.submitText}>ส่งรายงาน</Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <Text style={styles.heading}>
+                {kind === 'content' ? 'เหตุใดคุณจึงรายงานรูปภาพนี้' : 'เหตุใดคุณจึงรายงานเนื้อหานี้'}
+              </Text>
+              <Text style={styles.sub}>
+                {targetLabel
+                  ? `${targetLabel}\nรายงานจะถูกส่งให้ทีมตรวจสอบ ไม่ได้แชร์กับเจ้าของโพสต์`
+                  : 'รายงานจะถูกส่งให้ทีมตรวจสอบ ไม่ได้แชร์กับเจ้าของโพสต์'}
+              </Text>
+              <View style={styles.list}>
+                {REPORT_REASONS.map((reason, index) => (
+                  <Pressable
+                    key={reason}
+                    style={[styles.reasonRow, index === REPORT_REASONS.length - 1 && styles.reasonLast]}
+                    onPress={() => pickReason(reason)}
+                  >
+                    <Text style={styles.reasonLabel}>{reason}</Text>
+                    <Ionicons name="chevron-forward" size={18} color="#C7C7CC" />
+                  </Pressable>
+                ))}
+              </View>
+            </>
+          )}
         </View>
-      </GestureHandlerRootView>
+      </DragDownDismiss>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'flex-end',
-  },
+  dismissRoot: { flex: 1, justifyContent: 'flex-end' },
   sheet: {
-    backgroundColor: colors.surface.card,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
     paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 28,
-    gap: 10,
+    paddingTop: 8,
   },
   handle: {
     alignSelf: 'center',
-    width: 40,
+    width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: colors.border.strong,
-    marginBottom: 4,
+    backgroundColor: '#D1D5DB',
+    marginBottom: 10,
   },
-  title: { fontWeight: '900', fontSize: 18, color: colors.text.primary },
-  sub: { color: colors.text.secondary, fontSize: 13 },
-  label: { fontWeight: '700', color: colors.text.primary, marginTop: 4 },
-  reasonWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  reasonChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: colors.surface.canvas,
+  navTitle: {
+    textAlign: 'center',
+    fontWeight: '800',
+    fontSize: 16,
+    color: colors.text.primary,
+    marginBottom: 14,
   },
-  reasonChipOn: { backgroundColor: colors.brand.primary },
-  reasonText: { fontSize: 13, fontWeight: '600', color: colors.text.primary },
-  reasonTextOn: { color: colors.brand.ink },
+  heading: {
+    fontWeight: '800',
+    fontSize: 20,
+    color: colors.text.primary,
+    marginBottom: 8,
+  },
+  sub: {
+    color: colors.text.secondary,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '500',
+    marginBottom: 12,
+  },
+  list: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#E5E7EB',
+  },
+  reasonRow: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E5E7EB',
+  },
+  reasonLast: { borderBottomWidth: 0 },
+  reasonLabel: { flex: 1, fontSize: 16, fontWeight: '600', color: colors.text.primary },
+  backRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 10 },
+  backText: { fontSize: 15, fontWeight: '700', color: colors.text.primary },
   input: {
-    minHeight: 72,
+    minHeight: 88,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.border.soft,
     padding: 12,
     textAlignVertical: 'top',
     color: colors.text.primary,
+    marginBottom: 12,
   },
   submit: {
-    marginTop: 6,
     backgroundColor: '#FE2C55',
     borderRadius: 12,
     paddingVertical: 14,

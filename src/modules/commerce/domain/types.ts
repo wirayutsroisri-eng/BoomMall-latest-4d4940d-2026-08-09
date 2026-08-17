@@ -22,6 +22,17 @@ export type CustomFieldDef = {
 export type CustomFieldValue = {
   key: string;
   value: string | number;
+  /** Free-text spec name when the seller types their own rows */
+  label?: string;
+};
+
+export type ProductMediaType = 'image' | 'video';
+
+/** One gallery slot — cover is index 0 */
+export type ProductMediaItem = {
+  uri: string;
+  type: ProductMediaType;
+  sizeBytes?: number;
 };
 
 /** Shopify/Amazon-style Master SKU */
@@ -41,18 +52,28 @@ export type MasterSku = {
   ownerShopId?: string;
   /** Explicit shop category key (falls back to tag/title inference when absent) */
   categoryKey?: string;
-  /** Cover photo for shop-dashboard column cards (first of imageUris) */
+  /** Cover photo for shop-dashboard column cards (first image in media) */
   imageUri?: string;
-  /** All product photos (permanent local URIs) */
+  /** All product photos (legacy — prefer `media`) */
   imageUris?: string[];
-  /** Free-text product description */
+  /** Ordered gallery. First item is cover (image or video). */
+  media?: ProductMediaItem[];
+  /** Long-form product article */
   description?: string;
+  /** How-to / usage article */
+  usageGuide?: string;
+  /** Photos that illustrate specs (diagrams, labels, measurements) */
+  specImages?: ProductMediaItem[];
+  /** Photos / steps for how to use */
+  usageImages?: ProductMediaItem[];
   /** Product barcode / EAN / UPC (unique across catalog when set) */
   barcode?: string;
   /** Short caption overlaid on the content card */
   caption?: string;
   /** ISO timestamp when the product was listed */
   createdAt?: string;
+  /** True while an approved product promotion is active */
+  isPromoted?: boolean;
 };
 
 /** Full product edit payload (PUT/PATCH equivalent) */
@@ -62,10 +83,15 @@ export type UpdateProductInput = {
   barcode?: string | null;
   categoryKey?: string;
   description?: string;
+  usageGuide?: string;
+  specImages?: ProductMediaItem[];
+  usageImages?: ProductMediaItem[];
+  channel?: CommerceChannel;
   price?: number;
   cost?: number;
   availableTotal?: number;
   imageUris?: string[];
+  media?: ProductMediaItem[];
   customFields?: CustomFieldValue[];
 };
 
@@ -78,11 +104,18 @@ export type SkuVariant = {
   masterSkuId: string;
   sku: string;
   label: string;
+  /** Real photo for this option (BGV — required when listing with variants) */
+  imageUri?: string;
   attrs: {
     color?: string;
     size?: string;
     voltage?: string;
     capacityAh?: number;
+    weight?: string;
+    /** Short per-option note (size/weight extras) */
+    note?: string;
+    /** Per-option free-text specs (legacy — prefer size / weight / note) */
+    specs?: Array<{ label: string; value: string }>;
   };
   price: number;
   /** Unit cost for margin insight (optional) */

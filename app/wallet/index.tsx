@@ -1,10 +1,6 @@
 import { Redirect } from 'expo-router';
-import { BoomWalletScreen } from '@/modules/wallet/ui/BoomWalletScreen';
-import { ENABLE_BOOM_WALLET_UI } from '@/shared/compliance/appStoreGates';
 
+/** ตัดหน้ากระเป๋าเหรียญ — ไปตั้งค่าบัญชีแทน */
 export default function WalletRoute() {
-  if (!ENABLE_BOOM_WALLET_UI) {
-    return <Redirect href="/(tabs)/profile" />;
-  }
-  return <BoomWalletScreen />;
+  return <Redirect href="/wallet/security" />;
 }

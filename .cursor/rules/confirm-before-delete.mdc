@@ -1,0 +1,25 @@
+---
+description: Every delete control must confirm with the user before removing data.
+alwaysApply: true
+---
+
+# Iron rule: confirm before delete
+
+Any control that **deletes or permanently removes** user data must ask first (`Alert.alert` with ยกเลิก + destructive ลบ). Never delete on the first tap.
+
+Applies to: messages, photos in chat, conversations, reminders, favorites, products, media, variants, stickers, tracks.
+
+```ts
+// ❌ BAD
+onPress={() => deleteMessage(id)}
+
+// ✅ GOOD
+onPress={() => {
+  Alert.alert('ลบข้อความนี้?', 'ข้อความจะถูกเอาออก', [
+    { text: 'ยกเลิก', style: 'cancel' },
+    { text: 'ลบ', style: 'destructive', onPress: () => deleteMessage(id) },
+  ]);
+}}
+```
+
+Do not add a second confirm if the caller already showed one. Undo/eraser/clear-canvas tools are not deletes.

@@ -4,7 +4,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
-import { CURRENT_USER_ID } from '@/modules/chat/data/mockChatData';
+import { currentChatUserId } from '@/modules/chat/data/chatRealtimeApi';
 import { useChatStore } from '@/modules/chat/state/chat-store';
 import { usePresenceStore } from '@/modules/chat/state/presence-store';
 import {
@@ -14,6 +14,7 @@ import {
 import type { ActiveNote } from '@/modules/chat/domain/types';
 import { Avatar } from '@/shared/components/Avatar';
 import { colors } from '@/shared/theme/colors';
+import { chatInboxPalette } from './chatDayNight';
 
 const SLOT_WIDTH = 88;
 const AVATAR_SIZE = 80;
@@ -33,12 +34,13 @@ function shortName(name: string) {
  * คนออฟไลน์ไม่โชว์ในแถบนี้
  */
 export function ActiveNotesBar() {
+  const palette = chatInboxPalette();
   const notes = useChatStore((s) => s.notes);
   const myNote = useChatStore((s) => s.myNote);
   const setMyNote = useChatStore((s) => s.setMyNote);
   const startPresenceEngine = usePresenceStore((s) => s.startPresenceEngine);
   const stopPresenceEngine = usePresenceStore((s) => s.stopPresenceEngine);
-  const myPresence = usePresenceStore((s) => s.presenceByUserId[CURRENT_USER_ID]);
+  const myPresence = usePresenceStore((s) => s.presenceByUserId[currentChatUserId()]);
   const iAmOnline = isPresenceOnline(myPresence);
 
   useEffect(() => {
@@ -91,16 +93,16 @@ export function ActiveNotesBar() {
               radius={AVATAR_RADIUS}
               borderWidth={0}
             />
-            <View style={styles.editBadge}>
+            <View style={[styles.editBadge, { borderColor: palette.noteBadgeBorder }]}>
               <Ionicons name="add" size={12} color={colors.text.inverse} />
             </View>
           </View>
         ) : (
           <View style={styles.addSlot}>
-            <Ionicons name="add" size={36} color="#FFFFFF" style={styles.addGlow} />
+            <Ionicons name="add" size={36} color={palette.noteAdd} />
           </View>
         )}
-        <Text style={styles.slotLabel} numberOfLines={1}>
+        <Text style={[styles.slotLabel, { color: palette.noteLabel }]} numberOfLines={1}>
           {myNote?.imageUri ? 'โมเมนต์คุณ' : 'เพิ่มรูป'}
         </Text>
       </Pressable>
@@ -128,7 +130,7 @@ export function ActiveNotesBar() {
                 borderWidth={0}
               />
             </View>
-            <Text style={styles.slotLabel} numberOfLines={1}>
+            <Text style={[styles.slotLabel, { color: palette.noteLabel }]} numberOfLines={1}>
               {shortName(note.authorName)}
             </Text>
           </Pressable>
@@ -177,11 +179,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  addGlow: {
-    textShadowColor: 'rgba(255,255,255,0.55)',
-    textShadowRadius: 6,
-    textShadowOffset: { width: 0, height: 0 },
-  },
   editBadge: {
     position: 'absolute',
     bottom: 0,
@@ -193,12 +190,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1.5,
-    borderColor: '#000000',
   },
   slotLabel: {
     fontSize: 12,
     fontWeight: '600',
-    color: 'rgba(255,255,255,0.72)',
     textAlign: 'center',
     width: '100%',
   },

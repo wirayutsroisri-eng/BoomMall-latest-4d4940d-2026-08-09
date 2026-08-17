@@ -22,6 +22,7 @@ import * as Haptics from 'expo-haptics';
 import { Directory, File, Paths } from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library/legacy';
 import { DragDownDismiss } from '@/shared/components/DragDownDismiss';
+import { GalleryPhotoEditor } from '@/shared/media/GalleryPhotoEditor';
 import type { ChatMediaItem } from '@/modules/chat/domain/selectChatImages';
 
 const SCREEN_W = Dimensions.get('window').width;
@@ -46,6 +47,8 @@ type Props = {
   /** WeChat "ส่งต่อไปยัง" — forward current image into another chat */
   forwardTargets?: ChatMediaForwardTarget[];
   onForward?: (conversationId: string, imageUri: string) => void;
+  /** Replace the current photo after markup / crop / filter. */
+  onReplaceImage?: (messageId: string, albumIndex: number, uri: string) => void;
 };
 
 async function saveUriToLibrary(uri: string): Promise<void> {
@@ -73,6 +76,14 @@ async function saveUriToLibrary(uri: string): Promise<void> {
   await MediaLibrary.saveToLibraryAsync(localUri);
 }
 
+async function ensureLocalImageUri(uri: string): Promise<string> {
+  if (!uri.startsWith('http://') && !uri.startsWith('https://')) return uri;
+  const dir = new Directory(Paths.cache, 'chat-edits');
+  if (!dir.exists) dir.create({ intermediates: true, idempotent: true });
+  const downloaded = await File.downloadFileAsync(uri, dir);
+  return downloaded.uri;
+}
+
 function monthLabel(_item: ChatMediaItem): string {
   // Mock chat timestamps are clock-only; group under current month like WeChat
   const d = new Date();
@@ -93,6 +104,7 @@ export function ChatMediaViewer({
   onDelete,
   forwardTargets = [],
   onForward,
+  onReplaceImage,
 }: Props) {
   const insets = useSafeAreaInsets();
   const pagerRef = useRef<FlatList<ChatMediaItem>>(null);
@@ -103,6 +115,8 @@ export function ChatMediaViewer({
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
+  const [editorUri, setEditorUri] = useState<string | null>(null);
+  const [editorBusy, setEditorBusy] = useState(false);
 
   useEffect(() => {
     if (!visible) return;
@@ -110,6 +124,8 @@ export function ChatMediaViewer({
     setIndex(safe);
     setAlbumOpen(false);
     setMoreOpen(false);
+    setEditorUri(null);
+    setEditorBusy(false);
     setSelectMode(false);
     setSelectedIds(new Set());
     setChromeVisible(true);
@@ -248,6 +264,20 @@ export function ChatMediaViewer({
     }
   }, [current]);
 
+  const onEditPress = useCallback(async () => {
+    if (!current || editorBusy) return;
+    setMoreOpen(false);
+    setEditorBusy(true);
+    try {
+      const local = await ensureLocalImageUri(current.uri);
+      setEditorUri(local);
+    } catch {
+      Alert.alert('เปิดแก้ไขไม่ได้', 'ลองอีกครั้ง');
+    } finally {
+      setEditorBusy(false);
+    }
+  }, [current, editorBusy]);
+
   const onForwardTo = useCallback(
     (targetId: string) => {
       if (!current || !onForward) return;
@@ -275,6 +305,10 @@ export function ChatMediaViewer({
       presentationStyle="overFullScreen"
       transparent
       onRequestClose={() => {
+        if (editorUri) {
+          setEditorUri(null);
+          return;
+        }
         if (moreOpen) {
           setMoreOpen(false);
           return;
@@ -292,7 +326,7 @@ export function ChatMediaViewer({
           showDim
           rootInModal={false}
           style={styles.sheet}
-          enabled={!moreOpen && !albumOpen}
+          enabled={!moreOpen && !albumOpen && !editorUri && !editorBusy}
         >
           <View style={styles.black}>
             {/* ——— Fullscreen pager ——— */}
@@ -513,6 +547,11 @@ export function ChatMediaViewer({
                       }}
                     />
                     <MoreAction
+                      icon="color-wand-outline"
+                      label="แก้ไขรูป"
+                      onPress={() => void onEditPress()}
+                    />
+                    <MoreAction
                       icon="download-outline"
                       label="บันทึกรูป"
                       onPress={() => void onSave()}
@@ -534,6 +573,27 @@ export function ChatMediaViewer({
                     <Text style={styles.cancelText}>ยกเลิก</Text>
                   </Pressable>
                 </DragDownDismiss>
+              </View>
+            ) : null}
+
+            {editorBusy ? (
+              <View style={styles.editorBusy} pointerEvents="auto">
+                <ActivityIndicator color="#fff" size="large" />
+              </View>
+            ) : null}
+
+            {editorUri && current ? (
+              <View style={styles.editorLayer}>
+                <GalleryPhotoEditor
+                  uri={editorUri}
+                  initialTool="draw"
+                  onClose={() => setEditorUri(null)}
+                  onDone={(uri) => {
+                    onReplaceImage?.(current.messageId, current.albumIndex ?? 0, uri);
+                    setEditorUri(null);
+                    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                  }}
+                />
               </View>
             ) : null}
           </View>
@@ -802,9 +862,20 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   moreAction: {
-    width: (SCREEN_W - 20 - 16 - 24) / 4,
+    width: (SCREEN_W - 20 - 16 - 32) / 5,
     alignItems: 'center',
     gap: 6,
+  },
+  editorBusy: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 40,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editorLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 50,
   },
   moreActionIcon: {
     width: 54,

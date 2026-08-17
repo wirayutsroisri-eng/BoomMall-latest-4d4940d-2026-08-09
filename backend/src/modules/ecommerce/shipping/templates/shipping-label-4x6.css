@@ -1,0 +1,197 @@
+/* Boom Mall — ใบปะหน้าพัสดุ + ใบจัดของในตัว
+   Thermal sticker 4×6 in / 100×150 mm  (1 แผ่น / 1 พัสดุ รวมออเดอร์ที่อยู่เดียวกัน)
+   ใช้กับ HTML จาก labelTemplate.ts หรือพิมพ์ผ่าน PDFKit engine */
+
+@page {
+  size: 100mm 150mm;
+  margin: 0;
+}
+
+:root {
+  --ink: #0b1f17;
+  --green: #00a86b;
+  --mint: #00d68f;
+  --mist: #e8f7f0;
+  --cod: #f5a524;
+  --muted: #4a5c54;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100mm;
+  height: 150mm;
+  background: #fff;
+  color: var(--ink);
+  font-family: "Noto Sans Thai", "Sarabun", "Helvetica Neue", sans-serif;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.sheet {
+  box-sizing: border-box;
+  width: 100mm;
+  height: 150mm;
+  padding: 3.2mm;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  page-break-after: always;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--ink);
+  color: #fff;
+  border-radius: 2.2mm;
+  padding: 2.2mm 2.6mm;
+}
+
+.mark {
+  width: 9mm;
+  height: 9mm;
+  border-radius: 2mm;
+  background: linear-gradient(160deg, var(--mint), var(--green));
+  color: var(--ink);
+  font-weight: 900;
+  font-size: 5.2mm;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wordmark {
+  font-weight: 900;
+  font-size: 4.1mm;
+  line-height: 1.05;
+}
+
+.wordmark small {
+  display: block;
+  font-size: 2mm;
+  letter-spacing: 0.35mm;
+  color: var(--mint);
+  text-transform: uppercase;
+}
+
+.track-no {
+  font-weight: 900;
+  font-size: 3.3mm;
+  letter-spacing: 0.25mm;
+}
+
+.barcode {
+  width: 100%;
+  height: 12mm;
+  object-fit: contain;
+}
+
+.qr {
+  width: 18mm;
+  height: 18mm;
+}
+
+.badge {
+  margin-top: 2mm;
+  border-radius: 1.4mm;
+  padding: 1.5mm 2.2mm;
+  font-weight: 900;
+  font-size: 2.7mm;
+  text-align: center;
+}
+
+.badge.paid {
+  background: var(--ink);
+  color: var(--mint);
+}
+
+.badge.cod {
+  background: #fff;
+  color: var(--ink);
+  box-shadow: inset 0 0 0 0.45mm var(--ink);
+}
+
+.parties {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2mm;
+  margin-top: 2.2mm;
+}
+
+.box {
+  border: 0.35mm solid var(--ink);
+  border-radius: 1.6mm;
+  padding: 1.6mm 1.8mm;
+}
+
+.box.to {
+  background: var(--mist);
+}
+
+.who {
+  font-size: 3mm;
+  font-weight: 900;
+}
+
+table.slip {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1.4mm;
+  font-size: 1.85mm;
+}
+
+table.slip th {
+  background: var(--ink);
+  color: #fff;
+  padding: 0.8mm 0.5mm;
+  text-align: left;
+}
+
+table.slip td {
+  padding: 0.65mm 0.45mm;
+  border-bottom: 0.28mm solid var(--ink);
+  vertical-align: middle;
+}
+
+table.slip .chk { width: 4.2mm; }
+table.slip .ico { width: 4.6mm; }
+table.slip .qty { width: 8mm; text-align: right; font-weight: 900; }
+
+.box-tick {
+  width: 2.8mm;
+  height: 2.8mm;
+  border: 0.32mm solid var(--ink);
+  display: inline-block;
+}
+
+.mark-box {
+  width: 3.4mm;
+  height: 3.4mm;
+  border: 0.28mm solid var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  font-size: 2mm;
+}
+
+.totals {
+  display: flex;
+  justify-content: space-between;
+  background: var(--ink);
+  color: #fff;
+  font-weight: 900;
+  font-size: 2.2mm;
+  padding: 1.3mm 1.8mm;
+}
+
+.foot {
+  margin-top: auto;
+  text-align: center;
+  font-weight: 800;
+  font-size: 2.1mm;
+  color: var(--green);
+}

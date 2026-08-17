@@ -1,4 +1,5 @@
 import { router, type Href } from 'expo-router';
+import { useFeedStore } from '@/modules/feed/state/feed-store';
 
 /**
  * Prevents double-tap from stacking screens (esp. fullScreenModal /listen).
@@ -125,12 +126,47 @@ export function openCreateHub(): boolean {
   return safePush('/create-hub');
 }
 
+/** Tab กล้อง — เข้าสตูดิโอถ่ายทันที ไม่ถามประเภทโพสต์ก่อน */
+export function openCreateCamera(): boolean {
+  if (isRouteMounted('create-modal')) return false;
+  return safePush('/create-modal');
+}
+
 export function openBoardCreate(side: 'demand' | 'supply', locked = true): boolean {
   if (isRouteMounted('board-create')) return false;
   return safePush({
     pathname: '/board-create',
     params: { side, locked: locked ? '1' : '0' },
   });
+}
+
+/** แท็บกล้อง: หน้าหางาน = รับงาน, ที่อื่น = กล้อง */
+export function openCreateFromTab(): boolean {
+  if (useFeedStore.getState().tab === 'board') {
+    return openBoardCreate('supply');
+  }
+  return openCreateCamera();
+}
+
+/**
+ * Facebook Messenger-style: leave the current screen and land in the Chat tab thread.
+ * Use `navigate` so product / profile stacks switch to the Chat tab instead of nesting.
+ */
+export function jumpToChatThread(
+  conversationId: string,
+  extra?: Record<string, string>,
+): boolean {
+  if (!conversationId) return false;
+  router.navigate({
+    pathname: '/(tabs)/chat/[conversationId]',
+    params: { conversationId, ...extra },
+  });
+  return true;
+}
+
+export function jumpToChatInbox(): boolean {
+  router.navigate('/(tabs)/chat');
+  return true;
 }
 
 /** @internal test helper */

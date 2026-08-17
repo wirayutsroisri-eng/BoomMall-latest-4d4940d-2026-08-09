@@ -1,6 +1,1 @@
-import React from 'react';
-import { CreatePostScreen } from '@/modules/create/ui/CreatePostScreen';
-
-export default function CreateDetailsRoute() {
-  return <CreatePostScreen />;
-}
+export { SellProductScreen as default } from '@/modules/store/ui/SellProductScreen';

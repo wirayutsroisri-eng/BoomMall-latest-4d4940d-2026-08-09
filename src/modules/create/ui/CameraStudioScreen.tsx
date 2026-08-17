@@ -20,7 +20,9 @@ import {
   type PickedGalleryItem,
 } from '@/shared/media/MediaGalleryPicker';
 import { openListenScreenNow } from '@/shared/navigation/safeNavigate';
-import { ENABLE_SIMULATED_CAMERA_TOOLS } from '@/shared/compliance/appStoreGates';
+import {
+  ENABLE_SIMULATED_CAMERA_TOOLS,
+} from '@/shared/compliance/appStoreGates';
 import { colors } from '@/shared/theme/colors';
 
 type CaptureMode = '10m' | '60s' | '15s' | 'photo' | 'text';
@@ -39,22 +41,31 @@ const RIGHT_TOOLS: Array<{
   label: string;
 }> = [
   { key: 'flip', icon: 'camera-reverse-outline', label: 'พลิก' },
-  { key: 'speed', icon: 'flash-outline', label: 'ความเร็ว' },
-  { key: 'timer', icon: 'timer-outline', label: 'ตัวจับเวลา' },
   { key: 'grid', icon: 'grid-outline', label: 'กรอบ' },
-  { key: 'beauty', icon: 'sparkles-outline', label: 'รีทัช' },
-  { key: 'filters', icon: 'color-filter-outline', label: 'ฟิลเตอร์' },
+  ...(ENABLE_SIMULATED_CAMERA_TOOLS
+    ? ([
+        { key: 'speed', icon: 'flash-outline', label: 'ความเร็ว' },
+        { key: 'timer', icon: 'timer-outline', label: 'ตัวจับเวลา' },
+        { key: 'beauty', icon: 'sparkles-outline', label: 'รีทัช' },
+        { key: 'filters', icon: 'color-filter-outline', label: 'ฟิลเตอร์' },
+      ] as const)
+    : []),
 ];
 
-const EFFECT_THUMBS = [
-  'https://picsum.photos/seed/fx-a/120/120',
-  'https://picsum.photos/seed/fx-b/120/120',
-  'https://picsum.photos/seed/fx-c/120/120',
+type FilterKey = 'none' | 'vivid' | 'warm' | 'cool' | 'mono' | 'fade';
+
+const FILTERS: Array<{ key: FilterKey; label: string; overlay: string | null }> = [
+  { key: 'none', label: 'ต้นฉบับ', overlay: null },
+  { key: 'vivid', label: 'สดใส', overlay: 'rgba(255,70,90,0.14)' },
+  { key: 'warm', label: 'อุ่น', overlay: 'rgba(255,150,50,0.2)' },
+  { key: 'cool', label: 'เย็น', overlay: 'rgba(60,140,255,0.18)' },
+  { key: 'mono', label: 'ขาวดำ', overlay: 'rgba(0,0,0,0.4)' },
+  { key: 'fade', label: 'ฟุ้ง', overlay: 'rgba(255,255,255,0.2)' },
 ];
 
 /**
- * TikTok-style camera — content only.
- * Capture / gallery → /create-preview (edit) → /create-publish
+ * Camera studio — content capture.
+ * Left: effects · Center: shutter · Right: gallery (not TikTok order)
  */
 export function CameraStudioScreen() {
   const insets = useSafeAreaInsets();
@@ -62,18 +73,20 @@ export function CameraStudioScreen() {
   const [mode, setMode] = useState<CaptureMode>('15s');
   const [facing, setFacing] = useState<'back' | 'front'>('back');
   const [showGrid, setShowGrid] = useState(true);
-  const [bottomTab, setBottomTab] = useState<'camera' | 'creative' | 'live'>('camera');
   const [lastThumb, setLastThumb] = useState<string | null>(null);
   const [galleryOpen, setGalleryOpen] = useState(false);
+  const [effectsOpen, setEffectsOpen] = useState(false);
+  const [filter, setFilter] = useState<FilterKey>('none');
   const modeScrollRef = useRef<ScrollView>(null);
 
   const isPhoto = mode === 'photo' || mode === 'text';
+  const activeFilter = FILTERS.find((f) => f.key === filter) ?? FILTERS[0];
 
   const goPreview = (uri: string, type: 'image' | 'video') => {
     setLastThumb(uri);
     router.push({
       pathname: '/create-preview',
-      params: { uri, type },
+      params: { uri, type, filter },
     });
   };
 
@@ -85,6 +98,7 @@ export function CameraStudioScreen() {
           uri: 'https://picsum.photos/seed/boom-text-canvas/1080/1920',
           type: 'image',
           textMode: '1',
+          filter,
         },
       });
       return;
@@ -139,13 +153,20 @@ export function CameraStudioScreen() {
       'เครื่องมือกล้อง',
       ENABLE_SIMULATED_CAMERA_TOOLS
         ? 'พร้อมใช้ในโหมดถ่ายจริง — จำลองการตั้งค่าแล้ว'
-        : 'เครื่องมือนี้ยังไม่พร้อมในเวอร์ชันนี้ — ใช้เลือกจากคลังภาพด้านล่างได้',
+        : 'เครื่องมือนี้ยังไม่พร้อมในเวอร์ชันนี้ — เลือกภาพจากแกลเลอรีด้านขวาได้',
     );
   };
 
   return (
     <View style={styles.root}>
       <LinearGradient colors={['#2a2218', '#12100e', '#050505']} style={StyleSheet.absoluteFill} />
+
+      {activeFilter.overlay ? (
+        <View
+          pointerEvents="none"
+          style={[styles.filterWash, { backgroundColor: activeFilter.overlay }]}
+        />
+      ) : null}
 
       {showGrid ? (
         <>
@@ -215,57 +236,74 @@ export function CameraStudioScreen() {
           })}
         </ScrollView>
 
+        {effectsOpen ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.fxRow}
+          >
+            {FILTERS.map((f) => {
+              const active = filter === f.key;
+              return (
+                <Pressable
+                  key={f.key}
+                  style={styles.fxChip}
+                  onPress={() => {
+                    setFilter(f.key);
+                    void Haptics.selectionAsync();
+                  }}
+                >
+                  <View
+                    style={[
+                      styles.fxSwatch,
+                      { backgroundColor: f.overlay ?? 'rgba(255,255,255,0.2)' },
+                      active && styles.fxSwatchActive,
+                    ]}
+                  />
+                  <Text style={[styles.fxLabel, active && styles.fxLabelActive]}>{f.label}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        ) : null}
+
         <View style={styles.shutterRow}>
-          <Pressable style={styles.galleryBtn} onPress={openLibrary}>
-            {lastThumb ? (
-              <Image source={{ uri: lastThumb }} style={styles.galleryImg} />
-            ) : (
-              <View style={styles.galleryEmpty}>
-                <Ionicons name="images" size={18} color="#fff" />
-              </View>
-            )}
+          <Pressable
+            style={styles.sideBtn}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              setEffectsOpen((v) => !v);
+            }}
+            accessibilityLabel="เอฟเฟกต์"
+          >
+            <View style={[styles.sideIconWrap, effectsOpen && styles.sideIconWrapOn]}>
+              <Ionicons name="sparkles" size={22} color="#fff" />
+            </View>
+            <Text style={styles.sideCaption}>เอฟเฟกต์</Text>
           </Pressable>
 
-          <Image source={{ uri: EFFECT_THUMBS[0] }} style={styles.fxThumb} />
-
-          <Pressable onPress={openCamera} hitSlop={8}>
+          <Pressable onPress={openCamera} hitSlop={8} accessibilityLabel="ถ่าย">
             <View style={[styles.shutterRing, isPhoto && styles.shutterRingPhoto]}>
               <View style={[styles.shutterCore, isPhoto && styles.shutterCorePhoto]} />
             </View>
           </Pressable>
 
-          <Image source={{ uri: EFFECT_THUMBS[1] }} style={styles.fxThumb} />
-          <Image source={{ uri: EFFECT_THUMBS[2] }} style={styles.fxThumb} />
-        </View>
-
-        <View style={styles.bottomTabs}>
-          {(
-            [
-              { key: 'camera' as const, label: 'กล้อง' },
-              { key: 'creative' as const, label: 'สร้างสรรค์' },
-              { key: 'live' as const, label: 'LIVE' },
-            ]
-          ).map((t) => {
-            const active = bottomTab === t.key;
-            return (
-              <Pressable
-                key={t.key}
-                onPress={() => {
-                  setBottomTab(t.key);
-                  if (t.key === 'live') {
-                    Alert.alert('LIVE', 'เริ่มไลฟ์สด BoomMall');
-                  }
-                  if (t.key === 'creative') {
-                    void openLibrary();
-                  }
-                }}
-              >
-                <Text style={[styles.bottomTabText, active && styles.bottomTabTextActive]}>
-                  {t.label}
-                </Text>
-              </Pressable>
-            );
-          })}
+          <Pressable
+            style={styles.sideBtn}
+            onPress={openLibrary}
+            accessibilityLabel="แกลเลอรี"
+          >
+            <View style={styles.galleryBtn}>
+              {lastThumb ? (
+                <Image source={{ uri: lastThumb }} style={styles.galleryImg} />
+              ) : (
+                <View style={styles.galleryEmpty}>
+                  <Ionicons name="images" size={22} color="#fff" />
+                </View>
+              )}
+            </View>
+            <Text style={styles.sideCaption}>แกลเลอรี</Text>
+          </Pressable>
         </View>
       </View>
 
@@ -369,15 +407,38 @@ const styles = StyleSheet.create({
   },
   shutterRow: {
     flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    paddingHorizontal: 28,
+  },
+  sideBtn: {
+    width: 72,
+    alignItems: 'center',
+    gap: 6,
+  },
+  sideIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0,0,0,0.35)',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 14,
-    paddingHorizontal: 12,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
+  sideIconWrapOn: {
+    borderColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.18)',
+  },
+  sideCaption: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
   },
   galleryBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
+    width: 48,
+    height: 48,
+    borderRadius: 12,
     overflow: 'hidden',
     borderWidth: 1.5,
     borderColor: 'rgba(255,255,255,0.55)',
@@ -389,12 +450,37 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  fxThumb: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  fxRow: {
+    paddingHorizontal: 16,
+    gap: 12,
+    paddingBottom: 4,
+  },
+  fxChip: {
+    alignItems: 'center',
+    gap: 4,
+    width: 56,
+  },
+  fxSwatch: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.35)',
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+  fxSwatchActive: {
+    borderColor: '#fff',
+    borderWidth: 3,
+  },
+  fxLabel: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  fxLabelActive: {
+    color: '#fff',
+  },
+  filterWash: {
+    ...StyleSheet.absoluteFillObject,
   },
   shutterRing: {
     width: 78,
@@ -417,21 +503,5 @@ const styles = StyleSheet.create({
   },
   shutterCorePhoto: {
     backgroundColor: '#fff',
-  },
-  bottomTabs: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 28,
-    paddingTop: 4,
-  },
-  bottomTabText: {
-    color: 'rgba(255,255,255,0.55)',
-    fontWeight: '700',
-    fontSize: 14,
-  },
-  bottomTabTextActive: {
-    color: '#fff',
-    fontWeight: '900',
-    fontSize: 16,
   },
 });

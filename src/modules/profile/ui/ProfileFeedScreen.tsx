@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
   FlatList,
   Pressable,
   StyleSheet,
@@ -18,16 +17,25 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { useSharedValue } from 'react-native-reanimated';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
+import { useFeedChromeStore } from '@/modules/feed/state/feed-chrome-store';
 import { useCallStore } from '@/modules/chat/state/call-store';
 import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
 import { FeedReelCard } from '@/modules/feed/ui/FeedReelCard';
+import { FeedLongPressSheet } from '@/modules/feed/ui/FeedLongPressSheet';
+import { FeedShareSheet } from '@/modules/feed/ui/FeedShareSheet';
 import { ProductBottomSheet } from '@/modules/feed/ui/ProductBottomSheet';
 import { CommentsBottomSheet } from '@/modules/feed/ui/CommentsBottomSheet';
 import { normalizeAuthorHandle } from '@/modules/feed/domain/selectFeedByAuthor';
 import { buildOwnerFeedItems } from '@/modules/profile/data/buildOwnerFeedItems';
 import type { FeedItem } from '@/modules/feed/domain/types';
 import { colors } from '@/shared/theme/colors';
-import { ENABLE_CALLS, ENABLE_FEED_COIN_REACTION } from '@/shared/compliance/appStoreGates';
+import { ENABLE_CALLS } from '@/shared/compliance/appStoreGates';
+import { ReportBlockSheet } from '@/modules/safety/ui/ReportBlockSheet';
+import { useModerationStore } from '@/modules/safety/state/moderation-store';
+import { useInventoryStore } from '@/modules/commerce/state/inventory-store';
+import { resolveShopMaster } from '@/modules/shop/domain/product-display';
+import { syncFeedInterested, syncFeedLike, syncFeedNotInterested, syncFeedShare } from '@/modules/feed/data/feedEngageApi';
+import { recordActivity } from '@/modules/account/state/activity-store';
 
 type Props = {
   handle: string;
@@ -41,8 +49,9 @@ export function ProfileFeedScreen({ handle, startId }: Props) {
   const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
   const storeItems = useFeedStore((s) => s.items);
-  const tipClip = useFeedStore((s) => s.tipClip);
+  const toggleLike = useFeedStore((s) => s.toggleLike);
   const toggleSave = useFeedStore((s) => s.toggleSave);
+  const bumpShare = useFeedStore((s) => s.bumpShare);
   const openComments = useFeedStore((s) => s.openComments);
   const openProductSheet = useFeedStore((s) => s.openProductSheet);
   const activeProductId = useFeedStore((s) => s.activeProductId);
@@ -50,16 +59,24 @@ export function ProfileFeedScreen({ handle, startId }: Props) {
   const startCall = useCallStore((s) => s.startCall);
   const setActive = useCallStore((s) => s.setActive);
   const profile = useLoyaltyStore((s) => s.profile);
+  const hideContent = useModerationStore((s) => s.hideContent);
+  const hiddenContentIds = useModerationStore((s) => s.hiddenContentIds);
+  const removedContentIds = useModerationStore((s) => s.removedContentIds);
+  const chromeHidden = useFeedChromeStore((s) => s.chromeHidden);
+  const autoAdvance = useFeedChromeStore((s) => s.autoAdvance);
+  const playbackRate = useFeedChromeStore((s) => s.playbackRate);
+  const masters = useInventoryStore((s) => s.masters);
 
   const myHandle = normalizeAuthorHandle(profile.handle);
   const ownerKey = normalizeAuthorHandle(handle);
   const isSelf = ownerKey === myHandle;
 
   const items = useMemo(() => {
+    const suppressed = new Set([...hiddenContentIds, ...removedContentIds]);
     const built = buildOwnerFeedItems(ownerKey, storeItems, {
       isSelf,
       displayName: isSelf ? profile.displayName : undefined,
-    });
+    }).filter((item) => !suppressed.has(item.id));
     if (!isSelf || !profile.displayName.trim()) return built;
     /** ให้ชื่อบนคลิปตรงกับชื่อโปรไฟล์เสมอ */
     return built.map((item) => ({
@@ -67,7 +84,7 @@ export function ProfileFeedScreen({ handle, startId }: Props) {
       author: profile.displayName,
       authorHandle: profile.handle.startsWith('@') ? profile.handle : `@${ownerKey}`,
     }));
-  }, [ownerKey, storeItems, isSelf, profile.displayName, profile.handle]);
+  }, [ownerKey, storeItems, isSelf, profile.displayName, profile.handle, hiddenContentIds, removedContentIds]);
 
   const initialIndex = useMemo(() => {
     if (!startId) return 0;
@@ -77,6 +94,9 @@ export function ProfileFeedScreen({ handle, startId }: Props) {
 
   const [viewportHeight, setViewportHeight] = useState(0);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
+  const [reportTarget, setReportTarget] = useState<FeedItem | null>(null);
+  const [menuItem, setMenuItem] = useState<FeedItem | null>(null);
+  const [shareItem, setShareItem] = useState<FeedItem | null>(null);
   const listRef = useRef<FlatList<FeedItem>>(null);
   const sheetRef = useRef<BottomSheetModal>(null);
   const commentsSheetRef = useRef<BottomSheetModal>(null);
@@ -97,6 +117,23 @@ export function ProfileFeedScreen({ handle, startId }: Props) {
   useEffect(() => {
     setActiveItemId(items[initialIndex]?.id ?? items[0]?.id ?? null);
   }, [items, initialIndex]);
+
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  useEffect(() => {
+    if (!activeItemId) return;
+    const timer = setTimeout(() => {
+      const item = itemsRef.current.find((i) => i.id === activeItemId);
+      if (!item) return;
+      recordActivity({
+        category: 'watch',
+        title: item.caption?.trim() || item.product?.name || 'คลิป',
+        subtitle: item.author,
+        targetId: item.id,
+      });
+    }, 2800);
+    return () => clearTimeout(timer);
+  }, [activeItemId]);
 
   useEffect(() => {
     if (viewportHeight <= 0 || items.length === 0) return;
@@ -128,15 +165,25 @@ export function ProfileFeedScreen({ handle, startId }: Props) {
     [openProductSheet],
   );
 
-  /** Empty feed coin — reaction only, no wallet value */
-  const tipOneCoin = useCallback(
+  const likeClip = useCallback(
     (item: FeedItem) => {
-      if (!ENABLE_FEED_COIN_REACTION) return;
-      tipClip(item.id, 1);
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      const nextLiked = !item.liked;
+      toggleLike(item.id);
+      void syncFeedLike(item.id, nextLiked);
     },
-    [tipClip],
+    [toggleLike],
   );
+
+  useEffect(() => {
+    if (!autoAdvance || !activeItemId || viewportHeight <= 0) return;
+    const idx = items.findIndex((i) => i.id === activeItemId);
+    if (idx < 0 || idx >= items.length - 1) return;
+    const ms = Math.max(2800, Math.round(15000 / playbackRate));
+    const t = setTimeout(() => {
+      listRef.current?.scrollToIndex({ index: idx + 1, animated: true });
+    }, ms);
+    return () => clearTimeout(t);
+  }, [autoAdvance, playbackRate, activeItemId, items, viewportHeight]);
 
   const onLayout = (e: LayoutChangeEvent) => {
     const h = e.nativeEvent.layout.height;
@@ -159,10 +206,26 @@ export function ProfileFeedScreen({ handle, startId }: Props) {
         >
           <Ionicons name="chevron-back" size={26} color="#fff" />
         </Pressable>
-        <Text style={styles.topTitle} numberOfLines={1}>
-          {title}
-        </Text>
-        <View style={styles.backBtn} />
+        {!chromeHidden ? (
+          <Text style={styles.topTitle} numberOfLines={1}>
+            {title}
+          </Text>
+        ) : (
+          <View style={styles.topTitle} />
+        )}
+        <Pressable
+          style={styles.backBtn}
+          onPress={() => {
+            const item = items.find((i) => i.id === activeItemId) ?? items[0];
+            if (!item) return;
+            void Haptics.selectionAsync();
+            setMenuItem(item);
+          }}
+          hitSlop={10}
+          accessibilityLabel="ตัวเลือกเพิ่มเติม"
+        >
+          <Ionicons name="ellipsis-horizontal" size={24} color="#fff" />
+        </Pressable>
       </View>
 
       <View style={styles.feedClip} onLayout={onLayout}>
@@ -193,15 +256,21 @@ export function ProfileFeedScreen({ handle, startId }: Props) {
                 item={item}
                 height={viewportHeight}
                 isActive={item.id === activeItemId}
-                onTip={ENABLE_FEED_COIN_REACTION ? () => tipOneCoin(item) : undefined}
                 onComment={() => openCommentsSheet(item.id)}
-                onVaultSave={() => toggleSave(item.id)}
-                onShare={() => Alert.alert('แชร์', `แชร์คลิปของ ${item.author}`)}
+                onShare={() => setShareItem(item)}
+                onLike={() => likeClip(item)}
+                liked={item.liked}
+                likes={item.likes}
+                onLongPressMenu={() => setMenuItem(item)}
                 onAvatar={() => {
                   if (isSelf) router.replace('/(tabs)/profile');
                   else router.replace(`/creator/${encodeURIComponent(ownerKey)}`);
                 }}
-                onProduct={() => openProduct(item.product.id)}
+                onProduct={
+                  resolveShopMaster(item.product, masters)
+                    ? () => openProduct(item.product.id)
+                    : undefined
+                }
                 onCall={
                   ENABLE_CALLS
                     ? () => {
@@ -225,22 +294,69 @@ export function ProfileFeedScreen({ handle, startId }: Props) {
         )}
       </View>
 
-      <ProductBottomSheet
-        ref={sheetRef}
-        product={activeProduct}
-        onCheckout={(variant, qty, total) => {
-          sheetRef.current?.dismiss();
-          Alert.alert(
-            'ยังไม่พร้อมชำระเงิน',
-            `${variant.label} × ${qty}\nยอดโดยประมาณ ฿${total.toLocaleString('th-TH')}\n\nยังไม่มีการเรียกเก็บเงิน — รอเชื่อม Payment Gateway`,
-          );
-        }}
-      />
+      <ProductBottomSheet ref={sheetRef} product={activeProduct} />
 
       <CommentsBottomSheet
         ref={commentsSheetRef}
         feedId={activeCommentsFeedId}
         commentCount={activeCommentsItem?.comments ?? 0}
+      />
+
+      <FeedLongPressSheet
+        visible={Boolean(menuItem)}
+        item={menuItem}
+        canReport={Boolean(menuItem) && !isSelf}
+        saved={Boolean(menuItem?.saved)}
+        onClose={() => setMenuItem(null)}
+        onInterested={() => {
+          if (!menuItem) return;
+          void syncFeedInterested(menuItem.id);
+          setMenuItem(null);
+        }}
+        onNotInterested={() => {
+          if (!menuItem) return;
+          hideContent(menuItem.id);
+          void syncFeedNotInterested(menuItem.id);
+          setMenuItem(null);
+        }}
+        onSave={() => {
+          if (!menuItem) return;
+          toggleSave(menuItem.id);
+          setMenuItem(null);
+        }}
+        onReport={() => {
+          const target = menuItem;
+          setMenuItem(null);
+          if (!target || isSelf) return;
+          setTimeout(() => setReportTarget(target), 280);
+        }}
+        onShare={() => {
+          const target = menuItem;
+          setMenuItem(null);
+          if (!target) return;
+          setTimeout(() => setShareItem(target), 280);
+        }}
+      />
+
+      <FeedShareSheet
+        visible={Boolean(shareItem)}
+        item={shareItem}
+        onClose={() => setShareItem(null)}
+        onShared={(item) => {
+          bumpShare(item.id);
+          void syncFeedShare(item.id);
+        }}
+      />
+
+      <ReportBlockSheet
+        visible={Boolean(reportTarget)}
+        onClose={() => setReportTarget(null)}
+        kind="content"
+        targetId={reportTarget?.id ?? ''}
+        targetLabel={
+          reportTarget ? `${reportTarget.author} · ${reportTarget.caption.slice(0, 40)}` : undefined
+        }
+        blockUserId={reportTarget?.authorHandle.replace(/^@/, '')}
       />
     </View>
   );

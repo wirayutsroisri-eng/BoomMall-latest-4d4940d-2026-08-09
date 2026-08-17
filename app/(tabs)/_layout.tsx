@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Tabs, router } from 'expo-router';
-import { MainTabBar } from '@/shared/components/MainTabBar';
-import { openCreateHub } from '@/shared/navigation/safeNavigate';
+import { Tabs, router, usePathname } from 'expo-router';
+import { MainTabBar, isChatWindow } from '@/shared/components/MainTabBar';
+import { openCreateFromTab } from '@/shared/navigation/safeNavigate';
 import { useAuthStore } from '@/modules/auth/state/auth-store';
 import { SocialLoginGate } from '@/modules/auth/ui/SocialLoginGate';
 
@@ -15,6 +15,7 @@ export default function TabsLayout() {
   const hydrated = useAuthStore((s) => s.hydrated);
   const [loginOpen, setLoginOpen] = useState(false);
   const [pending, setPending] = useState<PendingAction>(null);
+  const hideTabBar = isChatWindow(usePathname());
 
   const requireAuth = (action: Exclude<PendingAction, null>, proceed?: () => void) => {
     if (!hydrated) return;
@@ -29,9 +30,10 @@ export default function TabsLayout() {
   return (
     <>
       <Tabs
-        tabBar={(props) => <MainTabBar {...props} />}
+        tabBar={(props) => (hideTabBar ? null : <MainTabBar {...props} />)}
         screenOptions={{
           headerShown: false,
+          tabBarStyle: hideTabBar ? { display: 'none', height: 0 } : undefined,
         }}
       >
         <Tabs.Screen
@@ -62,7 +64,7 @@ export default function TabsLayout() {
           listeners={{
             tabPress: (e) => {
               e.preventDefault();
-              requireAuth('create', () => openCreateHub());
+              requireAuth('create', () => openCreateFromTab());
             },
           }}
         />
@@ -90,7 +92,7 @@ export default function TabsLayout() {
           setLoginOpen(false);
           const next = pending;
           setPending(null);
-          if (next === 'create') openCreateHub();
+          if (next === 'create') openCreateFromTab();
           else if (next === 'chat') router.push('/(tabs)/chat');
           else if (next === 'shop') router.push('/(tabs)/shop');
           else if (next === 'feed') router.push('/(tabs)');

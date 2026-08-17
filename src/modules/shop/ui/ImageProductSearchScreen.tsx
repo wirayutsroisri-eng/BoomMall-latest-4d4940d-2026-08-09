@@ -25,9 +25,9 @@ import Animated, {
 } from 'react-native-reanimated';
 import { masterContentImage } from '@/modules/commerce/data/catalog';
 import { useInventoryStore } from '@/modules/commerce/state/inventory-store';
-import { useCartStore } from '@/modules/commerce/state/cart-store';
-import type { MasterSku, WarehouseId } from '@/modules/commerce/domain/types';
+import type { MasterSku } from '@/modules/commerce/domain/types';
 import { colors } from '@/shared/theme/colors';
+import { ENABLE_SIMULATED_CAMERA_TOOLS } from '@/shared/compliance/appStoreGates';
 
 const FRAME = Math.min(Dimensions.get('window').width - 72, 280);
 
@@ -99,8 +99,6 @@ export function ImageProductSearchScreen() {
   const insets = useSafeAreaInsets();
   const masters = useInventoryStore((s) => s.masters);
   const variants = useInventoryStore((s) => s.variants);
-  const listStockRows = useInventoryStore((s) => s.listStockRows);
-  const addToCart = useCartStore((s) => s.addToCart);
 
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -167,7 +165,7 @@ export function ImageProductSearchScreen() {
     if (!permission.granted) {
       Alert.alert(
         'ต้องการสิทธิ์กล้อง',
-        'บน Simulator อาจไม่มีกล้อง — ใช้ "เลือกรูป" หรือ "จำลองสแกน" แทนได้',
+        'อนุญาตกล้องเพื่อถ่ายรูปสินค้า หรือใช้ "เลือกรูป" จากคลังภาพ',
       );
       return;
     }
@@ -185,22 +183,8 @@ export function ImageProductSearchScreen() {
     analyze(demoUri);
   };
 
-  const addProduct = (master: MasterSku) => {
-    const vs = variantsByMaster.get(master.id) ?? [];
-    if (!vs.length) {
-      Alert.alert('ยังไม่มี SKU', 'สินค้านี้ยังไม่มีตัวเลือกให้สั่ง');
-      return;
-    }
-    const v = vs[0];
-    const rows = listStockRows(v.id);
-    const preferred = (rows[0]?.warehouseId ?? 'WH-CTI-MAIN') as WarehouseId;
-    const res = addToCart({
-      variantId: v.id,
-      warehouseId: preferred,
-      qty: v.moq ?? 1,
-      unitPrice: v.price,
-    });
-    Alert.alert(res.ok ? 'ใส่ตะกร้าแล้ว' : 'ไม่สำเร็จ', res.message);
+  const openProduct = (master: MasterSku) => {
+    router.push({ pathname: '/shop/product/[id]', params: { id: master.id } });
   };
 
   return (
@@ -267,12 +251,14 @@ export function ImageProductSearchScreen() {
               <Text style={styles.actionBtnText}>สแกนรูป</Text>
             </Pressable>
 
-            <Pressable style={[styles.actionBtn, styles.actionBtnPrimary]} onPress={simulateScan}>
-              <View style={[styles.actionIcon, styles.actionIconPrimary]}>
-                <Ionicons name="scan-outline" size={22} color={colors.brand.ink} />
-              </View>
-              <Text style={[styles.actionBtnText, styles.actionBtnTextPrimary]}>จำลองสแกน</Text>
-            </Pressable>
+            {ENABLE_SIMULATED_CAMERA_TOOLS ? (
+              <Pressable style={[styles.actionBtn, styles.actionBtnPrimary]} onPress={simulateScan}>
+                <View style={[styles.actionIcon, styles.actionIconPrimary]}>
+                  <Ionicons name="scan-outline" size={22} color={colors.brand.ink} />
+                </View>
+                <Text style={[styles.actionBtnText, styles.actionBtnTextPrimary]}>จำลองสแกน</Text>
+              </Pressable>
+            ) : null}
           </View>
         </View>
 
@@ -305,7 +291,7 @@ export function ImageProductSearchScreen() {
                 <Pressable
                   key={row.master.id}
                   style={styles.resultCard}
-                  onPress={() => addProduct(row.master)}
+                  onPress={() => openProduct(row.master)}
                 >
                   <Image
                     source={{

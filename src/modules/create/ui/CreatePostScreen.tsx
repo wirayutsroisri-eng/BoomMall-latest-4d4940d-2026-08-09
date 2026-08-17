@@ -2,22 +2,23 @@ import React, { useState } from 'react';
 import {
   Alert,
   Image,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { useInventoryStore } from '@/modules/commerce/state/inventory-store';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
 import { useWarehouseStore } from '@/modules/warehouse/state/warehouse-store';
-import type { ClonePrefill } from '@/modules/commerce/domain/stock-core';
+import type { ClonePrefill, VariantInput } from '@/modules/commerce/domain/stock-core';
 import {
   channelToCondition,
   conditionHint,
@@ -30,40 +31,43 @@ import {
   MediaGalleryPicker,
   type PickedGalleryItem,
 } from '@/shared/media/MediaGalleryPicker';
+import { FormTextInput } from '@/shared/components/FormTextInput';
 import { colors } from '@/shared/theme/colors';
-
-/** Paste clipboard into form fields (works when iOS long-press paste is flaky). */
-async function pasteFromClipboard(
-  onChange: (v: string) => void,
-  opts?: { appendTo?: string; numeric?: boolean },
-) {
-  try {
-    const raw = await Clipboard.getStringAsync();
-    if (!raw?.trim()) {
-      Alert.alert('คลิปบอร์ดว่าง', 'คัดลอกข้อความก่อน แล้วกดวางอีกครั้ง');
-      return;
-    }
-    let text = raw;
-    if (opts?.numeric) {
-      text = raw.replace(/[^\d.]/g, '');
-      if (!text) {
-        Alert.alert('วางไม่ได้', 'ในคลิปบอร์ดไม่มีตัวเลข');
-        return;
-      }
-      onChange(text);
-    } else if (opts?.appendTo && opts.appendTo.length > 0) {
-      onChange(`${opts.appendTo}${opts.appendTo.endsWith('\n') ? '' : '\n'}${text}`);
-    } else {
-      onChange(text);
-    }
-    void Haptics.selectionAsync();
-  } catch {
-    Alert.alert('วางไม่สำเร็จ', 'ลองคัดลอกใหม่แล้วกดวางอีกครั้ง');
-  }
-}
 
 const MAX_PRODUCT_IMAGES = 6;
 const MY_WAREHOUSE_ID = 'wh-boom-ev';
+
+type GalleryPurpose = 'post' | 'sell';
+
+type DraftVariant = {
+  id: string;
+  label: string;
+  price: string;
+  stock: string;
+  imageUri: string | null;
+};
+
+function newDraftVariant(seed?: Partial<DraftVariant>): DraftVariant {
+  return {
+    id: `dv-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    label: '',
+    price: '',
+    stock: '1',
+    imageUri: null,
+    ...seed,
+  };
+}
+
+/** Keep digits (and one decimal) after paste / typing — do not use input type=number (breaks paste on web). */
+function sanitizeDecimal(raw: string) {
+  const cleaned = raw.replace(/[^\d.]/g, '');
+  const [head, ...rest] = cleaned.split('.');
+  return rest.length ? `${head}.${rest.join('')}` : head;
+}
+
+function sanitizeInt(raw: string) {
+  return raw.replace(/[^\d]/g, '');
+}
 
 export function CreatePostScreen() {
   const insets = useSafeAreaInsets();
@@ -94,8 +98,9 @@ export function CreatePostScreen() {
       : undefined;
 
   /** Hub / store / clone → sell-only (ไม่ปนคลิปหรือเว็บบอร์ด) */
-  const sellOnly = params.mode === 'sell' || Boolean(prefill);
-  const [mode, setMode] = useState<'post' | 'sell'>(() => (sellOnly ? 'sell' : 'post'));
+  const modeParam = Array.isArray(params.mode) ? params.mode[0] : params.mode;
+  const sellOnly = modeParam !== 'post';
+  const mode: 'post' | 'sell' = sellOnly ? 'sell' : 'post';
   const [caption, setCaption] = useState('');
   const [postPrice, setPostPrice] = useState('1990');
   const [postCondition, setPostCondition] = useState<ProductCondition>('new');
@@ -108,7 +113,7 @@ export function CreatePostScreen() {
 
   const [sellImages, setSellImages] = useState<string[]>(() => prefill?.imageUris ?? []);
   const [galleryOpen, setGalleryOpen] = useState(false);
-  const [galleryPurpose, setGalleryPurpose] = useState<'post' | 'sell'>('sell');
+  const [galleryPurpose, setGalleryPurpose] = useState<GalleryPurpose>('sell');
   const [title, setTitle] = useState(() => prefill?.title ?? '');
   const [description, setDescription] = useState(() => prefill?.description ?? '');
   const [masterSku, setMasterSku] = useState(() =>
@@ -121,6 +126,24 @@ export function CreatePostScreen() {
     prefill ? String(prefill.basePrice) : '1990',
   );
   const [simpleStock, setSimpleStock] = useState(() => (prefill ? '0' : '10'));
+  const [simpleStock, setSimpleStock] = useState(() => (prefill ? '0' : '10'));
+  const [hasVariants, setHasVariants] = useState(true);
+  const [draftVariants, setDraftVariants] = useState<DraftVariant[]>(() => {
+    if (prefill?.variants.length) {
+      return prefill.variants.map((v) =>
+        newDraftVariant({
+          label: v.label,
+          price: String(v.price),
+          stock: '0',
+          imageUri: v.imageUri ?? null,
+        }),
+      );
+    }
+    return [
+      newDraftVariant({ label: '', price: '8500', stock: '1' }),
+      newDraftVariant({ label: '', price: '12500', stock: '1' }),
+    ];
+  });
   const [warehouseId, setWarehouseId] = useState<WarehouseId>('WH-CTI-MAIN');
   const channel = conditionToChannel(condition);
   const postChannel = conditionToChannel(postCondition);
@@ -172,6 +195,49 @@ export function CreatePostScreen() {
 
   const removeSellImage = (uri: string) => {
     setSellImages((prev) => prev.filter((u) => u !== uri));
+  };
+
+  const patchVariant = (id: string, patch: Partial<DraftVariant>) => {
+    setDraftVariants((prev) => prev.map((v) => (v.id === id ? { ...v, ...patch } : v)));
+  };
+
+  const toggleHasVariants = (on: boolean) => {
+    setHasVariants(on);
+    if (on && draftVariants.length === 0) {
+      setDraftVariants([
+        newDraftVariant({
+          price: basePrice,
+          stock: simpleStock || '1',
+        }),
+      ]);
+    }
+    void Haptics.selectionAsync();
+  };
+
+  const addVariantRow = () => {
+    setDraftVariants((prev) => [...prev, newDraftVariant({ price: basePrice })]);
+    void Haptics.selectionAsync();
+  };
+
+  const removeVariantRow = (id: string) => {
+    setDraftVariants((prev) => prev.filter((v) => v.id !== id));
+    void Haptics.selectionAsync();
+  };
+
+  const bumpVariantStock = (id: string, delta: 1 | -1) => {
+    setDraftVariants((prev) =>
+      prev.map((v) => {
+        if (v.id !== id) return v;
+        const next = Math.max(0, (Number(v.stock) || 0) + delta);
+        return { ...v, stock: String(next) };
+      }),
+    );
+    void Haptics.selectionAsync();
+  };
+
+  const bumpSimpleStock = (delta: 1 | -1) => {
+    setSimpleStock((raw) => String(Math.max(0, (Number(raw) || 0) + delta)));
+    void Haptics.selectionAsync();
   };
 
   const closeAll = () => {
@@ -251,16 +317,6 @@ export function CreatePostScreen() {
       Alert.alert('ยังไม่มีชื่อสินค้า', 'พิมพ์ชื่อให้รู้ว่าขายอะไรนะ');
       return;
     }
-    const price = Number(basePrice);
-    if (!Number.isFinite(price) || price <= 0) {
-      Alert.alert('ราคายังไม่ถูก', 'ใส่ตัวเลขราคามากกว่า 0 นะ');
-      return;
-    }
-    const stockQty = Number(simpleStock);
-    if (!Number.isFinite(stockQty) || stockQty < 0) {
-      Alert.alert('จำนวนยังไม่ถูก', 'ใส่จำนวนชิ้นที่มีขายเป็นตัวเลขนะ');
-      return;
-    }
 
     const autoSku =
       masterSku.trim() ||
@@ -279,42 +335,100 @@ export function CreatePostScreen() {
       })
       .filter(Boolean) as CustomFieldValue[];
 
+    const prepared: VariantInput[] = [];
+    let listingPrice = 0;
+    let listingStock = 0;
+
+    if (hasVariants) {
+      if (!draftVariants.length) {
+        Alert.alert('ยังไม่มีตัวเลือก', 'เพิ่มอย่างน้อย 1 ตัวเลือกย่อย หรือปิดสวิตช์ตัวเลือกย่อย');
+        return;
+      }
+      for (let i = 0; i < draftVariants.length; i++) {
+        const v = draftVariants[i]!;
+        if (!v.label.trim()) {
+          Alert.alert('ยังไม่มีชื่อตัวเลือก', `ใส่ชื่อตัวเลือกที่ ${i + 1} เช่น 12 นิ้ว 3000W`);
+          return;
+        }
+        const price = Number(v.price);
+        if (!Number.isFinite(price) || price <= 0) {
+          Alert.alert('ราคายังไม่ถูก', `ใส่ราคาตัวเลือก “${v.label.trim()}” ให้มากกว่า 0`);
+          return;
+        }
+        const stockQty = Number(v.stock);
+        if (!Number.isFinite(stockQty) || stockQty < 0 || !Number.isInteger(stockQty)) {
+          Alert.alert('จำนวนยังไม่ถูก', `ใส่สต็อกตัวเลือก “${v.label.trim()}” เป็นจำนวนเต็มไม่ติดลบ`);
+          return;
+        }
+        prepared.push({
+          label: v.label.trim(),
+          sku: `${autoSku}-V${i + 1}`,
+          price,
+          attrs: {},
+          warehouseId: wh,
+          onHand: stockQty,
+          imageUri: v.imageUri ?? undefined,
+        });
+      }
+      listingPrice = Math.min(...prepared.map((v) => v.price));
+      listingStock = prepared.reduce((sum, v) => sum + v.onHand, 0);
+    } else {
+      const price = Number(basePrice);
+      if (!Number.isFinite(price) || price <= 0) {
+        Alert.alert('ราคายังไม่ถูก', 'ใส่ตัวเลขราคามากกว่า 0 นะ');
+        return;
+      }
+      const stockQty = Number(simpleStock);
+      if (!Number.isFinite(stockQty) || stockQty < 0) {
+        Alert.alert('จำนวนยังไม่ถูก', 'ใส่จำนวนชิ้นที่มีขายเป็นตัวเลขนะ');
+        return;
+      }
+      listingPrice = price;
+      listingStock = stockQty;
+      prepared.push({
+        label: 'มาตรฐาน',
+        sku: `${autoSku}-A`,
+        price,
+        attrs: {},
+        warehouseId: wh,
+        onHand: stockQty,
+      });
+    }
+
+    const coverUris =
+      sellImages.length > 0
+        ? sellImages
+        : prepared.map((v) => v.imageUri).filter((u): u is string => Boolean(u));
+
     const masterId = createMasterWithVariants({
       title: title.trim(),
       masterSku: autoSku,
       channel,
-      basePrice: price,
+      basePrice: listingPrice,
       tags: [conditionLabel(condition), 'Custom', ...(categoryLabel ? [categoryLabel] : [])],
       customFields,
       description: description.trim() || undefined,
       categoryKey,
-      imageUris: sellImages.length ? sellImages : undefined,
-      variants: [
-        {
-          label: 'มาตรฐาน',
-          sku: `${autoSku}-A`,
-          price,
-          attrs: {
-            voltage: fieldValues.voltage,
-            capacityAh: fieldValues.capacityAh ? Number(fieldValues.capacityAh) : undefined,
-            color: fieldValues.material,
-          },
-          warehouseId: wh,
-          onHand: stockQty,
-        },
-      ],
+      imageUris: coverUris.length ? coverUris : undefined,
+      variants: prepared,
     });
 
-    // Auto-sync: shops subscribed to my warehouse get a listing (per policy)
     const syncedShops = onNewProductCreated(MY_WAREHOUSE_ID, masterId, categoryKey);
 
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    const variantSummary = hasVariants
+      ? `${prepared.length} ตัวเลือก · ${listingPrice.toLocaleString('th-TH')}${
+          prepared.some((v) => v.price !== listingPrice)
+            ? `–${Math.max(...prepared.map((v) => v.price)).toLocaleString('th-TH')}`
+            : ''
+        } บาท · รวม ${listingStock} ชิ้น`
+      : `มี ${listingStock} ชิ้น`;
     Alert.alert(
       prefill ? 'คัดลอกสินค้าเรียบร้อย' : 'ลงขายเรียบร้อย',
       [
         prefill
           ? 'สร้างเป็นสินค้าชิ้นใหม่แล้ว ของเดิมไม่เปลี่ยน'
-          : `ลงขายเป็น${conditionLabel(condition)} ราคา ฿${price.toLocaleString('th-TH')} · มี ${stockQty} ชิ้น`,
+          : `ลงขายเป็น${conditionLabel(condition)} ราคา ฿${listingPrice.toLocaleString('th-TH')} · ${variantSummary}`,
         syncedShops > 0 ? `ร้านที่เชื่อมคลังเห็นสินค้านี้แล้ว ${syncedShops} ร้าน` : null,
       ]
         .filter(Boolean)
@@ -324,29 +438,26 @@ export function CreatePostScreen() {
   };
 
   const sellRemaining = Math.max(0, MAX_PRODUCT_IMAGES - sellImages.length);
+  const galleryLimit = galleryPurpose === 'post' ? 1 : sellRemaining || 1;
 
-  return (
+  const variantPrices = draftVariants
+    .map((v) => Number(v.price))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  const variantStockTotal = draftVariants.reduce((sum, v) => {
+    const n = Number(v.stock);
+    return sum + (Number.isFinite(n) && n > 0 ? n : 0);
+  }, 0);
+  const variantMin = variantPrices.length ? Math.min(...variantPrices) : null;
+  const variantMax = variantPrices.length ? Math.max(...variantPrices) : null;
+  const variantRangeLabel =
+    variantMin == null || variantMax == null
+      ? null
+      : variantMin === variantMax
+        ? `${variantMin.toLocaleString('th-TH')} บาท`
+        : `${variantMin.toLocaleString('th-TH')} - ${variantMax.toLocaleString('th-TH')} บาท`;
+
+  const sellForm = (
     <>
-    <ScrollView
-      style={styles.root}
-      contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: 40 }}
-      keyboardShouldPersistTaps="always"
-      keyboardDismissMode="none"
-    >
-      <View style={styles.header}>
-        <Pressable onPress={closeAll}>
-          <Text style={styles.cancel}>ปิด</Text>
-        </Pressable>
-        <Text style={styles.title}>
-          {prefill ? 'คัดลอกมาลงขายใหม่' : mode === 'sell' ? 'ลงขายสินค้า' : 'สร้าง'}
-        </Text>
-        <Pressable onPress={publish}>
-          <Text style={styles.publish}>
-            {mode === 'sell' ? 'ลงขายเลย' : sellWithClip ? 'โพสต์และขาย' : 'โพสต์'}
-          </Text>
-        </Pressable>
-      </View>
-
       {prefill ? (
         <View style={styles.cloneBanner}>
           <Ionicons name="happy-outline" size={16} color={colors.accent.info} />
@@ -355,152 +466,59 @@ export function CreatePostScreen() {
             ใส่จำนวนใหม่เองนะ
           </Text>
         </View>
-      ) : sellOnly ? (
-        <View style={styles.cloneBanner}>
-          <Ionicons name="bag-handle-outline" size={16} color={colors.brand.primaryDark} />
-          <Text style={styles.cloneBannerText}>
-            ฟอร์มลงขายสินค้าอย่างเดียว — ไม่ปนกับเว็บบอร์ดหางานหรือคลิปฟีด
-          </Text>
-        </View>
       ) : null}
 
-      {mode === 'post' ? (
-        <Pressable onPress={pickMedia}>
-          <View style={styles.canvas}>
-            {mediaUri ? (
-              <>
-                <Image source={{ uri: mediaUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-                {mediaType === 'video' ? (
-                  <View style={styles.videoBadge}>
-                    <Ionicons name="videocam" size={14} color="#fff" />
-                    <Text style={styles.videoBadgeText}>วิดีโอ</Text>
-                  </View>
-                ) : null}
-                <View style={styles.changeMediaBadge}>
-                  <Ionicons name="camera-reverse" size={14} color="#fff" />
-                  <Text style={styles.videoBadgeText}>เปลี่ยนรูป/วิดีโอ</Text>
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>ข้อมูลสินค้า</Text>
+
+        <Text style={styles.fieldLabel}>
+          รูปหลัก ({sellImages.length}/{MAX_PRODUCT_IMAGES})
+        </Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.photoStrip}
+          style={{ flexGrow: 0, marginBottom: 18 }}
+        >
+          {sellImages.map((uri, index) => (
+            <View key={uri} style={styles.photoTile}>
+              <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+              {index === 0 ? (
+                <View style={styles.coverBadge}>
+                  <Text style={styles.coverBadgeText}>ปก</Text>
                 </View>
-              </>
-            ) : (
-              <>
-                <Ionicons name="images" size={28} color={colors.brand.primary} />
-                <Text style={styles.canvasHint}>แตะเพื่อเลือกรูป/วิดีโอจาก Simulator (9:16)</Text>
-              </>
-            )}
-          </View>
-        </Pressable>
-      ) : (
-        <>
-          <Text style={styles.label}>
-            1) ใส่รูปสินค้า ({sellImages.length}/{MAX_PRODUCT_IMAGES}) · รูปแรก = รูปปก
-          </Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.photoStrip}
-            style={{ flexGrow: 0, marginBottom: 14 }}
-          >
-            {sellImages.map((uri, index) => (
-              <View key={uri} style={styles.photoTile}>
-                <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-                {index === 0 ? (
-                  <View style={styles.coverBadge}>
-                    <Text style={styles.coverBadgeText}>ปก</Text>
-                  </View>
-                ) : null}
-                <Pressable
-                  style={styles.removePhoto}
-                  onPress={() => removeSellImage(uri)}
-                  hitSlop={8}
-                >
-                  <Ionicons name="close" size={12} color="#fff" />
-                </Pressable>
-              </View>
-            ))}
-            {sellImages.length < MAX_PRODUCT_IMAGES ? (
-              <Pressable style={styles.addPhotoTile} onPress={pickSellImages}>
-                <Ionicons name="camera" size={22} color={colors.text.secondary} />
-                <Text style={styles.addPhotoText}>เพิ่มรูป</Text>
+              ) : null}
+              <Pressable
+                style={styles.removePhoto}
+                onPress={() => {
+                  Alert.alert('ลบรูปนี้?', 'รูปจะถูกนำออกจากรายการ', [
+                    { text: 'ยกเลิก', style: 'cancel' },
+                    { text: 'ลบ', style: 'destructive', onPress: () => removeSellImage(uri) },
+                  ]);
+                }}
+                hitSlop={8}
+                accessibilityLabel="ลบรูป"
+              >
+                <Ionicons name="close" size={12} color="#fff" />
               </Pressable>
-            ) : null}
-          </ScrollView>
-        </>
-      )}
+            </View>
+          ))}
+          {sellImages.length < MAX_PRODUCT_IMAGES ? (
+            <Pressable style={styles.addPhotoTile} onPress={pickSellImages}>
+              <Ionicons name="camera-outline" size={22} color={colors.text.secondary} />
+              <Text style={styles.addPhotoText}>เพิ่มรูป</Text>
+            </Pressable>
+          ) : null}
+        </ScrollView>
 
-      {mode === 'post' ? (
-        <>
-          <TextInput
-            style={styles.input}
-            placeholder="เขียนแคปชัน..."
-            placeholderTextColor={colors.text.muted}
-            value={caption}
-            onChangeText={setCaption}
-            multiline
-          />
-
-          {sellWithClip ? (
-            <>
-              <Text style={styles.label}>ชื่อสินค้า</Text>
-              <TextInput
-                style={styles.inputSingle}
-                placeholder="เช่น แบต 60V (ว่างได้ ใช้แคปชันแทน)"
-                placeholderTextColor={colors.text.muted}
-                value={postProductName}
-                onChangeText={setPostProductName}
-              />
-              <Text style={styles.label}>ราคา (บาท)</Text>
-              <TextInput
-                style={styles.inputSingle}
-                placeholder="เช่น 1990"
-                placeholderTextColor={colors.text.muted}
-                value={postPrice}
-                onChangeText={setPostPrice}
-                keyboardType="numeric"
-              />
-              <Text style={styles.label}>มีกี่ชิ้น</Text>
-              <TextInput
-                style={styles.inputSingle}
-                placeholder="เช่น 10"
-                placeholderTextColor={colors.text.muted}
-                value={postStock}
-                onChangeText={setPostStock}
-                keyboardType="numeric"
-              />
-              <Text style={styles.label}>สภาพสินค้า</Text>
-              <View style={styles.row}>
-                {(['new', 'used'] as ProductCondition[]).map((c) => (
-                  <Pressable
-                    key={c}
-                    style={[styles.chip, postCondition === c && styles.chipActive]}
-                    onPress={() => {
-                      setPostCondition(c);
-                      const ch = conditionToChannel(c);
-                      const wh = warehouses.find((w) => w.channelFocus.includes(ch));
-                      if (wh) setWarehouseId(wh.id);
-                    }}
-                  >
-                    <Text style={[styles.chipText, postCondition === c && styles.chipTextActive]}>
-                      {conditionLabel(c)}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-              <Text style={styles.conditionHint}>{conditionHint(postCondition)}</Text>
-            </>
-          ) : (
-            <Text style={styles.sellOffNote}>
-              ปิดขายไว้ — โพสต์ดูอย่างเดียว ยังไม่มีปุ่มซื้อ
-            </Text>
-          )}
-        </>
-      ) : (
-        <>
-          <Text style={styles.label}>2) สภาพสินค้า</Text>
-          <View style={styles.row}>
-            {(['new', 'used'] as ProductCondition[]).map((c) => (
+        <Text style={styles.fieldLabel}>สภาพ</Text>
+        <View style={styles.segmented}>
+          {(['new', 'used'] as ProductCondition[]).map((c) => {
+            const active = condition === c;
+            return (
               <Pressable
                 key={c}
-                style={[styles.chip, condition === c && styles.chipActive]}
+                style={[styles.segment, active && styles.segmentActive]}
                 onPress={() => {
                   setCondition(c);
                   const ch = conditionToChannel(c);
@@ -509,144 +527,348 @@ export function CreatePostScreen() {
                   void Haptics.selectionAsync();
                 }}
               >
-                <Text style={[styles.chipText, condition === c && styles.chipTextActive]}>
+                <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
                   {conditionLabel(c)}
                 </Text>
               </Pressable>
-            ))}
+            );
+          })}
+        </View>
+        <Text style={styles.conditionHint}>{conditionHint(condition)}</Text>
+
+        {categoryLabel ? (
+          <View style={styles.categoryHint}>
+            <Ionicons name="pricetag" size={13} color={colors.brand.primaryDark} />
+            <Text style={styles.categoryHintText}>หมวด: {categoryLabel}</Text>
           </View>
-          <Text style={styles.conditionHint}>{conditionHint(condition)}</Text>
+        ) : null}
 
-          {categoryLabel ? (
-            <View style={styles.categoryHint}>
-              <Ionicons name="pricetag" size={13} color={colors.brand.primaryDark} />
-              <Text style={styles.categoryHintText}>หมวด: {categoryLabel}</Text>
-            </View>
-          ) : null}
+        <FormTextInput
+          label="ชื่อสินค้า"
+          style={styles.lineInput}
+          value={title}
+          onChangeText={setTitle}
+          placeholder="เช่น มอเตอร์ QS 12 นิ้ว"
+          placeholderTextColor={colors.text.muted}
+          autoCapitalize="sentences"
+          containerStyle={{ marginBottom: 16 }}
+        />
 
-          <Field
-            label="3) ชื่อสินค้า"
-            value={title}
-            onChange={setTitle}
-            placeholder="เช่น แบตมอเตอร์ไซค์ 60V"
-            allowPaste
+        <View style={styles.variantToggleRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.toggleTitle}>มีตัวเลือกย่อยสินค้าหรือไม่?</Text>
+            <Text style={styles.toggleHint}>เช่น 12 นิ้ว 3000W / 5000W — คนละราคา คนละสต็อก</Text>
+          </View>
+          <Switch
+            value={hasVariants}
+            onValueChange={toggleHasVariants}
+            trackColor={{ false: '#D5DBD8', true: colors.brand.primary }}
+            thumbColor="#fff"
           />
+        </View>
 
-          <View style={styles.labelRow}>
-            <Text style={styles.label}>เล่าเกี่ยวกับสินค้า (ไม่บังคับ)</Text>
-            <Pressable
-              hitSlop={8}
-              onPress={() =>
-                void pasteFromClipboard(setDescription, { appendTo: description })
-              }
-              style={styles.pasteBtn}
-            >
-              <Ionicons name="clipboard-outline" size={14} color={colors.brand.primaryDark} />
-              <Text style={styles.pasteBtnText}>วาง</Text>
+        {hasVariants ? (
+          <>
+            {variantRangeLabel ? (
+              <View style={styles.autoSummary}>
+                <Text style={styles.autoSummaryText}>ช่วงราคา {variantRangeLabel}</Text>
+                <Text style={styles.autoSummaryText}>
+                  สต็อกรวม {variantStockTotal.toLocaleString('th-TH')} ชิ้น
+                </Text>
+              </View>
+            ) : null}
+            {draftVariants.map((v) => {
+              const stockN = Number(v.stock) || 0;
+              return (
+                <View key={v.id} style={styles.variantCard}>
+                  <View style={styles.variantNameRow}>
+                    <Text style={styles.miniLabel}>ชื่อตัวเลือก</Text>
+                    <Pressable
+                      onPress={() => {
+                        Alert.alert('ลบตัวเลือกนี้?', 'ตัวเลือกย่อยจะถูกนำออก', [
+                          { text: 'ยกเลิก', style: 'cancel' },
+                          { text: 'ลบ', style: 'destructive', onPress: () => removeVariantRow(v.id) },
+                        ]);
+                      }}
+                      hitSlop={8}
+                      accessibilityLabel="ลบตัวเลือกย่อย"
+                    >
+                      <Ionicons name="trash-outline" size={16} color={colors.text.muted} />
+                    </Pressable>
+                  </View>
+                  <FormTextInput
+                    style={styles.variantNameInput}
+                    value={v.label}
+                    onChangeText={(t) => patchVariant(v.id, { label: t })}
+                    placeholder="เช่น 12 นิ้ว 3000W"
+                    placeholderTextColor={colors.text.muted}
+                    autoCapitalize="sentences"
+                  />
+                  <View style={styles.variantGrid}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.miniLabel}>ราคา (บาท)</Text>
+                      <FormTextInput
+                        style={styles.variantFieldInput}
+                        value={v.price}
+                        onChangeText={(t) => patchVariant(v.id, { price: sanitizeDecimal(t) })}
+                        keyboardType={Platform.OS === 'web' ? 'default' : 'decimal-pad'}
+                        inputMode="decimal"
+                        placeholder="8500"
+                        placeholderTextColor={colors.text.muted}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.miniLabel}>จำนวนชิ้น</Text>
+                      <View style={styles.stockStepper}>
+                        <Pressable
+                          style={[styles.stockBtn, stockN <= 0 && styles.stockBtnDisabled]}
+                          onPress={() => bumpVariantStock(v.id, -1)}
+                          disabled={stockN <= 0}
+                        >
+                          <Text style={styles.stockBtnText}>−</Text>
+                        </Pressable>
+                        <FormTextInput
+                          style={styles.stockInput}
+                          value={v.stock}
+                          onChangeText={(t) => patchVariant(v.id, { stock: sanitizeInt(t) })}
+                          keyboardType={Platform.OS === 'web' ? 'default' : 'number-pad'}
+                          inputMode="numeric"
+                          placeholder="0"
+                          placeholderTextColor={colors.text.muted}
+                          textAlign="center"
+                        />
+                        <Pressable style={styles.stockBtn} onPress={() => bumpVariantStock(v.id, 1)}>
+                          <Text style={styles.stockBtnText}>+</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+              );
+            })}
+            <Pressable style={styles.addVariantBtn} onPress={addVariantRow}>
+              <Ionicons name="add" size={18} color={colors.brand.primaryDark} />
+              <Text style={styles.addVariantText}>เพิ่มตัวเลือกย่อย</Text>
             </Pressable>
+          </>
+        ) : (
+          <View style={styles.singleGrid}>
+            <View style={{ flex: 1 }}>
+              <FormTextInput
+                label="ราคา (บาท)"
+                style={styles.variantFieldInput}
+                value={basePrice}
+                onChangeText={(t) => setBasePrice(sanitizeDecimal(t))}
+                keyboardType={Platform.OS === 'web' ? 'default' : 'decimal-pad'}
+                inputMode="decimal"
+                placeholder="เช่น 8500"
+                placeholderTextColor={colors.text.muted}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.miniLabel}>จำนวนชิ้น</Text>
+              <View style={styles.stockStepper}>
+                <Pressable
+                  style={[
+                    styles.stockBtn,
+                    (Number(simpleStock) || 0) <= 0 && styles.stockBtnDisabled,
+                  ]}
+                  onPress={() => bumpSimpleStock(-1)}
+                  disabled={(Number(simpleStock) || 0) <= 0}
+                >
+                  <Text style={styles.stockBtnText}>−</Text>
+                </Pressable>
+                <FormTextInput
+                  style={styles.stockInput}
+                  value={simpleStock}
+                  onChangeText={(t) => setSimpleStock(sanitizeInt(t))}
+                  keyboardType={Platform.OS === 'web' ? 'default' : 'number-pad'}
+                  inputMode="numeric"
+                  placeholder={prefill ? 'ใส่จำนวนใหม่' : 'เช่น 10'}
+                  placeholderTextColor={colors.text.muted}
+                  textAlign="center"
+                />
+                <Pressable style={styles.stockBtn} onPress={() => bumpSimpleStock(1)}>
+                  <Text style={styles.stockBtnText}>+</Text>
+                </Pressable>
+              </View>
+            </View>
           </View>
-          <TextInput
-            style={[styles.input, { marginBottom: 10 }]}
-            placeholder="ของสภาพไหน ใช้นานแค่ไหน มีประกันไหม... (วางข้อความที่คัดลอกได้)"
-            placeholderTextColor={colors.text.muted}
-            value={description}
-            onChangeText={setDescription}
-            multiline
-            contextMenuHidden={false}
-            textAlignVertical="top"
-            autoCorrect
-            autoCapitalize="sentences"
-            scrollEnabled
-          />
+        )}
 
-          <Field
-            label="4) ราคา (บาท)"
-            value={basePrice}
-            onChange={setBasePrice}
-            keyboardType="numeric"
-            placeholder="เช่น 1990"
-            allowPaste
-            pasteNumeric
-          />
-          <Field
-            label="5) มีกี่ชิ้น"
-            value={simpleStock}
-            onChange={setSimpleStock}
-            keyboardType="numeric"
-            placeholder={prefill ? 'ใส่จำนวนใหม่ (เริ่มที่ 0)' : 'เช่น 10'}
-            allowPaste
-            pasteNumeric
-          />
-
-          <Text style={styles.easyTip}>
-            พอครบแล้วกด “ลงขายเลย” มุมขวาบน — ง่ายๆ แค่นี้
-          </Text>
-        </>
-      )}
-    </ScrollView>
-
-    <MediaGalleryPicker
-      visible={galleryOpen}
-      onClose={() => setGalleryOpen(false)}
-      onSend={onGallerySend}
-      initialMode={galleryPurpose === 'sell' ? 'photo' : 'photo'}
-      allowModeSwitch={galleryPurpose === 'post'}
-      selectionLimit={galleryPurpose === 'sell' ? sellRemaining || 1 : 1}
-      sendLabel="ส่ง"
-      title="ล่าสุด"
-    />
+        <FormTextInput
+          label="รายละเอียด (ไม่บังคับ)"
+          style={styles.areaInput}
+          placeholder="ของสภาพไหน ใช้นานแค่ไหน มีประกันไหม..."
+          placeholderTextColor={colors.text.muted}
+          value={description}
+          onChangeText={setDescription}
+          multiline
+          autoCapitalize="sentences"
+          scrollEnabled
+          containerStyle={{ marginTop: 16, marginBottom: 0 }}
+        />
+      </View>
     </>
   );
-}
 
-function Field({
-  label,
-  value,
-  onChange,
-  placeholder,
-  keyboardType = 'default',
-  allowPaste = false,
-  pasteNumeric = false,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  keyboardType?: 'default' | 'numeric';
-  allowPaste?: boolean;
-  pasteNumeric?: boolean;
-}) {
   return (
-    <View style={{ marginBottom: 10 }}>
-      <View style={styles.labelRow}>
-        <Text style={styles.label}>{label}</Text>
-        {allowPaste ? (
-          <Pressable
-            hitSlop={8}
-            onPress={() =>
-              void pasteFromClipboard(onChange, {
-                appendTo: pasteNumeric ? undefined : value,
-                numeric: pasteNumeric,
-              })
-            }
-            style={styles.pasteBtn}
-          >
-            <Ionicons name="clipboard-outline" size={14} color={colors.brand.primaryDark} />
-            <Text style={styles.pasteBtnText}>วาง</Text>
-          </Pressable>
+    <>
+      <KeyboardAvoidingView
+        style={styles.root}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+          {mode === 'post' ? (
+            <Pressable onPress={closeAll}>
+              <Text style={styles.cancel}>ปิด</Text>
+            </Pressable>
+          ) : (
+            <View style={{ width: 48 }} />
+          )}
+          <Text style={styles.title}>
+            {prefill ? 'คัดลอกมาลงขายใหม่' : mode === 'sell' ? 'ลงขายสินค้า' : 'สร้าง'}
+          </Text>
+          {mode === 'post' ? (
+            <Pressable onPress={publish}>
+              <Text style={styles.publish}>
+                {sellWithClip ? 'โพสต์และขาย' : 'โพสต์'}
+              </Text>
+            </Pressable>
+          ) : (
+            <View style={{ width: 48 }} />
+          )}
+        </View>
+
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={{
+            paddingHorizontal: 16,
+            paddingBottom: mode === 'sell' ? 28 + Math.max(insets.bottom, 10) + 58 : 40,
+          }}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+        >
+          {mode === 'post' ? (
+            <>
+              <Pressable onPress={pickMedia}>
+                <View style={styles.canvas}>
+                  {mediaUri ? (
+                    <>
+                      <Image source={{ uri: mediaUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                      {mediaType === 'video' ? (
+                        <View style={styles.videoBadge}>
+                          <Ionicons name="videocam" size={14} color="#fff" />
+                          <Text style={styles.videoBadgeText}>วิดีโอ</Text>
+                        </View>
+                      ) : null}
+                      <View style={styles.changeMediaBadge}>
+                        <Ionicons name="camera-reverse" size={14} color="#fff" />
+                        <Text style={styles.videoBadgeText}>เปลี่ยนรูป/วิดีโอ</Text>
+                      </View>
+                    </>
+                  ) : (
+                    <>
+                      <Ionicons name="images" size={28} color={colors.brand.primary} />
+                      <Text style={styles.canvasHint}>แตะเพื่อเลือกรูป/วิดีโอจาก Simulator (9:16)</Text>
+                    </>
+                  )}
+                </View>
+              </Pressable>
+              <FormTextInput
+                style={styles.input}
+                placeholder="เขียนแคปชัน..."
+                placeholderTextColor={colors.text.muted}
+                value={caption}
+                onChangeText={setCaption}
+                multiline
+              />
+
+              {sellWithClip ? (
+                <>
+                  <Text style={styles.label}>ชื่อสินค้า</Text>
+                  <FormTextInput
+                    style={styles.inputSingle}
+                    placeholder="เช่น แบต 60V (ว่างได้ ใช้แคปชันแทน)"
+                    placeholderTextColor={colors.text.muted}
+                    value={postProductName}
+                    onChangeText={setPostProductName}
+                  />
+                  <Text style={styles.label}>ราคา (บาท)</Text>
+                  <FormTextInput
+                    style={styles.inputSingle}
+                    placeholder="เช่น 1990"
+                    placeholderTextColor={colors.text.muted}
+                    value={postPrice}
+                    onChangeText={(t) => setPostPrice(sanitizeDecimal(t))}
+                    keyboardType="decimal-pad"
+                    inputMode="decimal"
+                  />
+                  <Text style={styles.label}>มีกี่ชิ้น</Text>
+                  <FormTextInput
+                    style={styles.inputSingle}
+                    placeholder="เช่น 10"
+                    placeholderTextColor={colors.text.muted}
+                    value={postStock}
+                    onChangeText={(t) => setPostStock(sanitizeInt(t))}
+                    keyboardType="number-pad"
+                    inputMode="numeric"
+                  />
+                  <Text style={styles.label}>สภาพสินค้า</Text>
+                  <View style={styles.row}>
+                    {(['new', 'used'] as ProductCondition[]).map((c) => (
+                      <Pressable
+                        key={c}
+                        style={[styles.chip, postCondition === c && styles.chipActive]}
+                        onPress={() => {
+                          setPostCondition(c);
+                          const ch = conditionToChannel(c);
+                          const wh = warehouses.find((w) => w.channelFocus.includes(ch));
+                          if (wh) setWarehouseId(wh.id);
+                        }}
+                      >
+                        <Text style={[styles.chipText, postCondition === c && styles.chipTextActive]}>
+                          {conditionLabel(c)}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                  <Text style={styles.conditionHint}>{conditionHint(postCondition)}</Text>
+                </>
+              ) : (
+                <Text style={styles.sellOffNote}>
+                  ปิดขายไว้ — โพสต์ดูอย่างเดียว ยังไม่มีปุ่มซื้อ
+                </Text>
+              )}
+            </>
+          ) : (
+            sellForm
+          )}
+        </ScrollView>
+
+        {mode === 'sell' ? (
+          <View style={[styles.stickyBar, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+            <Pressable style={styles.cancelBtn} onPress={closeAll}>
+              <Text style={styles.cancelBtnText}>ยกเลิก</Text>
+            </Pressable>
+            <Pressable style={styles.saveBtn} onPress={publish} accessibilityRole="button">
+              <Text style={styles.saveBtnText}>บันทึกสินค้า</Text>
+            </Pressable>
+          </View>
         ) : null}
-      </View>
-      <TextInput
-        style={styles.inputSingle}
-        value={value}
-        onChangeText={onChange}
-        placeholder={placeholder}
-        placeholderTextColor={colors.text.muted}
-        keyboardType={keyboardType}
-        autoCapitalize={keyboardType === 'numeric' ? 'none' : 'sentences'}
-        contextMenuHidden={false}
+      </KeyboardAvoidingView>
+
+      <MediaGalleryPicker
+        visible={galleryOpen}
+        onClose={() => setGalleryOpen(false)}
+        onSend={onGallerySend}
+        initialMode="photo"
+        allowModeSwitch={galleryPurpose === 'post'}
+        selectionLimit={galleryLimit}
+        sendLabel="ส่ง"
+        title="ล่าสุด"
       />
-    </View>
+    </>
   );
 }
 
@@ -654,45 +876,23 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: colors.surface.canvas,
-    paddingHorizontal: 16,
   },
+  scroll: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    paddingHorizontal: 16,
+    marginBottom: 8,
   },
   cancel: { color: colors.text.secondary, fontWeight: '600', fontSize: 16 },
-  title: { fontWeight: '900', fontSize: 18, color: colors.text.primary },
+  title: { fontWeight: '800', fontSize: 17, color: colors.text.primary },
   publish: { color: colors.brand.primaryDark, fontWeight: '800', fontSize: 16 },
-  labelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  pasteBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: colors.brand.mist,
-    borderWidth: 1,
-    borderColor: 'rgba(0,160,110,0.25)',
-    marginBottom: 6,
-  },
-  pasteBtnText: {
-    color: colors.brand.primaryDark,
-    fontWeight: '800',
-    fontSize: 12,
-  },
   cloneBanner: {
     flexDirection: 'row',
     gap: 8,
     backgroundColor: '#EAF3FF',
-    borderRadius: 14,
+    borderRadius: 16,
     padding: 12,
     marginBottom: 14,
     borderWidth: 1,
@@ -705,64 +905,222 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     lineHeight: 17,
   },
-  modes: { flexDirection: 'row', gap: 8, marginBottom: 14 },
-  sellToggle: {
+  card: {
+    backgroundColor: colors.surface.card,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.border.soft,
+    padding: 16,
+    marginBottom: 14,
+  },
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.text.primary,
+    marginBottom: 4,
+  },
+  fieldLabel: {
+    color: colors.text.secondary,
+    fontWeight: '700',
+    marginBottom: 8,
+    fontSize: 12,
+  },
+  miniLabel: {
+    color: colors.text.muted,
+    fontWeight: '700',
+    fontSize: 11,
+    marginBottom: 6,
+  },
+  segmented: {
+    flexDirection: 'row',
+    backgroundColor: '#EEF1EF',
+    borderRadius: 12,
+    padding: 3,
+    marginBottom: 8,
+  },
+  segment: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderRadius: 10,
+  },
+  segmentActive: {
+    backgroundColor: '#fff',
+  },
+  segmentText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text.secondary,
+  },
+  segmentTextActive: {
+    color: colors.text.primary,
+  },
+  lineInput: {
+    backgroundColor: 'transparent',
+    borderRadius: 0,
+    paddingHorizontal: 0,
+    paddingVertical: 10,
+    color: colors.text.primary,
+    borderWidth: 0,
+    borderBottomWidth: 1,
+    borderColor: colors.border.strong,
+    fontSize: 16,
+  },
+  areaInput: {
+    minHeight: 88,
+    backgroundColor: '#F7F9F8',
+    borderRadius: 12,
+    padding: 12,
+    textAlignVertical: 'top',
+    fontSize: 15,
+    color: colors.text.primary,
+    borderWidth: 1,
+    borderColor: colors.border.soft,
+  },
+  variantToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 14,
+  },
+  toggleTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.text.primary,
+  },
+  toggleHint: {
+    marginTop: 2,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.text.secondary,
+    lineHeight: 16,
+  },
+  autoSummary: {
+    backgroundColor: colors.brand.mist,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+    gap: 2,
+  },
+  autoSummaryText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.brand.primaryDark,
+  },
+  singleGrid: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'flex-end',
+  },
+  variantCard: {
+    backgroundColor: '#F7F9F8',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border.soft,
+    padding: 12,
+    marginBottom: 10,
+  },
+  variantNameRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 12,
-    padding: 14,
-    borderRadius: 16,
-    backgroundColor: colors.surface.card,
+    marginBottom: 4,
+  },
+  variantNameInput: {
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    color: colors.text.primary,
     borderWidth: 1,
     borderColor: colors.border.soft,
-    marginBottom: 14,
+    fontSize: 15,
+    marginBottom: 10,
   },
-  sellToggleOn: {
-    backgroundColor: colors.brand.mist,
-    borderColor: colors.brand.primaryDark,
+  variantGrid: { flexDirection: 'row', gap: 8 },
+  variantFieldInput: {
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    color: colors.text.primary,
+    borderWidth: 1,
+    borderColor: colors.border.soft,
+    fontSize: 15,
   },
-  sellToggleLeft: {
+  stockStepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  stockBtn: {
+    width: 36,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: colors.border.soft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stockBtnDisabled: { opacity: 0.35 },
+  stockBtnText: { fontSize: 18, fontWeight: '700', color: colors.text.primary, marginTop: -1 },
+  stockInput: {
     flex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    color: colors.text.primary,
+    borderWidth: 1,
+    borderColor: colors.border.soft,
+    fontSize: 15,
+    minWidth: 48,
+  },
+  addVariantBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: colors.brand.primaryDark,
+    paddingVertical: 12,
+    marginTop: 2,
+  },
+  addVariantText: { color: colors.brand.primaryDark, fontSize: 14, fontWeight: '800' },
+  stickyBar: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    backgroundColor: colors.surface.card,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border.soft,
   },
-  sellToggleTitle: {
-    fontSize: 14,
-    fontWeight: '900',
-    color: colors.text.primary,
-  },
-  sellToggleTitleOn: {
-    color: colors.brand.primaryDark,
-  },
-  sellToggleHint: {
-    marginTop: 2,
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.text.secondary,
-    lineHeight: 15,
-  },
-  sellSwitch: {
-    width: 44,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: '#D5DBD8',
-    padding: 2,
+  cancelBtn: {
+    height: 48,
+    paddingHorizontal: 18,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#D5DBD8',
+    alignItems: 'center',
     justifyContent: 'center',
-  },
-  sellSwitchOn: {
-    backgroundColor: colors.brand.primaryDark,
-  },
-  sellKnob: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
     backgroundColor: '#fff',
   },
-  sellKnobOn: {
-    alignSelf: 'flex-end',
+  cancelBtnText: { fontSize: 15, fontWeight: '700', color: colors.text.primary },
+  saveBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: colors.brand.primaryDark,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
+  saveBtnText: { fontSize: 15, fontWeight: '800', color: '#fff' },
   sellOffNote: {
     fontSize: 12,
     fontWeight: '600',
@@ -770,21 +1128,6 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     marginBottom: 8,
   },
-  mode: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 14,
-    backgroundColor: colors.surface.card,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border.soft,
-  },
-  modeActive: {
-    backgroundColor: colors.brand.ink,
-    borderColor: colors.brand.ink,
-  },
-  modeText: { fontWeight: '700', color: colors.text.secondary },
-  modeTextActive: { color: colors.brand.primary },
   canvas: {
     height: 180,
     borderRadius: 20,
@@ -869,14 +1212,6 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: colors.brand.ink, borderColor: colors.brand.ink },
   chipText: { color: colors.text.secondary, fontWeight: '700', fontSize: 12 },
   chipTextActive: { color: colors.brand.primary },
-  addField: {
-    backgroundColor: colors.brand.mist,
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  addFieldText: { color: colors.brand.primaryDark, fontWeight: '800' },
   photoStrip: { gap: 8, paddingVertical: 2 },
   photoTile: {
     width: 92,
@@ -920,19 +1255,10 @@ const styles = StyleSheet.create({
   },
   addPhotoText: { color: colors.text.secondary, fontSize: 11, fontWeight: '800' },
   conditionHint: {
-    marginTop: -4,
     marginBottom: 14,
     fontSize: 12,
     fontWeight: '600',
     color: colors.text.secondary,
-  },
-  easyTip: {
-    marginTop: 8,
-    marginBottom: 20,
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.brand.primaryDark,
-    lineHeight: 18,
   },
   categoryHint: {
     flexDirection: 'row',
@@ -946,36 +1272,4 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   categoryHintText: { color: colors.brand.primaryDark, fontSize: 12, fontWeight: '800' },
-  variantHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  addVariantBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    backgroundColor: colors.brand.mist,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  addVariantText: { color: colors.brand.primaryDark, fontSize: 12, fontWeight: '800' },
-  variantCard: {
-    backgroundColor: colors.surface.card,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: colors.border.soft,
-    padding: 12,
-    marginBottom: 10,
-  },
-  variantCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  variantIndex: { fontSize: 11, fontWeight: '800', color: colors.text.muted },
-  variantGrid: { flexDirection: 'row', gap: 8 },
 });

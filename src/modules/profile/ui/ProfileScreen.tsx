@@ -9,18 +9,19 @@ import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
-import { useBoomWalletStore } from '@/modules/wallet/state/boom-wallet-store';
-import { BoomWalletProfileButton } from '@/modules/wallet/ui/BoomWalletProfileButton';
-import { BoomCoinRewardPopup } from '@/modules/wallet/ui/BoomCoinRewardPopup';
-import { BoomCoinAmountView } from '@/modules/wallet/ui/BoomCoinAmountView';
 import { normalizeAuthorHandle } from '@/modules/feed/domain/selectFeedByAuthor';
 import { buildOwnerFeedItems } from '@/modules/profile/data/buildOwnerFeedItems';
 import type { FeedItem } from '@/modules/feed/domain/types';
 import { Avatar } from '@/shared/components/Avatar';
 import { colors } from '@/shared/theme/colors';
-import { ENABLE_BOOM_WALLET_UI, ENABLE_FEED_COIN_REACTION } from '@/shared/compliance/appStoreGates';
+import { promptText } from '@/shared/components/AppPrompt';
 import { ContentGrid } from './ContentGrid';
 import { MyOrdersHub } from './MyOrdersHub';
+import { SellerHomePanel } from '@/modules/store/ui/SellerHomePanel';
+import { useOrdersStore } from '@/modules/store/state/orders-store';
+import { countAwaitingShipment } from '@/modules/store/domain/seller-ops';
+import { confirmDeleteAccount } from '@/modules/account/services/deleteAccountFlow';
+import { openLegalDocument } from '@/shared/legal/openLegal';
 
 function openOwnerFeed(handle: string, item: FeedItem) {
   router.push({
@@ -32,8 +33,7 @@ function openOwnerFeed(handle: string, item: FeedItem) {
   });
 }
 
-type ProfileTab = 'videos' | 'orders' | 'saved' | 'liked';
-type NavTab = ProfileTab | 'store';
+type ProfileTab = 'videos' | 'orders' | 'saved' | 'liked' | 'store';
 
 function formatCompact(n: number) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -41,7 +41,7 @@ function formatCompact(n: number) {
   return String(n);
 }
 
-const TABS: Array<{ key: NavTab; icon: keyof typeof Ionicons.glyphMap }> = [
+const TABS: Array<{ key: ProfileTab; icon: keyof typeof Ionicons.glyphMap }> = [
   { key: 'videos', icon: 'grid-outline' },
   { key: 'orders', icon: 'bag-handle-outline' },
   { key: 'store', icon: 'storefront-outline' },
@@ -54,8 +54,6 @@ export function ProfileScreen() {
   const profile = useLoyaltyStore((s) => s.profile);
   const updateProfile = useLoyaltyStore((s) => s.updateProfile);
   const items = useFeedStore((s) => s.items);
-  const lifetimeCoins = useBoomWalletStore((s) => s.lifetimeCoinsReceived);
-  const available = useBoomWalletStore((s) => s.available);
   const [tab, setTab] = useState<ProfileTab>('videos');
 
   const myHandle = normalizeAuthorHandle(profile.handle);
@@ -67,11 +65,6 @@ export function ProfileScreen() {
       }),
     [items, myHandle, profile.displayName],
   );
-  /** ได้รับ Coin = ยอดทิปสะสมบนคลิปของเรา (ขึ้นเมื่อมีคนกดเหรียญ) */
-  const coinsReceived = useMemo(
-    () => myContent.reduce((sum, item) => sum + (item.tips ?? 0), 0),
-    [myContent],
-  );
   const likedItems = useMemo(() => items.filter((i) => i.liked), [items]);
   const savedItems = useMemo(() => items.filter((i) => i.saved), [items]);
   const productsCount = useMemo(
@@ -79,12 +72,14 @@ export function ProfileScreen() {
     [myContent],
   );
 
-  const handleTabPress = (key: NavTab) => {
+  const incomingOrders = useOrdersStore((s) => s.incomingOrders);
+  const pendingShipCount = useMemo(
+    () => countAwaitingShipment(incomingOrders),
+    [incomingOrders],
+  );
+
+  const handleTabPress = (key: ProfileTab) => {
     void Haptics.selectionAsync();
-    if (key === 'store') {
-      router.push('/store/dashboard');
-      return;
-    }
     setTab(key);
   };
 
@@ -128,52 +123,27 @@ export function ProfileScreen() {
 
   const editDisplayName = () => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Alert.prompt(
-      'แก้ไขชื่อที่ใช้แสดง',
-      undefined,
-      (text) => {
-        const trimmed = text?.trim();
-        if (trimmed) updateProfile({ displayName: trimmed });
-      },
-      'plain-text',
-      profile.displayName,
-    );
+    void promptText({
+      title: 'แก้ไขชื่อที่ใช้แสดง',
+      defaultValue: profile.displayName,
+    }).then((text) => {
+      const trimmed = text?.trim();
+      if (trimmed) updateProfile({ displayName: trimmed });
+    });
   };
 
   const editBio = () => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Alert.prompt(
-      'แก้ไขคำบรรยายโปรไฟล์',
-      undefined,
-      (text) => updateProfile({ bio: (text ?? '').trim() }),
-      'plain-text',
-      profile.bio,
-    );
+    void promptText({
+      title: 'แก้ไขคำบรรยายโปรไฟล์',
+      defaultValue: profile.bio,
+    }).then((text) => updateProfile({ bio: (text ?? '').trim() }));
   };
 
   const copyHandle = async () => {
     await Clipboard.setStringAsync(profile.handle);
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     Alert.alert('คัดลอกแล้ว', `คัดลอก ${profile.handle} ไปยังคลิปบอร์ดแล้ว`);
-  };
-
-  const onLifetimePress = () => {
-    void Haptics.selectionAsync();
-    if (!ENABLE_BOOM_WALLET_UI) {
-      Alert.alert(
-        'ได้รับเหรียญ',
-        `สะสมบนคลิป ${coinsReceived.toLocaleString('en-US')} ครั้ง\n\nเป็นตัวนับบนฟีดเท่านั้น — ไม่มีมูลค่าเงิน`,
-      );
-      return;
-    }
-    Alert.alert(
-      'ได้รับ Coin',
-      `สะสมบนคลิป ${coinsReceived.toLocaleString('en-US')} Coin\nLedger lifetime ${lifetimeCoins.toLocaleString('en-US')}\n\nขึ้นเมื่อมีคนกดเหรียญสนับสนุน (แทนหัวใจ)\nไม่ใช่ยอดใน Wallet — ยอดใช้จ่ายจริงอยู่ที่ปุ่ม Wallet`,
-      [
-        { text: 'ปิด', style: 'cancel' },
-        { text: 'เปิด Wallet', onPress: () => router.push('/wallet') },
-      ],
-    );
   };
 
   return (
@@ -205,7 +175,8 @@ export function ProfileScreen() {
             <Pressable
               hitSlop={8}
               style={styles.coverIconBtn}
-              onPress={() => router.push('/wallet/security')}
+              onPress={() => router.push('/settings')}
+              accessibilityLabel="ตั้งค่าบัญชี"
             >
               <Ionicons name="settings-outline" size={20} color="#fff" />
             </Pressable>
@@ -239,7 +210,7 @@ export function ProfileScreen() {
         </Text>
       </View>
 
-      {/* 4-column stats: Following | Followers | Coins | Products */}
+      {/* 4-column stats: Following | Followers | Community | Products */}
       <View style={styles.statsRow}>
         <View style={styles.statCell}>
           <Text style={styles.statValue}>{formatCompact(profile.followingCount)}</Text>
@@ -249,33 +220,16 @@ export function ProfileScreen() {
           <Text style={styles.statValue}>{formatCompact(profile.followersCount)}</Text>
           <Text style={styles.statLabel}>ผู้ติดตาม</Text>
         </View>
-        {ENABLE_BOOM_WALLET_UI || ENABLE_FEED_COIN_REACTION ? (
-          <View style={styles.statCell}>
-            <BoomCoinAmountView
-              amount={coinsReceived}
-              variant="compact"
-              label="ได้รับ Coin"
-              iconSize={22}
-              valueSize={17}
-              animate
-              onPress={onLifetimePress}
-              valueStyle={styles.statValue}
-              labelStyle={styles.statLabel}
-            />
-          </View>
-        ) : (
-          <View style={styles.statCell}>
-            <Text style={styles.statValue}>{formatCompact(profile.followingCount + profile.followersCount)}</Text>
-            <Text style={styles.statLabel}>ชุมชน</Text>
-          </View>
-        )}
         <View style={styles.statCell}>
+          <Text style={styles.statValue}>{formatCompact(profile.followingCount + profile.followersCount)}</Text>
+          <Text style={styles.statLabel}>ชุมชน</Text>
+        </View>
+        <Pressable style={styles.statCell} onPress={() => handleTabPress('store')}>
           <Text style={styles.statValue}>{formatCompact(productsCount)}</Text>
           <Text style={styles.statLabel}>สินค้า</Text>
-        </View>
+        </Pressable>
       </View>
 
-      {/* Owner actions — Edit (+ Wallet when enabled) */}
       <View style={styles.actionRow}>
         <Pressable
           style={styles.secondaryBtn}
@@ -283,25 +237,9 @@ export function ProfileScreen() {
         >
           <Text style={styles.secondaryBtnText}>แก้ไขโปรไฟล์</Text>
         </Pressable>
-        {ENABLE_BOOM_WALLET_UI ? (
-          <Pressable
-            style={styles.secondaryBtn}
-            onPress={() => {
-              void Haptics.selectionAsync();
-              router.push('/wallet');
-            }}
-          >
-            <BoomCoinAmountView
-              amount={available}
-              variant="balance"
-              iconSize={18}
-              valueSize={14}
-              animate
-              style={styles.walletBtnInner}
-              valueStyle={styles.secondaryBtnText}
-            />
-          </Pressable>
-        ) : null}
+        <Pressable style={styles.secondaryBtn} onPress={() => router.push('/settings')}>
+          <Text style={styles.secondaryBtnText}>ตั้งค่า</Text>
+        </Pressable>
         <Pressable
           style={styles.moreBtn}
           onPress={() =>
@@ -311,14 +249,20 @@ export function ProfileScreen() {
                 text: 'ความปลอดภัย / Moderation',
                 onPress: () => router.push('/settings/moderation'),
               },
-              { text: 'ตั้งค่าบัญชี', onPress: () => router.push('/wallet/security') },
+              { text: 'ตั้งค่าบัญชี', onPress: () => router.push('/settings') },
+              { text: 'ศูนย์กิจกรรมผู้ใช้', onPress: () => router.push('/settings/activity') },
               {
                 text: 'นโยบายความเป็นส่วนตัว',
-                onPress: () => router.push({ pathname: '/legal/[doc]', params: { doc: 'privacy' } }),
+                onPress: () => void openLegalDocument('privacy'),
               },
               {
                 text: 'ข้อกำหนดการใช้บริการ',
-                onPress: () => router.push({ pathname: '/legal/[doc]', params: { doc: 'terms' } }),
+                onPress: () => void openLegalDocument('terms'),
+              },
+              {
+                text: 'ลบบัญชีและข้อมูลทั้งหมด',
+                style: 'destructive',
+                onPress: confirmDeleteAccount,
               },
               { text: 'ปิด', style: 'cancel' },
             ])
@@ -336,23 +280,23 @@ export function ProfileScreen() {
         {profile.bio || 'กดค้างเพื่อเพิ่มคำบรรยายโปรไฟล์'}
       </Text>
 
-      {ENABLE_BOOM_WALLET_UI ? (
-        <>
-          <BoomWalletProfileButton />
-          <BoomCoinRewardPopup />
-        </>
-      ) : null}
-
       <View style={styles.tabBar}>
         {TABS.map((t) => {
           const active = t.key === tab;
           return (
             <Pressable key={t.key} style={styles.tabItem} onPress={() => handleTabPress(t.key)}>
-              <Ionicons
-                name={t.icon}
-                size={22}
-                color={active ? colors.text.primary : colors.text.muted}
-              />
+              <View>
+                <Ionicons
+                  name={t.icon}
+                  size={22}
+                  color={active ? colors.text.primary : colors.text.muted}
+                />
+                {t.key === 'store' && pendingShipCount > 0 ? (
+                  <View style={styles.tabBadge}>
+                    <Text style={styles.tabBadgeText}>{pendingShipCount}</Text>
+                  </View>
+                ) : null}
+              </View>
               {active ? <View style={styles.tabIndicator} /> : null}
             </Pressable>
           );
@@ -371,6 +315,8 @@ export function ProfileScreen() {
       ) : null}
 
       {tab === 'orders' ? <MyOrdersHub /> : null}
+
+      {tab === 'store' ? <SellerHomePanel /> : null}
 
       {tab === 'saved' ? (
         <ContentGrid
@@ -549,4 +495,17 @@ const styles = StyleSheet.create({
     borderRadius: 1,
     backgroundColor: colors.text.primary,
   },
+  tabBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -8,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: colors.accent.live,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  tabBadgeText: { color: '#fff', fontSize: 9, fontWeight: '900' },
 });

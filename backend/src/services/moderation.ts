@@ -1,11 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { AppError } from '../lib/errors';
 
 export type ReportKind = 'user' | 'content' | 'message' | 'comment';
 export type ReportStatus = 'open' | 'reviewed' | 'actioned' | 'dismissed';
 export type ContentModerationStatus = 'hidden' | 'removed' | 'pending_review';
 export type UserAccountStatus = 'active' | 'soft_banned' | 'banned' | 'hard_deleted';
-export type SocialProvider = 'apple' | 'google' | 'line';
+export type SocialProvider = 'apple' | 'google' | 'line' | 'facebook';
 
 export type ModerationReport = {
   id: string;
@@ -540,6 +541,28 @@ export function upsertUser(input: {
   return user;
 }
 
+/** Used only to recreate the App Store Review demo account after testers delete it. */
+export function restoreHardDeletedUser(userId: string, displayName: string, handle?: string) {
+  const store = readStore();
+  const existing = store.users[userId];
+  const now = new Date().toISOString();
+  store.users[userId] = {
+    id: userId,
+    displayName,
+    handle,
+    status: 'active',
+    banCount: 0,
+    social: {},
+    productIds: [],
+    contentIds: existing?.contentIds ?? [],
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  };
+  store.blacklist = store.blacklist.filter((b) => b.userId !== userId);
+  writeStore(store);
+  return store.users[userId];
+}
+
 export function isSocialBlacklisted(provider: SocialProvider, providerUserId: string) {
   const store = readStore();
   return store.blacklist.find(
@@ -547,16 +570,136 @@ export function isSocialBlacklisted(provider: SocialProvider, providerUserId: st
   );
 }
 
+/**
+ * Algorithm soft-lock only — never permanent ban / hard delete / banCount escalation.
+ * App Store 1.2: requires a user report (reportId).
+ */
+export function algorithmSoftLockUser(input: {
+  userId: string;
+  actor: string;
+  reason: string;
+  reportId: string;
+}) {
+  const store = readStore();
+  const report = store.reports.find((r) => r.id === input.reportId);
+  if (!report) {
+    throw new AppError(
+      'REPORT_REQUIRED',
+      'App Store 1.2: locking an account requires a user report (reportId)',
+      400,
+    );
+  }
+  if (report.kind === 'user' && report.targetId !== input.userId) {
+    throw new AppError('REPORT_MISMATCH', 'reportId does not match this user', 400);
+  }
+
+  let user = store.users[input.userId];
+  if (!user) {
+    const nowCreate = new Date().toISOString();
+    user = {
+      id: input.userId,
+      displayName: report.targetLabel ?? input.userId,
+      handle: undefined,
+      status: 'active',
+      banCount: 0,
+      social: {},
+      productIds: [],
+      contentIds: [],
+      createdAt: nowCreate,
+      updatedAt: nowCreate,
+    };
+    store.users[input.userId] = user;
+  }
+
+  if (user.status === 'hard_deleted' || user.status === 'banned') {
+    return { user, applied: false as const, reason: `status=${user.status}` };
+  }
+  if (user.status === 'soft_banned') {
+    return { user, applied: false as const, reason: 'already soft-locked' };
+  }
+
+  const ts = new Date().toISOString();
+  user.status = 'soft_banned';
+  user.softBannedAt = ts;
+  user.lastBanReason = input.reason;
+  user.updatedAt = ts;
+  // Do NOT increment banCount — algorithm must never escalate to permanent
+
+  quarantineUserContent(store, user, input.actor, input.reason);
+
+  if (report.status === 'open' || report.status === 'reviewed') {
+    report.status = 'actioned';
+    report.resolvedAt = ts;
+    report.resolvedBy = input.actor;
+    report.resolution = 'algorithm_soft_lock';
+  }
+
+  pushAudit(store, {
+    actor: input.actor,
+    action: 'algorithm_soft_lock',
+    entityType: 'user',
+    entityId: user.id,
+    detail: {
+      reason: input.reason,
+      reportId: input.reportId,
+      appleGuideline: '1.2',
+      permanentBan: false,
+      hardDelete: false,
+    },
+  });
+  writeStore(store);
+  return { user, applied: true as const };
+}
+
 export function banUser(input: {
   userId: string;
   actor: string;
   reason: string;
   mode?: 'soft' | 'hard';
+  /** App Store 1.2 — lock must be tied to a user report */
+  reportId: string;
 }) {
   const store = readStore();
-  const user = store.users[input.userId];
-  if (!user) return null;
-  if (user.status === 'hard_deleted') return { user, created: false };
+  const report = store.reports.find((r) => r.id === input.reportId);
+  if (!report) {
+    throw new AppError(
+      'REPORT_REQUIRED',
+      'App Store 1.2: locking an account requires a user report (reportId)',
+      400,
+    );
+  }
+
+  const reportTargetsUser =
+    report.kind === 'user'
+      ? report.targetId === input.userId
+      : true; // content/message/comment: ops lock author id supplied with matching report evidence
+
+  if (report.kind === 'user' && report.targetId !== input.userId) {
+    throw new AppError('REPORT_MISMATCH', 'reportId does not match this user', 400);
+  }
+  if (!reportTargetsUser) {
+    throw new AppError('REPORT_MISMATCH', 'reportId does not match this user', 400);
+  }
+
+  let user = store.users[input.userId];
+  if (!user) {
+    // Create moderation record from report target so ops can lock without pre-seeding
+    const nowCreate = new Date().toISOString();
+    user = {
+      id: input.userId,
+      displayName: report.targetLabel ?? input.userId,
+      handle: undefined,
+      status: 'active',
+      banCount: 0,
+      social: {},
+      productIds: [],
+      contentIds: [],
+      createdAt: nowCreate,
+      updatedAt: nowCreate,
+    };
+    store.users[input.userId] = user;
+  }
+  if (user.status === 'hard_deleted') return { user, permanent: false, unlocked: false as const };
 
   const mode = input.mode ?? 'hard';
   const now = new Date().toISOString();
@@ -578,15 +721,93 @@ export function banUser(input: {
   // Rule 7: quarantine commerce + UGC
   quarantineUserContent(store, user, input.actor, input.reason);
 
+  // Mark related report actioned
+  if (report.status === 'open' || report.status === 'reviewed') {
+    report.status = 'actioned';
+    report.resolvedAt = now;
+    report.resolvedBy = input.actor;
+    report.resolution = permanent ? 'account_locked_permanent' : 'account_locked_temporary';
+  }
+
   pushAudit(store, {
     actor: input.actor,
-    action: permanent ? 'user_ban_permanent' : 'user_soft_ban',
+    action: permanent ? 'user_lock_permanent' : 'user_lock_temporary',
     entityType: 'user',
     entityId: user.id,
-    detail: { reason: input.reason, banCount: user.banCount },
+    detail: {
+      reason: input.reason,
+      banCount: user.banCount,
+      reportId: input.reportId,
+      reportReason: report.reason,
+      appleGuideline: '1.2',
+    },
   });
   writeStore(store);
   return { user, permanent };
+}
+
+/**
+ * Unlock / restore account after human review.
+ * Hard-deleted accounts cannot be unlocked (PDPA purge).
+ */
+export function unlockUser(input: {
+  userId: string;
+  actor: string;
+  reason: string;
+  reportId?: string;
+}) {
+  if (!input.reason.trim()) {
+    throw new AppError('VALIDATION', 'Unlock reason is required', 400);
+  }
+  const store = readStore();
+  const user = store.users[input.userId];
+  if (!user) return null;
+  if (user.status === 'hard_deleted') {
+    throw new AppError('FORBIDDEN', 'Hard-deleted accounts cannot be unlocked', 403);
+  }
+  if (user.status === 'active') {
+    return { user, changed: false };
+  }
+
+  const now = new Date().toISOString();
+  const previous = user.status;
+  user.status = 'active';
+  user.softBannedAt = undefined;
+  user.bannedAt = undefined;
+  user.updatedAt = now;
+  user.lastBanReason = undefined;
+
+  // Remove social blacklist rows for this user (unlock restores access)
+  store.blacklist = store.blacklist.filter((b) => b.userId !== user.id);
+
+  if (input.reportId) {
+    const report = store.reports.find((r) => r.id === input.reportId);
+    if (report) {
+      report.status = 'reviewed';
+      report.resolvedAt = now;
+      report.resolvedBy = input.actor;
+      report.resolution = 'account_unlocked';
+    }
+  }
+
+  pushAudit(store, {
+    actor: input.actor,
+    action: 'user_unlock',
+    entityType: 'user',
+    entityId: user.id,
+    detail: {
+      reason: input.reason.trim(),
+      previousStatus: previous,
+      reportId: input.reportId,
+      appleGuideline: '1.2',
+    },
+  });
+  writeStore(store);
+  return { user, changed: true, previousStatus: previous };
+}
+
+export function reportsForTarget(targetId: string) {
+  return readStore().reports.filter((r) => r.targetId === targetId);
 }
 
 export function hardDeleteUser(input: { userId: string; actor: string; reason?: string }) {

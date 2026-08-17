@@ -23,6 +23,7 @@ import { BoomCoinRewardPopup } from './BoomCoinRewardPopup';
 import { BoomCoinRewardAnimation } from './BoomCoinRewardAnimation';
 import { colors } from '@/shared/theme/colors';
 import { ENABLE_BOOM_COIN_PURCHASE_UI } from '@/shared/compliance/appStoreGates';
+import { promptText } from '@/shared/components/AppPrompt';
 
 function groupByDay(iso: string) {
   const d = new Date(iso);
@@ -71,29 +72,23 @@ export function BoomWalletScreen() {
       });
       if (result.success) return true;
     }
-    return await new Promise((resolve) => {
-      Alert.prompt(
-        'Wallet PIN',
-        'กรอก PIN 6 หลัก (Preview — ตั้งได้จากความปลอดภัย)',
-        [
-          { text: 'ยกเลิก', style: 'cancel', onPress: () => resolve(false) },
-          {
-            text: 'ยืนยัน',
-            onPress: (pin?: string) => {
-              if (pin && /^\d{6}$/.test(pin)) {
-                try {
-                  enablePin(pin);
-                } catch {
-                  /* already set */
-                }
-                resolve(true);
-              } else resolve(false);
-            },
-          },
-        ],
-        'secure-text',
-      );
+    const pin = await promptText({
+      title: 'Wallet PIN',
+      message: 'กรอก PIN 6 หลัก (Preview — ตั้งได้จากความปลอดภัย)',
+      keyboardType: 'number-pad',
+      secureTextEntry: true,
+      maxLength: 6,
+      okLabel: 'ยืนยัน',
     });
+    if (pin && /^\d{6}$/.test(pin)) {
+      try {
+        enablePin(pin);
+      } catch {
+        /* already set */
+      }
+      return true;
+    }
+    return false;
   };
 
   const onPay = async () => {

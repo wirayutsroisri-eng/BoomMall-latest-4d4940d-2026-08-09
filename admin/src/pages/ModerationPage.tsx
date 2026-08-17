@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
+import { AccountLockPanel } from '../components/AccountLockPanel';
 import {
-  banUser,
   fetchAuditLog,
   fetchBlacklist,
   fetchModeratedContent,
@@ -25,6 +25,7 @@ import {
 export function ModerationPage() {
   const [stats, setStats] = useState<ModerationStats | null>(null);
   const [reports, setReports] = useState<ModerationReport[]>([]);
+  const [openReportsForLock, setOpenReportsForLock] = useState<ModerationReport[]>([]);
   const [content, setContent] = useState<ContentModerationRecord[]>([]);
   const [users, setUsers] = useState<ModeratedUser[]>([]);
   const [blacklist, setBlacklist] = useState<SocialBlacklistEntry[]>([]);
@@ -40,9 +41,10 @@ export function ModerationPage() {
     setLoading(true);
     setError(null);
     try {
-      const [s, r, c, u, b, a] = await Promise.all([
+      const [s, r, openR, c, u, b, a] = await Promise.all([
         fetchModerationStats(),
         fetchModerationReports(statusFilter),
+        fetchModerationReports('open'),
         fetchModeratedContent(),
         fetchModerationUsers(),
         fetchBlacklist(),
@@ -50,6 +52,7 @@ export function ModerationPage() {
       ]);
       setStats(s.data);
       setReports(r.data);
+      setOpenReportsForLock(openR.data);
       setContent(c.data);
       setUsers(u.data);
       setBlacklist(b.data);
@@ -94,18 +97,6 @@ export function ModerationPage() {
     }
   };
 
-  const onBan = async (userId: string, mode: 'soft' | 'hard') => {
-    setBusyId(userId);
-    try {
-      await banUser(userId, manualReason || 'policy violation', mode);
-      await refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'แบนไม่สำเร็จ');
-    } finally {
-      setBusyId(null);
-    }
-  };
-
   const onHardDelete = async (userId: string) => {
     if (!window.confirm('Hard Delete ตาม PDPA? ลบข้อมูลส่วนบุคคลและขึ้น Social Blacklist')) return;
     setBusyId(userId);
@@ -121,40 +112,38 @@ export function ModerationPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="font-display text-2xl font-extrabold text-[#0b1f17]">
-          All-in-One Moderation
-        </h2>
-        <p className="mt-1 max-w-3xl text-sm text-[#122820]/70">
-          10 Golden Rules · Hide / Delete / Ban · Auto-hide เมื่อเกิน 3 unique reports · Social Blacklist ·
-          PDPA Hard Delete · Sync แบบ real-time ไปที่แอป
-        </p>
-      </div>
-
       {error ? (
-        <div className="rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+        <div className="rounded-[14px] border border-[var(--danger)]/20 bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">
           {error}
         </div>
       ) : null}
 
-      {/* Rule 10 — analytics */}
+      <AccountLockPanel
+        reports={openReportsForLock}
+        users={users}
+        busyId={busyId}
+        setBusyId={setBusyId}
+        onDone={refresh}
+        onError={setError}
+      />
+
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="รายงานใหม่ (เปิด)" value={stats?.openReports ?? '—'} />
         <Stat label="Auto-Hidden" value={stats?.autoHiddenPosts ?? '—'} />
-        <Stat label="Banned Users" value={stats?.bannedUsers ?? '—'} />
+        <Stat label="บัญชีถูกล็อก" value={stats?.bannedUsers ?? '—'} />
         <Stat label="Pending Review" value={stats?.pendingReview ?? '—'} />
       </div>
 
       {stats?.topCategories?.length ? (
-        <div className="rounded-2xl border border-[#122820]/10 bg-white/90 px-4 py-3">
-          <p className="text-xs font-bold uppercase tracking-wide text-[#122820]/50">
+        <div className="surface-panel px-4 py-3">
+          <p className="text-xs font-bold uppercase tracking-wide text-[var(--ink-tertiary)]">
             Top Report Categories
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
             {stats.topCategories.map((c) => (
               <span
                 key={c.reason}
-                className="rounded-full bg-[#122820]/8 px-3 py-1 text-xs font-bold text-[#122820]"
+                className="rounded-full bg-[var(--bg)] px-3 py-1 text-xs font-bold text-[var(--ink)]"
               >
                 {c.reason} · {c.count}
               </span>
@@ -164,10 +153,9 @@ export function ModerationPage() {
       ) : null}
 
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* Reports */}
-        <section className="rounded-2xl border border-[#122820]/10 bg-white/90 p-5 shadow-sm">
+        <section className="surface-panel p-5">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-lg font-extrabold text-[#0b1f17]">User Reports</h3>
+            <h3 className="text-lg font-extrabold text-[var(--ink)]">รายงานจากผู้ใช้</h3>
             <div className="flex flex-wrap gap-1">
               {(['open', 'actioned', 'dismissed', 'all'] as const).map((s) => (
                 <button
@@ -175,7 +163,9 @@ export function ModerationPage() {
                   type="button"
                   onClick={() => setStatusFilter(s)}
                   className={`rounded-lg px-2.5 py-1 text-[11px] font-bold ${
-                    statusFilter === s ? 'bg-[#122820] text-white' : 'bg-[#122820]/6'
+                    statusFilter === s
+                      ? 'bg-[var(--ink)] text-white'
+                      : 'bg-[var(--bg)] text-[var(--ink-secondary)]'
                   }`}
                 >
                   {s}
@@ -184,18 +174,18 @@ export function ModerationPage() {
             </div>
           </div>
           {loading ? (
-            <p className="text-sm text-[#122820]/60">กำลังโหลด…</p>
+            <p className="text-sm text-[var(--ink-tertiary)]">กำลังโหลด…</p>
           ) : reports.length === 0 ? (
-            <p className="text-sm text-[#122820]/60">ไม่มีรายงาน</p>
+            <p className="text-sm text-[var(--ink-tertiary)]">ไม่มีรายงาน</p>
           ) : (
             <ul className="max-h-[420px] space-y-2 overflow-auto">
               {reports.map((r) => (
-                <li key={r.id} className="rounded-xl border border-[#122820]/10 bg-[#f7faf8] px-3 py-2">
-                  <p className="text-sm font-bold text-[#0b1f17]">
+                <li key={r.id} className="rounded-[14px] border border-[var(--line)] bg-[var(--bg)] px-3 py-2">
+                  <p className="text-sm font-bold text-[var(--ink)]">
                     {r.reason}{' '}
-                    <span className="text-[10px] uppercase text-[#00a86b]">{r.status}</span>
+                    <span className="text-[10px] uppercase text-[var(--accent)]">{r.status}</span>
                   </p>
-                  <p className="text-xs text-[#122820]/65">
+                  <p className="text-xs text-[var(--ink-tertiary)]">
                     {r.kind} · {r.targetLabel ?? r.targetId}
                   </p>
                   {r.status === 'open' ? (
@@ -203,19 +193,19 @@ export function ModerationPage() {
                       <Btn
                         disabled={busyId === r.id}
                         tone="warn"
-                        label="Hide"
+                        label="ซ่อนเนื้อหา"
                         onClick={() => void actReport(r.id, 'hide')}
                       />
                       <Btn
                         disabled={busyId === r.id}
                         tone="danger"
-                        label="Delete"
+                        label="ลบเนื้อหา"
                         onClick={() => void actReport(r.id, 'remove')}
                       />
                       <Btn
                         disabled={busyId === r.id}
                         tone="neutral"
-                        label="Dismiss"
+                        label="ยกเลิกรายงาน"
                         onClick={() => void actReport(r.id, 'dismiss')}
                       />
                     </div>
@@ -226,37 +216,27 @@ export function ModerationPage() {
           )}
         </section>
 
-        {/* Accounts */}
-        <section className="rounded-2xl border border-[#122820]/10 bg-white/90 p-5 shadow-sm">
-          <h3 className="mb-3 text-lg font-extrabold text-[#0b1f17]">Account Status</h3>
+        <section className="surface-panel p-5">
+          <h3 className="mb-3 text-lg font-extrabold text-[var(--ink)]">สถานะบัญชี</h3>
+          <p className="mb-3 text-xs text-[var(--ink-tertiary)]">
+            ล็อก/ปลดล็อกใช้แผงด้านบน · ที่นี่เหลือ Hard Delete (PDPA) เท่านั้น
+          </p>
           <ul className="max-h-[420px] space-y-2 overflow-auto">
             {users.map((u) => (
-              <li key={u.id} className="rounded-xl border border-[#122820]/10 px-3 py-2">
-                <p className="text-sm font-bold text-[#0b1f17]">
+              <li key={u.id} className="rounded-[14px] border border-[var(--line)] px-3 py-2">
+                <p className="text-sm font-bold text-[var(--ink)]">
                   {u.displayName}{' '}
-                  <span className="text-[10px] uppercase text-amber-700">{u.status}</span>
+                  <span className="text-[10px] uppercase text-[var(--warn)]">{u.status}</span>
                 </p>
-                <p className="text-xs text-[#122820]/60">
-                  {u.handle ?? u.id} · bans {u.banCount}
+                <p className="text-xs text-[var(--ink-tertiary)]">
+                  {u.handle ?? u.id} · locks {u.banCount}
                 </p>
                 {u.status !== 'hard_deleted' ? (
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     <Btn
                       disabled={busyId === u.id}
-                      tone="warn"
-                      label="Soft Ban"
-                      onClick={() => void onBan(u.id, 'soft')}
-                    />
-                    <Btn
-                      disabled={busyId === u.id}
                       tone="danger"
-                      label="Ban"
-                      onClick={() => void onBan(u.id, 'hard')}
-                    />
-                    <Btn
-                      disabled={busyId === u.id}
-                      tone="danger"
-                      label="Hard Delete"
+                      label="Hard Delete (PDPA)"
                       onClick={() => void onHardDelete(u.id)}
                     />
                   </div>

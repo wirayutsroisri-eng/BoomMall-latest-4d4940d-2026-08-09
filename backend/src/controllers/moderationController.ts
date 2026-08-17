@@ -7,7 +7,6 @@ import {
   getPublicContentBlocks,
   getUser,
   hardDeleteUser,
-  isSocialBlacklisted,
   listAudit,
   listBlacklist,
   listContentActions,
@@ -19,11 +18,13 @@ import {
   resolveReport,
   restoreContent,
   setContentStatus,
-  upsertUser,
+  unlockUser,
   type ContentModerationStatus,
   type ReportKind,
   type SocialProvider,
 } from '../services/moderation';
+import { runLockUnlockAlgorithm } from '../services/trustSafety/service';
+import { bumpSocialPostReport } from '../modules/feed/SocialPostService';
 
 export function getModerationStats(_req: AuthedRequest, res: Response) {
   res.json({ ok: true, data: moderationStats() });
@@ -75,6 +76,13 @@ export function postPublicReport(req: Request, res: Response, next: NextFunction
       details: body.details ? String(body.details) : undefined,
       reporterRef: body.reporterRef ? String(body.reporterRef) : 'app-user',
     });
+    // Algorithm applies soft-lock / AUTO_HIDDEN / unlock from active NL policies (App Store 1.2)
+    void runLockUnlockAlgorithm({ actor: 'algorithm', trigger: 'user_report' }).catch(() => {
+      /* non-fatal */
+    });
+    if (kind === 'content' && targetId) {
+      void bumpSocialPostReport(targetId).catch(() => undefined);
+    }
     res.status(201).json({ ok: true, data: result });
   } catch (e) {
     next(e);
@@ -176,18 +184,48 @@ export function getModerationUser(req: AuthedRequest, res: Response, next: NextF
   }
 }
 
-/** POST /api/v1/admin/users/:id/ban */
+/** POST /api/v1/admin/users/:id/ban — Lock account (requires user report · App Store 1.2) */
 export function postBanUser(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
     const userId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     if (!userId) throw new AppError('VALIDATION', 'user id required', 400);
-    const reason = String(req.body?.reason ?? 'policy violation').trim();
+    const reason = String(req.body?.reason ?? '').trim();
+    const reportId = String(req.body?.reportId ?? '').trim();
+    if (!reason) throw new AppError('VALIDATION', 'reason required', 400);
+    if (!reportId) {
+      throw new AppError(
+        'REPORT_REQUIRED',
+        'App Store 1.2: ต้องมีรายงานจากผู้ใช้ (reportId) ก่อนล็อกบัญชี',
+        400,
+      );
+    }
     const mode = req.body?.mode === 'soft' ? 'soft' : 'hard';
     const result = banUser({
       userId,
       actor: req.adminActor ?? 'admin',
       reason,
       mode,
+      reportId,
+    });
+    if (!result) throw new AppError('NOT_FOUND', 'User not found', 404);
+    res.json({ ok: true, data: result });
+  } catch (e) {
+    next(e);
+  }
+}
+
+/** POST /api/v1/admin/users/:id/unlock — Unlock after review */
+export function postUnlockUser(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const userId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!userId) throw new AppError('VALIDATION', 'user id required', 400);
+    const reason = String(req.body?.reason ?? '').trim();
+    if (!reason) throw new AppError('VALIDATION', 'unlock reason required', 400);
+    const result = unlockUser({
+      userId,
+      actor: req.adminActor ?? 'admin',
+      reason,
+      reportId: req.body?.reportId ? String(req.body.reportId) : undefined,
     });
     if (!result) throw new AppError('NOT_FOUND', 'User not found', 404);
     res.json({ ok: true, data: result });
@@ -247,63 +285,19 @@ export function postKeywordScan(req: Request, res: Response, next: NextFunction)
   }
 }
 
-/** Social login exchange — checks blacklist, upserts user, returns session */
-export function postSocialLogin(req: Request, res: Response, next: NextFunction) {
+/** Social login exchange — Apple JWKS / JWT session */
+export async function postSocialLogin(req: Request, res: Response, next: NextFunction) {
   try {
+    const { exchangeSocialLogin } = await import('../modules/auth/AuthService');
     const provider = String(req.body?.provider ?? '').trim() as SocialProvider;
-    const providerUserId = String(req.body?.providerUserId ?? '').trim();
-    const displayName = String(req.body?.displayName ?? 'BoomMall User').trim();
-    const handle = req.body?.handle ? String(req.body.handle) : undefined;
-    const identityToken = req.body?.identityToken ? String(req.body.identityToken) : undefined;
-
-    if (!['apple', 'google', 'line'].includes(provider) || !providerUserId) {
-      throw new AppError('VALIDATION', 'provider and providerUserId required', 400);
-    }
-
-    const blocked = isSocialBlacklisted(provider, providerUserId);
-    if (blocked) {
-      throw new AppError('FORBIDDEN', 'This social account is banned from BoomMall', 403);
-    }
-
-    // Production: verify identityToken with Apple/Google/LINE JWKS.
-    // Here we accept the client assertion after format checks for demo ops.
-    if (identityToken && identityToken.length < 10) {
-      throw new AppError('UNAUTHORIZED', 'Invalid identity token', 401);
-    }
-
-    const userId = `${provider}_${providerUserId}`.slice(0, 64);
-    const existing = getUser(userId);
-    if (existing?.status === 'banned' || existing?.status === 'soft_banned') {
-      throw new AppError('FORBIDDEN', 'Account suspended', 403);
-    }
-    if (existing?.status === 'hard_deleted') {
-      throw new AppError('FORBIDDEN', 'Account deleted', 403);
-    }
-
-    const user = upsertUser({
-      id: userId,
-      displayName,
-      handle,
-      social: { [provider]: providerUserId },
+    const data = await exchangeSocialLogin({
+      provider,
+      providerUserId: String(req.body?.providerUserId ?? '').trim(),
+      displayName: req.body?.displayName ? String(req.body.displayName) : undefined,
+      handle: req.body?.handle ? String(req.body.handle) : undefined,
+      identityToken: req.body?.identityToken ? String(req.body.identityToken) : undefined,
     });
-
-    const sessionToken = Buffer.from(
-      JSON.stringify({ sub: user.id, provider, iat: Date.now() }),
-    ).toString('base64url');
-
-    res.json({
-      ok: true,
-      data: {
-        sessionToken,
-        user: {
-          id: user.id,
-          displayName: user.displayName,
-          handle: user.handle,
-          status: user.status,
-          provider,
-        },
-      },
-    });
+    res.json({ ok: true, data });
   } catch (e) {
     next(e);
   }

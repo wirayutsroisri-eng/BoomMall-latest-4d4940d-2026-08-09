@@ -146,6 +146,24 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen
+          name="shop/product/[id]"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
+            gestureEnabled: true,
+            fullScreenGestureEnabled: true,
+          }}
+        />
+        <Stack.Screen
+          name="shop/store/[shopKey]"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
+            gestureEnabled: true,
+            fullScreenGestureEnabled: true,
+          }}
+        />
+        <Stack.Screen
           name="shop/image-search"
           options={{
             presentation: 'fullScreenModal',
@@ -174,10 +192,64 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen
+          name="store/manage"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
+          name="store/history/[category]"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
           name="store/dashboard"
           options={{
             presentation: 'card',
             animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
+          name="store/orders"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen
+          name="store/shipping"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen
+          name="store/returns"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen
+          name="store/finance"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen
+          name="store/payout"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
+            gestureEnabled: true,
           }}
         />
         <Stack.Screen
@@ -217,6 +289,13 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen
+          name="settings/index"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
           name="settings/moderation"
           options={{
             presentation: 'card',
@@ -224,10 +303,46 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen
+          name="settings/activity"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
+          name="settings/history/[category]"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
+          name="settings/devices"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
+          name="settings/payments"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen
           name="legal/[doc]"
           options={{
             presentation: 'card',
             animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
+          name="register"
+          options={{
+            presentation: 'fullScreenModal',
+            ...dismissibleModalOptions,
           }}
         />
         <Stack.Screen name="+not-found" />

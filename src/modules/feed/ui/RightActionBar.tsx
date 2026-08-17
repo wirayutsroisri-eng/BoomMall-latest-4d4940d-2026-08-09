@@ -1,13 +1,11 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
-  withSequence,
   withSpring,
-  withTiming,
 } from 'react-native-reanimated';
 import { colors } from '@/shared/theme/colors';
 import { CoinIcon } from './CoinIcon';
@@ -15,24 +13,17 @@ import { SpinningDisc } from './SpinningDisc';
 import { formatBoomCoinCount } from '@/modules/wallet/domain/boom-coin';
 
 type Props = {
-  authorInitial: string;
   tips: number;
   comments: number;
-  shares: number;
   tipped?: boolean;
-  saved?: boolean;
-  /** TikTok: กำลังติดตามแล้ว → ซ่อนปุ่ม + */
-  following?: boolean;
-  onAvatar?: () => void;
-  /** TikTok: แตะ + ใต้รูป = follow ทันที */
-  onFollow?: () => void;
   /** กดทีละ 1 เหรียญ — ไม่เปิดชีตเลือกจำนวน (ซ่อนถ้าไม่ส่ง) */
   onTip?: () => void;
   onComment: () => void;
-  onVaultSave: () => void;
-  onShare: () => void;
-  onCall?: () => void;
-  onReport?: () => void;
+  onShare?: () => void;
+  shares?: number;
+  onLike?: () => void;
+  liked?: boolean;
+  likes?: number;
   /** Open YouTube-style Listen Mode for this clip's sound */
   onMusic?: () => void;
   musicActive?: boolean;
@@ -43,42 +34,23 @@ function formatCount(n: number) {
 }
 
 export function RightActionBar({
-  authorInitial,
   tips,
   comments,
-  shares,
   tipped,
-  saved,
-  following,
-  onAvatar,
-  onFollow,
   onTip,
   onComment,
-  onVaultSave,
   onShare,
-  onCall,
-  onReport,
+  shares,
+  onLike,
+  liked,
+  likes,
   onMusic,
   musicActive,
 }: Props) {
   const tipScale = useSharedValue(1);
   const tipStyle = useAnimatedStyle(() => ({ transform: [{ scale: tipScale.value }] }));
-  const badgeScale = useSharedValue(following ? 0 : 1);
-  const badgeStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: badgeScale.value }],
-    opacity: badgeScale.value,
-  }));
-
-  useEffect(() => {
-    if (following) {
-      badgeScale.value = withSequence(
-        withSpring(1.25, { damping: 8, stiffness: 280 }),
-        withTiming(0, { duration: 220 }),
-      );
-    } else {
-      badgeScale.value = withSpring(1, { damping: 12, stiffness: 220 });
-    }
-  }, [following, badgeScale]);
+  const likeScale = useSharedValue(1);
+  const likeStyle = useAnimatedStyle(() => ({ transform: [{ scale: likeScale.value }] }));
 
   const handleTip = () => {
     if (!onTip) return;
@@ -89,45 +61,17 @@ export function RightActionBar({
     onTip();
   };
 
-  const handleFollowBadge = () => {
-    if (following) return;
-    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    onFollow?.();
+  const handleLike = () => {
+    if (!onLike) return;
+    likeScale.value = withSpring(1.35, { damping: 6, stiffness: 260 }, () => {
+      likeScale.value = withSpring(1, { damping: 10 });
+    });
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    onLike();
   };
 
   return (
     <View style={styles.wrap} pointerEvents="box-none">
-      <View style={styles.avatarWrap}>
-        <Pressable
-          onPress={onAvatar}
-          onLongPress={() => {
-            if (!onCall) return;
-            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            onCall();
-          }}
-          hitSlop={6}
-        >
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{authorInitial}</Text>
-          </View>
-        </Pressable>
-        <Pressable
-          onPress={handleFollowBadge}
-          hitSlop={8}
-          style={styles.followBadgeHit}
-          accessibilityLabel="ติดตาม"
-          pointerEvents={following ? 'none' : 'auto'}
-        >
-          <Animated.View style={[styles.followBadge, badgeStyle]}>
-            <Ionicons
-              name={following ? 'checkmark' : 'add'}
-              size={12}
-              color={colors.text.inverse}
-            />
-          </Animated.View>
-        </Pressable>
-      </View>
-
       {onTip ? (
         <Pressable onPress={handleTip} style={styles.action} hitSlop={4} accessibilityLabel="เหรียญ">
           <Animated.View style={tipStyle}>
@@ -137,16 +81,32 @@ export function RightActionBar({
         </Pressable>
       ) : null}
 
+      {onLike ? (
+        <Pressable onPress={handleLike} style={styles.action} hitSlop={4} accessibilityLabel="ถูกใจ">
+          <Animated.View style={likeStyle}>
+            <Ionicons
+              name={liked ? 'heart' : 'heart-outline'}
+              size={28}
+              color={liked ? colors.brand.pink : colors.text.inverse}
+              style={styles.iconShadow}
+            />
+          </Animated.View>
+          <Text style={[styles.label, liked && styles.likeLabelActive]}>
+            {formatCount(likes ?? 0)}
+          </Text>
+        </Pressable>
+      ) : null}
+
       <Action icon="chatbubble-ellipses" label={formatCount(comments)} onPress={onComment} />
-      <Action
-        icon={saved ? 'bookmark' : 'bookmark-outline'}
-        label="เซฟ"
-        color={saved ? colors.accent.vault : colors.text.inverse}
-        onPress={onVaultSave}
-      />
-      <Action icon="arrow-redo-outline" label={formatCount(shares)} onPress={onShare} />
-      {onReport ? (
-        <Action icon="flag-outline" label="รายงาน" onPress={onReport} />
+      {onShare ? (
+        <Action
+          icon="arrow-redo-outline"
+          label={formatCount(shares ?? 0)}
+          onPress={() => {
+            void Haptics.selectionAsync();
+            onShare();
+          }}
+        />
       ) : null}
 
       <View style={styles.discSlot}>
@@ -192,44 +152,6 @@ const styles = StyleSheet.create({
     gap: ACTION_GAP,
     zIndex: 15,
   },
-  avatarWrap: {
-    width: 40,
-    height: ACTION_SLOT,
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    marginBottom: 0,
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-    backgroundColor: colors.brand.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: colors.text.inverse,
-  },
-  avatarText: {
-    fontWeight: '900',
-    color: colors.brand.ink,
-    fontSize: 15,
-  },
-  followBadgeHit: {
-    position: 'absolute',
-    bottom: 0,
-    alignSelf: 'center',
-    zIndex: 2,
-  },
-  followBadge: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: colors.brand.pink,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: colors.text.inverse,
-  },
   action: {
     width: 48,
     height: ACTION_SLOT,
@@ -252,6 +174,9 @@ const styles = StyleSheet.create({
   },
   tipLabelActive: {
     color: colors.accent.warning,
+  },
+  likeLabelActive: {
+    color: colors.brand.pink,
   },
   discSlot: {
     width: 48,

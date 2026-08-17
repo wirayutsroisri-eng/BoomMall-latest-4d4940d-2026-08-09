@@ -10,26 +10,28 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import {
   HIDDEN_CHAT_SECRET,
   useChatStore,
 } from '@/modules/chat/state/chat-store';
 import { useOpenChatStore } from '@/modules/chat/state/openchat-store';
-import { useCallStore } from '@/modules/chat/state/call-store';
-import { QUOTATION_TEMPLATES } from '@/modules/chat/data/mockQuotationTemplates';
+import { useAuthStore } from '@/modules/auth/state/auth-store';
 import type { Conversation, ConversationKind, OpenChatGroup } from '@/modules/chat/domain/types';
 import { ChatListItem } from './ChatListItem';
 import { OpenChatGroupListItem } from './OpenChatGroupListItem';
 import { ChatPlusMenu } from './ChatPlusMenu';
 import { ContactPickerSheet } from './ContactPickerSheet';
+import { CreateGroupSheet } from './CreateGroupSheet';
 import { ChatItemActionSheet } from './ChatItemActionSheet';
+import { MyQrSheet } from './MyQrSheet';
 import { sortPinnedByRecent } from '@/modules/chat/data/chatActions';
 import { ActiveNotesBar } from './ActiveNotesBar';
 import { colors } from '@/shared/theme/colors';
-import { ENABLE_CALLS } from '@/shared/compliance/appStoreGates';
 import { useModerationStore } from '@/modules/safety/state/moderation-store';
+import { jumpToChatThread } from '@/shared/navigation/safeNavigate';
+import { chatInboxPalette } from './chatDayNight';
 
 type FilterKey = 'all' | 'pinned' | ConversationKind | 'openchat';
 
@@ -38,31 +40,43 @@ const FILTERS: Array<{ key: FilterKey; label: string }> = [
   { key: 'pinned', label: '📌 ปักหมุด' },
   { key: 'friend', label: 'เพื่อน' },
   { key: 'group', label: 'กลุ่ม' },
-  { key: 'official', label: 'บัญชีทางการ' },
+  { key: 'official', label: 'ร้าน / ลูกค้า' },
   { key: 'openchat', label: 'โอเพนแชท' },
 ];
 
 export function ChatListScreen() {
   const insets = useSafeAreaInsets();
+  const palette = chatInboxPalette();
   const [filter, setFilter] = useState<FilterKey>('all');
   const [query, setQuery] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
-  const [picker, setPicker] = useState<null | 'call' | 'quotation'>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [myQrOpen, setMyQrOpen] = useState(false);
+  const [createGroupOpen, setCreateGroupOpen] = useState(false);
   const [actionTarget, setActionTarget] = useState<Conversation | null>(null);
   const conversations = useChatStore((s) => s.conversations);
   const hiddenUnlocked = useChatStore((s) => s.hiddenUnlocked);
   const unlockHiddenChats = useChatStore((s) => s.unlockHiddenChats);
   const lockHiddenChats = useChatStore((s) => s.lockHiddenChats);
   const createGroup = useChatStore((s) => s.createGroup);
-  const sendQuotation = useChatStore((s) => s.sendQuotation);
   const markConversationRead = useChatStore((s) => s.markConversationRead);
+  const markAllConversationsRead = useChatStore((s) => s.markAllConversationsRead);
+  const markConversationUnread = useChatStore((s) => s.markConversationUnread);
   const togglePinConversation = useChatStore((s) => s.togglePinConversation);
   const toggleMuteConversation = useChatStore((s) => s.toggleMuteConversation);
   const archiveConversation = useChatStore((s) => s.archiveConversation);
   const deleteConversation = useChatStore((s) => s.deleteConversation);
+  const hydrateInbox = useChatStore((s) => s.hydrateInbox);
   const groups = useOpenChatStore((s) => s.groups);
-  const startCall = useCallStore((s) => s.startCall);
+  const authUser = useAuthStore((s) => s.user);
   const blockedUserIds = useModerationStore((s) => s.blockedUserIds);
+  const blockUser = useModerationStore((s) => s.blockUser);
+
+  useFocusEffect(
+    useCallback(() => {
+      void hydrateInbox();
+    }, [hydrateInbox]),
+  );
 
   const visibleConversations = useMemo(() => {
     const blocked = new Set(blockedUserIds.map((id) => id.toLowerCase()));
@@ -93,39 +107,28 @@ export function ChatListScreen() {
     filter === 'openchat' ? groups : filteredConversations;
 
   const handleCreateGroup = () => {
-    Alert.prompt(
-      'สร้างกลุ่มใหม่',
-      'ตั้งชื่อกลุ่มแชตของคุณ (Group Chat)',
-      (name) => {
-        const trimmed = name?.trim();
-        if (!trimmed) return;
-        const id = createGroup(trimmed, 1);
-        router.push(`/(tabs)/chat/${id}`);
-      },
-      'plain-text',
-    );
+    setTimeout(() => setCreateGroupOpen(true), 280);
   };
 
-  const handleStartCall = (peerName: string, type: 'voice' | 'video') => {
-    if (!ENABLE_CALLS) {
-      Alert.alert('การโทรยังไม่พร้อม', 'ยังไม่มีระบบโทรศัพท์ในเวอร์ชันนี้');
-      return;
-    }
-    startCall(peerName, type);
+  const finishCreateGroup = (name: string, members: Array<{ name: string; handle: string }>) => {
+    const id = createGroup(name, members);
+    jumpToChatThread(id);
   };
 
-  const handleQuotation = (conversationId: string) => {
-    const template = QUOTATION_TEMPLATES[Math.floor(Math.random() * QUOTATION_TEMPLATES.length)];
-    sendQuotation(conversationId, {
-      id: `q-quick-${Date.now()}`,
-      title: template.title,
-      description: template.description,
-      amount: template.amount,
-      currency: 'THB',
-      status: 'pending',
-      expiresAt: 'วันนี้ 23:59',
-    });
-    router.push(`/(tabs)/chat/${conversationId}`);
+  const handleScanQr = () => {
+    router.push('/qr-scan');
+  };
+
+  const handleMyQr = () => {
+    setTimeout(() => setMyQrOpen(true), 280);
+  };
+
+  const handleNewChat = () => {
+    setTimeout(() => setPickerOpen(true), 280);
+  };
+
+  const handleMarkAllRead = () => {
+    markAllConversationsRead();
   };
 
   const onChangeQuery = (text: string) => {
@@ -139,9 +142,26 @@ export function ChatListScreen() {
   };
 
   const handleDeleteConversation = (id: string) => {
-    Alert.alert('ลบแชต', 'ต้องการลบการสนทนานี้ออกจากรายการหรือไม่?', [
+    Alert.alert('ลบแชท', 'ต้องการลบการสนทนานี้ออกจากรายการหรือไม่?', [
       { text: 'ยกเลิก', style: 'cancel' },
       { text: 'ลบ', style: 'destructive', onPress: () => deleteConversation(id) },
+    ]);
+  };
+
+  const handleBlockConversation = (id: string) => {
+    const target = conversations.find((c) => c.id === id);
+    if (!target) return;
+    const handle = (target.peerHandle ?? '').replace(/^@/, '');
+    Alert.alert('บล็อก', `บล็อก ${target.peerName}? จะไม่แสดงแชทและคอนเทนต์จากผู้ใช้นี้`, [
+      { text: 'ยกเลิก', style: 'cancel' },
+      {
+        text: 'บล็อก',
+        style: 'destructive',
+        onPress: () => {
+          if (handle) blockUser(handle);
+          deleteConversation(id);
+        },
+      },
     ]);
   };
 
@@ -150,12 +170,20 @@ export function ChatListScreen() {
     () => (
       <View style={styles.listHeader}>
         <View style={styles.topBar}>
-          <View style={styles.searchRow}>
-            <Ionicons name="search" size={18} color="rgba(255,255,255,0.45)" />
+          <View
+            style={[
+              styles.searchRow,
+              {
+                backgroundColor: palette.searchBg,
+                borderColor: palette.searchBorder,
+              },
+            ]}
+          >
+            <Ionicons name="search" size={18} color={palette.searchPlaceholder} />
             <TextInput
-              style={styles.search}
+              style={[styles.search, { color: palette.searchText }]}
               placeholder="ค้นหา หรือพิมพ์รหัสลับ Hidden Chats"
-              placeholderTextColor="rgba(255,255,255,0.4)"
+              placeholderTextColor={palette.searchPlaceholder}
               value={query}
               onChangeText={onChangeQuery}
               autoCapitalize="none"
@@ -173,7 +201,7 @@ export function ChatListScreen() {
             onPress={() => setMenuOpen(true)}
             accessibilityLabel="เพิ่ม"
           >
-            <Ionicons name="add" size={36} color="#FFFFFF" style={styles.addGlow} />
+            <Ionicons name="add" size={36} color={palette.addIcon} />
           </Pressable>
         </View>
 
@@ -193,32 +221,48 @@ export function ChatListScreen() {
           contentContainerStyle={styles.chipsContent}
           keyboardShouldPersistTaps="handled"
         >
-          {FILTERS.map((f) => (
-            <Pressable
-              key={f.key}
-              style={[styles.chip, filter === f.key && styles.chipActive]}
-              onPress={() => setFilter(f.key)}
-            >
-              <Text style={[styles.chipText, filter === f.key && styles.chipTextActive]}>
-                {f.label}
-              </Text>
-            </Pressable>
-          ))}
+          {FILTERS.map((f) => {
+            const active = filter === f.key;
+            return (
+              <Pressable
+                key={f.key}
+                style={[
+                  styles.chip,
+                  {
+                    backgroundColor: active ? palette.chipActiveBg : palette.chipBg,
+                    borderColor: active ? palette.chipActiveBg : palette.chipBorder,
+                  },
+                ]}
+                onPress={() => setFilter(f.key)}
+              >
+                <Text
+                  style={[
+                    styles.chipText,
+                    { color: active ? palette.chipActiveText : palette.chipText },
+                  ]}
+                >
+                  {f.label}
+                </Text>
+              </Pressable>
+            );
+          })}
         </ScrollView>
       </View>
     ),
-    [filter, hiddenUnlocked, lockHiddenChats, query],
+    [filter, hiddenUnlocked, lockHiddenChats, palette, query],
   );
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top + 4 }]}>
+    <View style={[styles.root, { paddingTop: insets.top + 4, backgroundColor: palette.canvas }]}>
       <FlatList<Conversation | OpenChatGroup>
         data={listData}
         keyExtractor={(item) => item.id}
         ListHeaderComponent={listHeader}
         stickyHeaderIndices={[]}
         contentContainerStyle={styles.list}
-        ItemSeparatorComponent={() => <View style={styles.sep} />}
+        ItemSeparatorComponent={() => (
+          <View style={[styles.sep, { backgroundColor: palette.sep }]} />
+        )}
         keyboardShouldPersistTaps="handled"
         renderItem={({ item }) =>
           'peerName' in item ? (
@@ -229,8 +273,8 @@ export function ChatListScreen() {
         }
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Ionicons name="chatbubbles-outline" size={36} color="rgba(255,255,255,0.35)" />
-            <Text style={styles.emptyText}>ไม่มีแชตในหมวดนี้</Text>
+            <Ionicons name="chatbubbles-outline" size={36} color={palette.empty} />
+            <Text style={[styles.emptyText, { color: palette.empty }]}>ไม่มีแชตในหมวดนี้</Text>
           </View>
         }
       />
@@ -239,18 +283,32 @@ export function ChatListScreen() {
         visible={menuOpen}
         onClose={() => setMenuOpen(false)}
         onCreateGroup={handleCreateGroup}
-        onAddFriend={() => router.push('/(tabs)/chat/add-friend')}
-        onStartCall={() => setPicker('call')}
-        onQuotation={() => setPicker('quotation')}
+        onScanQr={handleScanQr}
+        onMyQr={handleMyQr}
+        onNewChat={handleNewChat}
+        onMarkAllRead={handleMarkAllRead}
       />
 
       <ContactPickerSheet
-        visible={picker !== null}
-        mode={picker ?? 'call'}
+        visible={pickerOpen}
         contacts={visibleConversations.filter((c) => (c.kind ?? 'friend') !== 'group')}
-        onClose={() => setPicker(null)}
-        onPickForCall={handleStartCall}
-        onPickForQuotation={handleQuotation}
+        onClose={() => setPickerOpen(false)}
+        onPick={(id) => jumpToChatThread(id)}
+        onAddFriend={() => router.push('/(tabs)/chat/add-friend')}
+      />
+
+      <MyQrSheet
+        visible={myQrOpen}
+        displayName={authUser?.displayName ?? 'BoomMall'}
+        handle={authUser?.handle ?? authUser?.id ?? 'me'}
+        onClose={() => setMyQrOpen(false)}
+      />
+
+      <CreateGroupSheet
+        visible={createGroupOpen}
+        contacts={visibleConversations.filter((c) => (c.kind ?? 'friend') !== 'group')}
+        onClose={() => setCreateGroupOpen(false)}
+        onCreate={finishCreateGroup}
       />
 
       <ChatItemActionSheet
@@ -261,7 +319,10 @@ export function ChatListScreen() {
         onToggleMute={toggleMuteConversation}
         onArchive={archiveConversation}
         onMarkRead={markConversationRead}
+        onMarkUnread={markConversationUnread}
         onDelete={handleDeleteConversation}
+        onBlock={handleBlockConversation}
+        onOpen={(id) => jumpToChatThread(id)}
       />
     </View>
   );
@@ -270,7 +331,6 @@ export function ChatListScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#000000',
     paddingHorizontal: 16,
   },
   listHeader: {
@@ -287,16 +347,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#1C1C1E',
     borderRadius: 14,
     paddingHorizontal: 12,
     borderWidth: 1,
-    borderColor: colors.border.onDark,
   },
   search: {
     flex: 1,
     height: 44,
-    color: colors.text.inverse,
   },
   addBtn: {
     width: 44,
@@ -304,11 +361,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'transparent',
-  },
-  addGlow: {
-    textShadowColor: 'rgba(255,255,255,0.55)',
-    textShadowRadius: 6,
-    textShadowOffset: { width: 0, height: 0 },
   },
   lockHidden: {
     color: colors.accent.vault,
@@ -337,28 +389,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 16,
-    backgroundColor: '#1C1C1E',
     borderWidth: 1,
-    borderColor: colors.border.onDark,
-  },
-  chipActive: {
-    backgroundColor: '#FFFFFF',
-    borderColor: '#FFFFFF',
   },
   chipText: {
     fontWeight: '700',
     fontSize: 12,
-    color: 'rgba(255,255,255,0.72)',
-  },
-  chipTextActive: {
-    color: colors.brand.ink,
   },
   list: {
     paddingBottom: 120,
   },
   sep: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.border.onDark,
   },
   empty: {
     alignItems: 'center',
@@ -366,7 +407,6 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   emptyText: {
-    color: 'rgba(255,255,255,0.45)',
     fontSize: 13,
   },
 });

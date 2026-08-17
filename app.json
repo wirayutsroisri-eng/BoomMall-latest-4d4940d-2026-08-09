@@ -11,15 +11,27 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.boommall.superapp",
+      "buildNumber": "1",
       "usesAppleSignIn": true,
       "infoPlist": {
         "NSFaceIDUsageDescription": "BoomMall ใช้ Face ID เพื่อปลดล็อก Boom Vault และยืนยันตัวตนอย่างปลอดภัย",
-        "NSCameraUsageDescription": "BoomMall ใช้กล้องเพื่อถ่ายรูปสินค้า โพสต์คอนเทนต์ และแนบรูปในแชต",
+        "NSCameraUsageDescription": "BoomMall ใช้กล้องเพื่อถ่ายรูปสินค้า สแกนบาร์โค้ดคลัง โพสต์คอนเทนต์ และแนบรูปในแชต",
         "NSMicrophoneUsageDescription": "BoomMall ใช้ไมโครโฟนเพื่อบันทึกวอยซ์โน้ตในแชตและคลิปเสียงประกอบคอนเทนต์",
-        "NSPhotoLibraryUsageDescription": "BoomMall ใช้คลังภาพเพื่อแนบรูปในแชต โพสต์คอนเทนต์ และเลือกรูปสินค้า",
+        "NSPhotoLibraryUsageDescription": "BoomMall ใช้คลังภาพเพื่อแนบรูปและวิดีโอสินค้า โพสต์คอนเทนต์ และแนบสื่อในแชต",
+        "NSPhotoLibraryAddUsageDescription": "BoomMall บันทึกรูปที่คุณเลือกหรือสร้างลงคลังภาพเมื่อคุณอนุญาต",
+        "NSLocalNetworkUsageDescription": "BoomMall เชื่อมต่อเซิร์ฟเวอร์ในเครือข่ายท้องถิ่นเพื่อซิงค์บัญชี แชต และร้านค้าระหว่างทดสอบ",
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        },
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [
           "audio"
+        ],
+        "LSApplicationQueriesSchemes": [
+          "line",
+          "fb-messenger",
+          "whatsapp",
+          "fbapi"
         ]
       },
       "privacyManifests": {
@@ -60,7 +72,22 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "package": "com.boommall.superapp",
+      "versionCode": 1,
       "predictiveBackGestureEnabled": false,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "boommall.app",
+              "pathPrefix": "/creator"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ],
       "permissions": [
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
@@ -73,6 +100,7 @@
         "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
         "android.permission.READ_MEDIA_IMAGES",
         "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.POST_NOTIFICATIONS",
         "android.permission.MODIFY_AUDIO_SETTINGS"
       ]
     },
@@ -94,7 +122,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "BoomMall ใช้คลังภาพเพื่อแนบรูปในแชต โพสต์คอนเทนต์ และเลือกรูปสินค้า"
+          "photosPermission": "BoomMall ใช้คลังภาพเพื่อแนบรูปในแชต โพสต์คอนเทนต์ และเลือกรูปสินค้า",
+          "cameraPermission": "BoomMall ใช้กล้องเพื่อถ่ายรูปสินค้า โพสต์คอนเทนต์ และแนบรูปในแชต"
         }
       ],
       [
@@ -113,6 +142,15 @@
         {
           "enableBackgroundPlayback": true,
           "microphonePermission": "BoomMall ใช้ไมโครโฟนเพื่อบันทึกวอยซ์โน้ตในแชตและคลิปเสียงประกอบคอนเทนต์"
+        }
+      ],
+      "expo-video",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#00D68F",
+          "defaultChannel": "chat-reminders"
         }
       ]
     ],

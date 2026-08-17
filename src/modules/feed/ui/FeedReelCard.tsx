@@ -20,10 +20,11 @@ import { colors } from '@/shared/theme/colors';
 import type { FeedItem } from '@/modules/feed/domain/types';
 import { DEFAULT_OVERLAY_TRANSFORM } from '@/modules/create/domain/overlay';
 import { LockedOverlayText } from '@/modules/create/ui/LockedOverlayText';
-import { useFollowStore } from '@/modules/social/state/follow-store';
 import { useMusicPlayerStore } from '@/modules/music/state/music-player-store';
 import { openListenScreenNow } from '@/shared/navigation/safeNavigate';
-import { CoinIcon } from './CoinIcon';
+import { useFeedChromeStore } from '@/modules/feed/state/feed-chrome-store';
+import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
+import { Avatar } from '@/shared/components/Avatar';
 import { RightActionBar } from './RightActionBar';
 import { IOS_SPRING, clampPagerX, snapPagerIndex } from './feedMotion';
 
@@ -42,10 +43,12 @@ type Props = {
   isActive?: boolean;
   onTip?: () => void;
   onComment: () => void;
-  onVaultSave: () => void;
+  onShare?: () => void;
   onCall?: () => void;
-  onShare: () => void;
-  onReport?: () => void;
+  onLike?: () => void;
+  liked?: boolean;
+  likes?: number;
+  onLongPressMenu?: () => void;
   onAvatar?: () => void;
   /** ปักตะกร้า / พิกัดสินค้า — เปิดชีตซื้อ */
   onProduct?: () => void;
@@ -70,10 +73,12 @@ export function FeedReelCard({
   isActive,
   onTip,
   onComment,
-  onVaultSave,
-  onCall,
   onShare,
-  onReport,
+  onCall,
+  onLike,
+  liked,
+  likes,
+  onLongPressMenu,
   onAvatar,
   onProduct,
   enableProfileSwipe,
@@ -90,12 +95,18 @@ export function FeedReelCard({
   const [captionExpanded, setCaptionExpanded] = useState(false);
   const activeUri = gallery[Math.min(page, Math.max(gallery.length - 1, 0))];
   const authorKey = item.authorHandle.replace(/^@/, '');
-  const following = useFollowStore((s) => Boolean(s.following[authorKey.toLowerCase()]));
-  const followIfNeeded = useFollowStore((s) => s.followIfNeeded);
+  const myAvatarUri = useLoyaltyStore((s) => s.profile.avatarUri);
+  const avatarUri = item.isUserPost
+    ? myAvatarUri
+    : `https://i.pravatar.cc/150?u=boommall-${authorKey.toLowerCase()}`;
   const playFromFeedMusic = useMusicPlayerStore((s) => s.playFromFeedMusic);
   const musicPlaying = useMusicPlayerStore((s) => s.playing);
   const musicTrackTitle = useMusicPlayerStore((s) => s.track?.title);
   const expandMusic = useMusicPlayerStore((s) => s.expand);
+  const chromeHidden = useFeedChromeStore((s) => s.chromeHidden);
+  const captionsEnabled = useFeedChromeStore((s) => s.captionsEnabled);
+  const playbackRate = useFeedChromeStore((s) => s.playbackRate);
+  const setChromeHidden = useFeedChromeStore((s) => s.setChromeHidden);
 
   const openListenMode = () => {
     // Lock + push immediately so a double-tap cannot stack two /listen modals
@@ -134,15 +145,16 @@ export function FeedReelCard({
   }, [isActive]);
 
   useEffect(() => {
+    const duration = Math.max(2500, Math.round(15000 / playbackRate));
     if (isActive) {
       progress.value = 0;
-      progress.value = withRepeat(withTiming(1, { duration: 15000, easing: Easing.linear }), -1, false);
+      progress.value = withRepeat(withTiming(1, { duration, easing: Easing.linear }), -1, false);
     } else {
       cancelAnimation(progress);
       progress.value = 0;
     }
     return () => cancelAnimation(progress);
-  }, [isActive, progress, page]);
+  }, [isActive, progress, page, playbackRate]);
 
   const toggleCaption = () => {
     if (!captionCollapsible) return;
@@ -159,26 +171,54 @@ export function FeedReelCard({
     transform: [{ scale: heartScale.value }],
   }));
 
+  const burstHeart = () => {
+    heartScale.value = 0.4;
+    heartOpacity.value = 1;
+    heartScale.value = withSequence(
+      withTiming(1.15, { duration: 180, easing: Easing.out(Easing.back(2)) }),
+      withTiming(1, { duration: 100 }),
+    );
+    heartOpacity.value = withSequence(
+      withTiming(1, { duration: 120 }),
+      withTiming(0, { duration: 500, easing: Easing.out(Easing.ease) }),
+    );
+  };
+
+  const onDoubleTapLike = () => {
+    burstHeart();
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (!liked) onLike?.();
+  };
+
+  const openLongPressMenu = () => {
+    if (!onLongPressMenu) return;
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    onLongPressMenu();
+  };
+
+  const restoreChrome = () => {
+    if (chromeHidden) setChromeHidden(false);
+  };
+
   const doubleTap = Gesture.Tap()
     .numberOfTaps(2)
-    .onStart(() => {
-      heartScale.value = 0.4;
-      heartOpacity.value = 1;
-      heartScale.value = withSequence(
-        withTiming(1.15, { duration: 180, easing: Easing.out(Easing.back(2)) }),
-        withTiming(1, { duration: 100 }),
-      );
-      heartOpacity.value = withSequence(
-        withTiming(1, { duration: 120 }),
-        withTiming(0, { duration: 500, easing: Easing.out(Easing.ease) }),
-      );
-    })
     .onEnd(() => {
-      if (!onTip) return;
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      onTip();
-    })
-    .runOnJS(true);
+      runOnJS(onDoubleTapLike)();
+    });
+
+  const longPress = Gesture.LongPress()
+    .minDuration(400)
+    .maxDistance(12)
+    .onStart(() => {
+      runOnJS(openLongPressMenu)();
+    });
+
+  const singleTap = Gesture.Tap()
+    .numberOfTaps(1)
+    .maxDuration(250)
+    .onEnd(() => {
+      runOnJS(restoreChrome)();
+    });
 
   const goNextPhoto = () => {
     setPage((p) => Math.min(gallery.length - 1, p + 1));
@@ -297,7 +337,11 @@ export function FeedReelCard({
       pagerX.value = withSpring(panStartPagerX.value, IOS_SPRING);
     });
 
-  const composedGesture = Gesture.Simultaneous(doubleTap, horizontalSwipe);
+  const composedGesture = Gesture.Simultaneous(
+    Gesture.Exclusive(doubleTap, singleTap),
+    longPress,
+    horizontalSwipe,
+  );
 
   return (
     <GestureDetector gesture={composedGesture}>
@@ -307,13 +351,15 @@ export function FeedReelCard({
         ) : (
           <LinearGradient colors={item.gradient} style={StyleSheet.absoluteFill} />
         )}
-        <LinearGradient
-          colors={[colors.feed.gradientTop, 'transparent', colors.feed.gradientBottom]}
-          locations={[0, 0.35, 1]}
-          style={StyleSheet.absoluteFill}
-        />
+        {!chromeHidden ? (
+          <LinearGradient
+            colors={[colors.feed.gradientTop, 'transparent', colors.feed.gradientBottom]}
+            locations={[0, 0.35, 1]}
+            style={StyleSheet.absoluteFill}
+          />
+        ) : null}
 
-        {multi ? (
+        {multi && !chromeHidden ? (
           <View style={styles.pageDots} pointerEvents="none">
             {gallery.map((_, i) => (
               <View key={i} style={[styles.pageDot, i === page && styles.pageDotActive]} />
@@ -321,7 +367,7 @@ export function FeedReelCard({
           </View>
         ) : null}
 
-        {item.overlayText?.trim() && page === 0 ? (
+        {item.overlayText?.trim() && page === 0 && captionsEnabled ? (
           <LockedOverlayText
             text={item.overlayText}
             color={item.overlayTextColor ?? '#fff'}
@@ -331,49 +377,70 @@ export function FeedReelCard({
         ) : null}
 
         <Animated.View style={[styles.heartBurst, heartStyle]} pointerEvents="none">
-          <CoinIcon size={96} active />
+          <Ionicons name="heart" size={96} color={colors.brand.pink} />
         </Animated.View>
 
-        <View style={styles.meta}>
-          {item.isLive ? (
-            <View style={styles.liveBadge}>
-              <View style={styles.liveDot} />
-              <Text style={styles.liveText}>LIVE</Text>
-            </View>
-          ) : null}
-          {item.isUserPost ? (
-            <View style={styles.newBadge}>
-              <Text style={styles.newBadgeText}>โพสต์ของคุณ</Text>
-            </View>
-          ) : null}
-
-          {onProduct && item.product ? (
-            <Pressable
-              style={styles.productPin}
-              onPress={() => {
-                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                onProduct();
-              }}
-              hitSlop={6}
-              accessibilityLabel="ปักตะกร้า พิกัดตรงนี้"
-            >
-              <View style={styles.productPinIcon}>
-                <Ionicons name="bag-handle" size={14} color="#fff" />
+        {!chromeHidden ? (
+          <View style={styles.meta}>
+            {item.isLive ? (
+              <View style={styles.liveBadge}>
+                <View style={styles.liveDot} />
+                <Text style={styles.liveText}>LIVE</Text>
               </View>
-              <Text style={styles.productPinText} numberOfLines={1}>
-                พิกัดตรงนี้
+            ) : null}
+            {item.isUserPost ? (
+              <View style={styles.newBadge}>
+                <Text style={styles.newBadgeText}>โพสต์ของคุณ</Text>
+              </View>
+            ) : null}
+
+            {onProduct && item.product ? (
+              <Pressable
+                style={styles.productPin}
+                onPress={() => {
+                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  onProduct();
+                }}
+                hitSlop={6}
+                accessibilityLabel="ปักตะกร้า พิกัดตรงนี้"
+              >
+                <View style={styles.productPinIcon}>
+                  <Ionicons name="bag-handle" size={14} color="#fff" />
+                </View>
+                <Text style={styles.productPinText} numberOfLines={1}>
+                  พิกัดตรงนี้
+                </Text>
+              </Pressable>
+            ) : null}
+
+            <Pressable
+              style={styles.authorRow}
+              onPress={onAvatar}
+              onLongPress={
+                onCall
+                  ? () => {
+                      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      onCall();
+                    }
+                  : undefined
+              }
+              hitSlop={6}
+            >
+              <Avatar
+                uri={avatarUri}
+                initial={item.author.slice(0, 1)}
+                size={36}
+                radius={18}
+                borderColor="#fff"
+                borderWidth={1.5}
+              />
+              <Text style={styles.author} numberOfLines={1}>
+                {item.author}
               </Text>
             </Pressable>
-          ) : null}
 
-          <Pressable onPress={onAvatar} hitSlop={6}>
-            <Text style={styles.author}>{item.author}</Text>
-          </Pressable>
-
-          {caption ? (
-            <View style={styles.captionRow}>
+            {caption ? (
               <Pressable
-                style={styles.captionPress}
                 onPress={toggleCaption}
                 disabled={!captionCollapsible}
               >
@@ -391,72 +458,49 @@ export function FeedReelCard({
                   </Text>
                 )}
               </Pressable>
-              {captionCollapsible ? (
-                <Pressable
-                  style={[styles.captionToggle, captionExpanded && styles.captionToggleOpen]}
-                  onPress={toggleCaption}
-                  hitSlop={8}
-                  accessibilityLabel={captionExpanded ? 'ย่อข้อความ' : 'ขยายข้อความ'}
-                >
-                  <Ionicons
-                    name={captionExpanded ? 'remove' : 'add'}
-                    size={14}
-                    color="#fff"
-                  />
-                </Pressable>
-              ) : null}
-            </View>
-          ) : null}
+            ) : null}
 
-          {!captionExpanded ? (
-            <Pressable onPress={openListenMode} hitSlop={6}>
-              <Text style={styles.music} numberOfLines={1}>
-                ♪ {item.musicTitle} · แตะฟังเพลงยาว
+            {!captionExpanded ? (
+              <Pressable onPress={openListenMode} hitSlop={6}>
+                <Text style={styles.music} numberOfLines={1}>
+                  ♪ {item.musicTitle} · แตะฟังเพลงยาว
+                </Text>
+              </Pressable>
+            ) : (
+              <Text style={styles.location} numberOfLines={1}>
+                📍 {item.location} · {item.product.tier}
               </Text>
-            </Pressable>
-          ) : (
-            <Text style={styles.location} numberOfLines={1}>
-              📍 {item.location} · {item.product.tier}
-            </Text>
-          )}
-          {multi ? (
-            <Text style={styles.photoCount}>
-              รูป {page + 1}/{gallery.length} · ปัดซ้าย/ขวาดูรูปในโพสต์
-            </Text>
-          ) : null}
-        </View>
+            )}
+            {multi ? (
+              <Text style={styles.photoCount}>
+                รูป {page + 1}/{gallery.length} · ปัดซ้าย/ขวาดูรูปในโพสต์
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
 
-        <RightActionBar
-          authorInitial={item.author.slice(0, 1)}
-          tips={item.tips ?? 0}
-          comments={item.comments}
-          shares={item.shares}
-          tipped={(item.myTipTotal ?? 0) > 0}
-          saved={item.saved}
-          following={item.isUserPost ? true : following}
-          onAvatar={onAvatar}
-          onFollow={
-            item.isUserPost
-              ? undefined
-              : () => {
-                  followIfNeeded(authorKey);
-                }
-          }
-          onTip={onTip}
-          onComment={onComment}
-          onVaultSave={onVaultSave}
-          onShare={onShare}
-          onCall={onCall}
-          onReport={onReport}
-          onMusic={openListenMode}
-          musicActive={
-            musicTrackTitle !== item.musicTitle || musicPlaying
-          }
-        />
+        {!chromeHidden ? (
+          <RightActionBar
+            tips={item.tips ?? 0}
+            comments={item.comments}
+            tipped={(item.myTipTotal ?? 0) > 0}
+            onTip={onTip}
+            onComment={onComment}
+            onShare={onShare}
+            shares={item.shares}
+            onLike={onLike}
+            liked={liked}
+            likes={likes ?? item.likes}
+            onMusic={openListenMode}
+            musicActive={musicTrackTitle !== item.musicTitle || musicPlaying}
+          />
+        ) : null}
 
-        <View style={styles.progressTrack} pointerEvents="none">
-          <Animated.View style={[styles.progressFill, progressStyle]} />
-        </View>
+        {!chromeHidden ? (
+          <View style={styles.progressTrack} pointerEvents="none">
+            <Animated.View style={[styles.progressFill, progressStyle]} />
+          </View>
+        ) : null}
       </View>
     </GestureDetector>
   );
@@ -552,21 +596,19 @@ const styles = StyleSheet.create({
     fontSize: 13,
     flexShrink: 1,
   },
+  authorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    maxWidth: '100%',
+  },
   author: {
+    flexShrink: 1,
     color: '#fff',
     fontWeight: '900',
     fontSize: 16,
     textShadowColor: 'rgba(0,0,0,0.45)',
     textShadowRadius: 4,
-  },
-  captionRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-  },
-  captionPress: {
-    flex: 1,
-    minWidth: 0,
   },
   caption: {
     color: colors.text.onDark,
@@ -576,21 +618,6 @@ const styles = StyleSheet.create({
   captionMore: {
     color: 'rgba(255,255,255,0.55)',
     fontWeight: '700',
-  },
-  captionToggle: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    marginTop: 1,
-    backgroundColor: 'rgba(255,255,255,0.22)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.35)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  captionToggleOpen: {
-    backgroundColor: 'rgba(0,214,143,0.45)',
-    borderColor: colors.brand.primary,
   },
   location: {
     color: 'rgba(255,255,255,0.75)',

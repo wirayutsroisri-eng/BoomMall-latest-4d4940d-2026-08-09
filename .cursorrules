@@ -1,0 +1,41 @@
+# Expo HAS CHANGED
+
+Read the exact versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing any code.
+
+# Iron rule: confirm before delete
+
+Any control that deletes or permanently removes user data must ask first (`Alert.alert` ยกเลิก + ลบ). Never delete on the first tap.
+See `.cursor/rules/confirm-before-delete.mdc`.
+
+# Iron rule: drag-down to dismiss
+
+Every closable screen / modal / sheet must support drag-down to close (not only an X button).
+Use `DragDownDismiss` + `dismissibleModalOptions` from `@/shared/components/DragDownDismiss`.
+
+# Iron rule: App Store compliance
+
+Do not ship iOS features that will fail App Review: no fake payments/calls/LIVE, no Boom Coin purchase without IAP, no UGC without report/block, no account without delete, no `voip` without real VoIP, accurate permission strings, Privacy Policy + Terms required.
+See `.cursor/rules/app-store-compliance.mdc`.
+
+# iOS Swift Smooth UI, Swiping & Gesture Performance Rules for boommall
+
+When writing or editing UI screens, components, view controllers, or custom views in Swift:
+
+1. **60/120 FPS Performance & Frame Rates (ProMotion Support)**
+   - Target high refresh rates (up to 120Hz) on iOS ProMotion displays.
+   - Avoid off-screen rendering: set `layer.shadowPath` explicitly when adding shadows to swipeable views.
+   - Set `isOpaque = true` and reduce transparent layer overlays on list/card elements.
+
+2. **Fluid Swiping, Gestures & Physics**
+   - **SwiftUI:** Use Spring Physics with optimal response and damping for natural touch feel:
+     `.animation(.spring(response: 0.35, dampingFraction: 0.86, blendDuration: 0), value: gestureOffset)`
+   - **UIKit:** Use `UIPanGestureRecognizer` paired with `UIViewPropertyAnimator` or `UISpringTimingParameters`.
+   - **Velocity Snap Points:** Always calculate swipe release velocity (`velocity(in:)`) on gesture `.ended` to calculate momentum and snap points smoothly.
+
+3. **List & Scroll Optimization (`UICollectionView` / `SwiftUI ScrollView`)**
+   - Use `UICollectionViewCompositionalLayout` (UIKit) or `LazyVStack` / `LazyHStack` (SwiftUI).
+   - Implement `UICollectionViewDataSourcePrefetching` for preloading imagery/data before swiping into view.
+   - Never run heavy operations, JSON decoding, or image resizing on the Main Thread during gesture tracking.
+
+4. **Main Thread Protection**
+   - Offload image decoding, data filtering, and formatting to background threads using Swift Concurrency (`Task`, `actor`, or `DispatchQueue.global()`).

@@ -21,6 +21,7 @@ import {
   useCheckoutStore,
 } from '@/modules/commerce/state/checkout-store';
 import { colors } from '@/shared/theme/colors';
+import { variantListLabel } from '@/modules/shop/domain/product-display';
 
 const ORANGE = '#EE4D2D';
 
@@ -189,7 +190,10 @@ export function CartScreen() {
                       <View style={styles.thumbWrap}>
                         <Image
                           source={{
-                            uri: master?.imageUri ?? masterContentImage(master?.id ?? line.variantId),
+                            uri:
+                              variant?.imageUri ??
+                              master?.imageUri ??
+                              masterContentImage(master?.id ?? line.variantId),
                           }}
                           style={styles.thumb}
                         />
@@ -203,12 +207,27 @@ export function CartScreen() {
                         <Text style={styles.productTitle} numberOfLines={2}>
                           {master?.title ?? variant?.sku ?? 'สินค้า'}
                         </Text>
-                        <View style={styles.variantChip}>
+                        <Pressable
+                          style={styles.variantChip}
+                          onPress={() => {
+                            if (!master) return;
+                            void Haptics.selectionAsync();
+                            router.push({
+                              pathname: '/shop/product/[id]',
+                              params: {
+                                id: master.id,
+                                pick: '1',
+                                variantId: line.variantId,
+                              },
+                            });
+                          }}
+                          accessibilityLabel="เลือกตัวเลือกสินค้าเพิ่ม"
+                        >
                           <Text style={styles.variantChipText} numberOfLines={1}>
-                            {variant?.label ?? 'มาตรฐาน'}
+                            {variant ? variantListLabel(variant) : 'มาตรฐาน'}
                           </Text>
                           <Ionicons name="chevron-down" size={12} color={colors.text.muted} />
-                        </View>
+                        </Pressable>
                         <View style={styles.promoRow}>
                           <Text style={styles.promoTag}>ส่งฟรี</Text>
                           <Text style={styles.promoTag}>โค้ดร้าน</Text>
@@ -220,8 +239,18 @@ export function CartScreen() {
                           </View>
                           {editing ? (
                             <Pressable
-                              onPress={() => removeLine(line.variantId, line.warehouseId)}
+                              onPress={() => {
+                                Alert.alert('ลบสินค้านี้?', 'สินค้าจะถูกนำออกจากตะกร้า', [
+                                  { text: 'ยกเลิก', style: 'cancel' },
+                                  {
+                                    text: 'ลบ',
+                                    style: 'destructive',
+                                    onPress: () => removeLine(line.variantId, line.warehouseId),
+                                  },
+                                ]);
+                              }}
                               style={styles.deleteBtn}
+                              accessibilityLabel="ลบสินค้า"
                             >
                               <Text style={styles.deleteBtnText}>ลบ</Text>
                             </Pressable>
@@ -426,11 +455,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     backgroundColor: '#F3F5F4',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
   },
-  variantChipText: { fontSize: 11, fontWeight: '700', color: colors.text.secondary, maxWidth: 140 },
+  variantChipText: { fontSize: 11, fontWeight: '700', color: colors.text.secondary, maxWidth: 160 },
   promoRow: { flexDirection: 'row', gap: 4 },
   promoTag: {
     fontSize: 9,

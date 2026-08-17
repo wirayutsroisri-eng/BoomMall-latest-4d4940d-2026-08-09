@@ -26,6 +26,8 @@ type Draft = {
   searchRadius?: SearchRadiusOption;
   /** Skip remote image — use gradient + category glyph on board tiles */
   noImage?: boolean;
+  imageW?: number;
+  imageH?: number;
 };
 
 function productOf(d: Draft): FeedProduct {
@@ -55,6 +57,8 @@ function productOf(d: Draft): FeedProduct {
 }
 
 function toItem(d: Draft): FeedItem {
+  const imageWidth = d.noImage ? undefined : d.imageW ?? 1080;
+  const imageHeight = d.noImage ? undefined : d.imageH ?? 1920;
   return {
     id: d.id,
     lane: d.lane,
@@ -71,7 +75,9 @@ function toItem(d: Draft): FeedItem {
     isLive: Boolean(d.isLive),
     musicTitle: d.music,
     gradient: d.gradient,
-    imageUri: d.noImage ? undefined : `https://picsum.photos/seed/${d.seed}/1080/1920`,
+    imageUri: d.noImage ? undefined : `https://picsum.photos/seed/${d.seed}/${imageWidth}/${imageHeight}`,
+    imageWidth,
+    imageHeight,
     product: productOf(d),
   };
 }
@@ -513,6 +519,8 @@ const DRAFTS: Draft[] = [
     tier: 'C2C',
     price: 1500,
     tags: ['เว็บบอร์ด', 'หาช่าง', 'บริการ'],
+    imageW: 1080,
+    imageH: 1350,
   },
   {
     id: 'bd-02',
@@ -535,6 +543,8 @@ const DRAFTS: Draft[] = [
     tier: 'C2C',
     price: 800,
     tags: ['เว็บบอร์ด', 'หาช่าง', 'บริการ'],
+    imageW: 1600,
+    imageH: 900,
   },
   {
     id: 'bd-03',
@@ -557,6 +567,8 @@ const DRAFTS: Draft[] = [
     tier: 'C2C',
     price: 2500,
     tags: ['เว็บบอร์ด', 'หาช่าง', 'บริการ'],
+    imageW: 1080,
+    imageH: 1080,
   },
   {
     id: 'bd-04',
@@ -604,6 +616,8 @@ const DRAFTS: Draft[] = [
     tier: 'C2C',
     price: 900,
     tags: ['เว็บบอร์ด', 'รับงาน', 'บริการ'],
+    imageW: 1080,
+    imageH: 1350,
   },
   {
     id: 'bd-s02',
@@ -626,6 +640,8 @@ const DRAFTS: Draft[] = [
     tier: 'C2C',
     price: 600,
     tags: ['เว็บบอร์ด', 'รับงาน', 'บริการ'],
+    imageW: 1600,
+    imageH: 900,
   },
   {
     id: 'bd-s03',
@@ -671,6 +687,8 @@ const DRAFTS: Draft[] = [
     tier: 'C2C',
     price: 500,
     tags: ['เว็บบอร์ด', 'รับงาน', 'บริการ'],
+    imageW: 1080,
+    imageH: 1440,
   },
 ];
 

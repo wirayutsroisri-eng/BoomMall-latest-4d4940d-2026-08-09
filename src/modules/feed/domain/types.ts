@@ -64,6 +64,9 @@ export type FeedItem = {
   saved?: boolean;
   /** Real photo/video picked from device — overrides gradient background when present */
   imageUri?: string;
+  /** Pixel size of the cover photo — used so shop/job tiles keep the upload aspect */
+  imageWidth?: number;
+  imageHeight?: number;
   /** หลายรูปในโพสต์เดียว — ปัดซ้าย/ขวาเลื่อนในโพสต์ (ไม่เปิดโปรไฟล์) */
   imageUris?: string[];
   videoUri?: string;
@@ -90,4 +93,5 @@ export type FeedComment = {
   likes: number;
   createdAt: string;
   liked?: boolean;
+  parentId?: string;
 };

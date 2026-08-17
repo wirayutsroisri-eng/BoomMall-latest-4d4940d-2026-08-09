@@ -78,6 +78,7 @@ export function ContentPreviewScreen() {
     uri?: string;
     type?: string;
     textMode?: string;
+    filter?: string;
   }>();
 
   const uri = typeof params.uri === 'string' ? params.uri : null;
@@ -86,7 +87,13 @@ export function ContentPreviewScreen() {
   const [tool, setTool] = useState<string | null>(
     params.textMode === '1' ? 'text' : null,
   );
-  const [filter, setFilter] = useState<FilterKey>('none');
+  const [filter, setFilter] = useState<FilterKey>(() => {
+    const raw = params.filter;
+    if (raw === 'vivid' || raw === 'warm' || raw === 'cool' || raw === 'mono' || raw === 'fade') {
+      return raw;
+    }
+    return 'none';
+  });
   const [overlayText, setOverlayText] = useState(params.textMode === '1' ? '' : '');
   const [overlayTransform, setOverlayTransform] = useState<OverlayTransform>({
     ...DEFAULT_OVERLAY_TRANSFORM,
@@ -430,9 +437,18 @@ export function ContentPreviewScreen() {
               <Pressable
                 style={styles.stickerActionBtn}
                 onPress={() => {
-                  void Haptics.selectionAsync();
-                  setSticker(null);
-                  setStickerResizeArmed(false);
+                  Alert.alert('ลบสติกเกอร์?', 'จะนำสติกเกอร์นี้ออกจากภาพ', [
+                    { text: 'ยกเลิก', style: 'cancel' },
+                    {
+                      text: 'ลบ',
+                      style: 'destructive',
+                      onPress: () => {
+                        void Haptics.selectionAsync();
+                        setSticker(null);
+                        setStickerResizeArmed(false);
+                      },
+                    },
+                  ]);
                 }}
               >
                 <Ionicons name="trash-outline" size={16} color="#fff" />

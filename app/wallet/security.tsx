@@ -1,5 +1,5 @@
-import { WalletSecurityScreen } from '@/modules/wallet/ui/WalletSecurityScreen';
+import { AccountSettingsScreen } from '@/modules/account/ui/AccountSettingsScreen';
 
 export default function WalletSecurityRoute() {
-  return <WalletSecurityScreen />;
+  return <AccountSettingsScreen />;
 }

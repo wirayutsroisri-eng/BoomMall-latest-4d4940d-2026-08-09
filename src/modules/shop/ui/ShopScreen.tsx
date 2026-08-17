@@ -18,7 +18,7 @@ import * as Haptics from 'expo-haptics';
 import { masterContentImage } from '@/modules/commerce/data/catalog';
 import { useInventoryStore } from '@/modules/commerce/state/inventory-store';
 import { useCartStore } from '@/modules/commerce/state/cart-store';
-import type { MasterSku, WarehouseId } from '@/modules/commerce/domain/types';
+import type { MasterSku } from '@/modules/commerce/domain/types';
 import { colors } from '@/shared/theme/colors';
 import {
   ENABLE_COMING_SOON_SHOP_CHROME,
@@ -151,8 +151,6 @@ export function ShopScreen() {
   const masters = useInventoryStore((s) => s.masters);
   const variants = useInventoryStore((s) => s.variants);
   const totalAvailable = useInventoryStore((s) => s.totalAvailable);
-  const listStockRows = useInventoryStore((s) => s.listStockRows);
-  const addToCart = useCartStore((s) => s.addToCart);
   const lines = useCartStore((s) => s.lines);
   const lineCount = lines.reduce((n, l) => n + l.qty, 0);
 
@@ -193,51 +191,9 @@ export function ShopScreen() {
   const dealProducts = useMemo(() => products.slice(0, 4), [products]);
   const flashProducts = useMemo(() => products.slice(2, 6), [products]);
 
-  const addFirstVariant = (master: MasterSku) => {
-    const vs = variantsByMaster.get(master.id) ?? [];
-    if (!vs.length) {
-      Alert.alert('ยังไม่มี SKU', 'สินค้านี้ยังไม่มีตัวเลือกให้สั่ง');
-      return;
-    }
-    if (vs.length === 1) {
-      const v = vs[0];
-      const rows = listStockRows(v.id);
-      const preferred = (rows[0]?.warehouseId ?? 'WH-CTI-MAIN') as WarehouseId;
-      const res = addToCart({
-        variantId: v.id,
-        warehouseId: preferred,
-        qty: v.moq ?? 1,
-        unitPrice: v.price,
-      });
-      void Haptics.notificationAsync(
-        res.ok
-          ? Haptics.NotificationFeedbackType.Success
-          : Haptics.NotificationFeedbackType.Error,
-      );
-      Alert.alert(res.ok ? 'ใส่ตะกร้าแล้ว' : 'ใส่ตะกร้าไม่สำเร็จ', res.message);
-      return;
-    }
-    Alert.alert(
-      master.title,
-      'เลือก SKU ที่ต้องการ',
-      [
-        ...vs.map((v) => ({
-          text: `${v.label} · ${formatTHB(v.price)} · เหลือ ${totalAvailable(v.id)}`,
-          onPress: () => {
-            const rows = listStockRows(v.id);
-            const preferred = (rows[0]?.warehouseId ?? 'WH-CTI-MAIN') as WarehouseId;
-            const res = addToCart({
-              variantId: v.id,
-              warehouseId: preferred,
-              qty: v.moq ?? 1,
-              unitPrice: v.price,
-            });
-            Alert.alert(res.ok ? 'ใส่ตะกร้าแล้ว' : 'ใส่ตะกร้าไม่สำเร็จ', res.message);
-          },
-        })),
-        { text: 'ยกเลิก', style: 'cancel' as const },
-      ],
-    );
+  const openProduct = (productId: string) => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push({ pathname: '/shop/product/[id]', params: { id: productId } });
   };
 
   const openCart = () => {
@@ -362,7 +318,7 @@ export function ShopScreen() {
               {dealProducts.slice(0, 2).map((m) => {
                 const off = discountOf(m);
                 return (
-                  <Pressable key={m.id} style={styles.promoItem} onPress={() => addFirstVariant(m)}>
+                  <Pressable key={m.id} style={styles.promoItem} onPress={() => openProduct(m.id)}>
                     <Image
                       source={{ uri: m.imageUri ?? masterContentImage(m.id) }}
                       style={styles.promoThumb}
@@ -398,7 +354,7 @@ export function ShopScreen() {
               {flashProducts.slice(0, 2).map((m) => {
                 const soldPct = 35 + (m.id.charCodeAt(m.id.length - 1) % 50);
                 return (
-                  <Pressable key={m.id} style={styles.promoItem} onPress={() => addFirstVariant(m)}>
+                  <Pressable key={m.id} style={styles.promoItem} onPress={() => openProduct(m.id)}>
                     <Image
                       source={{ uri: m.imageUri ?? masterContentImage(m.id) }}
                       style={styles.promoThumb}
@@ -456,7 +412,7 @@ export function ShopScreen() {
               <Pressable
                 key={master.id}
                 style={styles.productCard}
-                onPress={() => addFirstVariant(master)}
+                onPress={() => openProduct(master.id)}
                 onLongPress={() =>
                   Alert.alert(
                     master.title,

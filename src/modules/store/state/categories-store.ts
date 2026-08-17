@@ -14,6 +14,8 @@ export const BASE_CATEGORIES: ShopCategory[] = [
   { key: 'motor', label: 'มอเตอร์', builtin: true },
   { key: 'controller', label: 'กล่องควบคุม', builtin: true },
   { key: 'battery', label: 'แบตเตอรี่', builtin: true },
+  { key: 'brakes', label: 'ชุดเบรก', builtin: true },
+  { key: 'cables', label: 'สายไฟ', builtin: true },
   { key: 'parts', label: 'อะไหล่', builtin: true },
   { key: 'apparel', label: 'เสื้อผ้า', builtin: true },
   { key: 'bag', label: 'กระเป๋า', builtin: true },

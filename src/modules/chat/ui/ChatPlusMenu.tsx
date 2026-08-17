@@ -4,42 +4,48 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '@/shared/theme/colors';
 
+export type ChatPlusAction = 'group' | 'scanQr' | 'myQr' | 'newChat' | 'markAllRead';
+
 type Props = {
   visible: boolean;
   onClose: () => void;
   onCreateGroup: () => void;
-  onAddFriend: () => void;
-  onStartCall: () => void;
-  onQuotation: () => void;
+  onScanQr: () => void;
+  onMyQr: () => void;
+  onNewChat: () => void;
+  onMarkAllRead: () => void;
 };
 
 const ITEMS: Array<{
-  key: 'group' | 'friend' | 'call' | 'quotation';
+  key: ChatPlusAction;
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
 }> = [
-  { key: 'group', icon: 'people', label: 'สร้างกลุ่มใหม่ / Group Chat' },
-  { key: 'friend', icon: 'person-add', label: 'เพิ่มเพื่อน / สแกน QR Code' },
-  { key: 'call', icon: 'call', label: 'เริ่มการโทร / HD Video Call' },
-  { key: 'quotation', icon: 'receipt', label: 'ออกใบเสนอราคา / Smart Quotation Card' },
+  { key: 'group', icon: 'people', label: 'สร้างกลุ่มใหม่' },
+  { key: 'scanQr', icon: 'scan', label: 'สแกน QR Code' },
+  { key: 'myQr', icon: 'qr-code', label: 'QR Code ของฉัน' },
+  { key: 'newChat', icon: 'chatbubble-ellipses', label: 'แชทใหม่' },
+  { key: 'markAllRead', icon: 'checkmark-done', label: 'อ่านทั้งหมดแล้ว' },
 ];
 
-/** LINE-style Popover Menu anchored under the [+] button in the Super Chat Engine header. */
+/** LINE-style popover under the inbox [+] button. */
 export function ChatPlusMenu({
   visible,
   onClose,
   onCreateGroup,
-  onAddFriend,
-  onStartCall,
-  onQuotation,
+  onScanQr,
+  onMyQr,
+  onNewChat,
+  onMarkAllRead,
 }: Props) {
   const insets = useSafeAreaInsets();
 
-  const handlers: Record<(typeof ITEMS)[number]['key'], () => void> = {
+  const handlers: Record<ChatPlusAction, () => void> = {
     group: onCreateGroup,
-    friend: onAddFriend,
-    call: onStartCall,
-    quotation: onQuotation,
+    scanQr: onScanQr,
+    myQr: onMyQr,
+    newChat: onNewChat,
+    markAllRead: onMarkAllRead,
   };
 
   return (
@@ -54,6 +60,8 @@ export function ChatPlusMenu({
                 onClose();
                 handlers[item.key]();
               }}
+              accessibilityRole="button"
+              accessibilityLabel={item.label}
             >
               <View style={styles.iconWrap}>
                 <Ionicons name={item.icon} size={17} color={colors.brand.ink} />

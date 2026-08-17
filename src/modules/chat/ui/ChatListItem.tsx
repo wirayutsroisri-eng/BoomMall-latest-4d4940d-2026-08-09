@@ -1,11 +1,12 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { router } from 'expo-router';
+import { jumpToChatThread } from '@/shared/navigation/safeNavigate';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import type { Conversation } from '@/modules/chat/domain/types';
 import { Avatar } from '@/shared/components/Avatar';
 import { colors } from '@/shared/theme/colors';
+import { chatInboxPalette } from './chatDayNight';
 
 type Props = {
   item: Conversation;
@@ -14,6 +15,7 @@ type Props = {
 
 export function ChatListItem({ item, onLongPress }: Props) {
   const isGroup = item.kind === 'group';
+  const palette = chatInboxPalette();
 
   const handleLongPress = () => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -23,7 +25,7 @@ export function ChatListItem({ item, onLongPress }: Props) {
   return (
     <Pressable
       style={styles.row}
-      onPress={() => router.push(`/(tabs)/chat/${item.id}`)}
+      onPress={() => jumpToChatThread(item.id)}
       onLongPress={handleLongPress}
       delayLongPress={350}
     >
@@ -37,31 +39,31 @@ export function ChatListItem({ item, onLongPress }: Props) {
           borderWidth={0}
         />
         {item.isPinned ? (
-          <View style={styles.pinBadge}>
+          <View style={[styles.pinBadge, { backgroundColor: palette.pinBadgeBg, borderColor: palette.groupDotBorder }]}>
             <Text style={styles.pinBadgeText}>📌</Text>
           </View>
         ) : null}
         {isGroup ? (
-          <View style={styles.groupDot}>
+          <View style={[styles.groupDot, { borderColor: palette.groupDotBorder }]}>
             <Ionicons name="people" size={10} color="#fff" />
           </View>
         ) : null}
       </View>
       <View style={styles.body}>
         <View style={styles.top}>
-          <Text style={styles.name} numberOfLines={1}>
+          <Text style={[styles.name, { color: palette.name }]} numberOfLines={1}>
             {item.isHidden ? '🔒 ' : ''}
             {item.peerName}
           </Text>
-          <Text style={styles.time}>{item.updatedAt}</Text>
+          <Text style={[styles.time, { color: palette.time }]}>{item.updatedAt}</Text>
         </View>
         <View style={styles.previewRow}>
-          <Text style={styles.preview} numberOfLines={1}>
+          <Text style={[styles.preview, { color: palette.preview }]} numberOfLines={1}>
             {isGroup ? `👥 ${item.memberCount ?? 0} · ` : ''}
             {item.lastMessage}
           </Text>
           {item.isMuted ? (
-            <Ionicons name="notifications-off" size={13} color="rgba(255,255,255,0.45)" />
+            <Ionicons name="notifications-off" size={13} color={palette.muteIcon} />
           ) : null}
           {item.unread > 0 && !item.isMuted ? <View style={styles.unreadDot} /> : null}
         </View>
@@ -96,11 +98,9 @@ const styles = StyleSheet.create({
     width: 14,
     height: 14,
     borderRadius: 7,
-    backgroundColor: '#000000',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: colors.border.onDark,
     zIndex: 2,
   },
   pinBadgeText: {
@@ -119,7 +119,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: '#000000',
   },
   body: { flex: 1 },
   top: {
@@ -130,11 +129,9 @@ const styles = StyleSheet.create({
   name: {
     flex: 1,
     fontWeight: '800',
-    color: colors.text.inverse,
     fontSize: 15,
   },
   time: {
-    color: 'rgba(255,255,255,0.45)',
     fontSize: 12,
   },
   previewRow: {
@@ -145,7 +142,6 @@ const styles = StyleSheet.create({
   },
   preview: {
     flex: 1,
-    color: 'rgba(255,255,255,0.55)',
   },
   /** จุดฟ้าเล็กๆ แทนเลขแจ้งเตือน */
   unreadDot: {

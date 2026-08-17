@@ -18,6 +18,7 @@ import {
   type AdminRole,
   type AdminSession,
 } from '../lib/api';
+import { ALL_ROLES } from './access';
 
 type AuthState = {
   ready: boolean;
@@ -25,6 +26,9 @@ type AuthState = {
   error: string | null;
   apiKey: string;
   actor: string;
+  signedIn: boolean;
+  isPlatformAdmin: boolean;
+  /** @deprecated use signedIn — kept so existing pages compile */
   isAdmin: boolean;
   login: (apiKey: string, actor?: string) => Promise<boolean>;
   logout: () => void;
@@ -32,6 +36,10 @@ type AuthState = {
 };
 
 const Ctx = createContext<AuthState | null>(null);
+
+function isKnownRole(role: string): role is AdminRole {
+  return ALL_ROLES.includes(role as AdminRole);
+}
 
 export function AdminAuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
@@ -50,14 +58,14 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
     }
     try {
       const res = await fetchAdminSession();
-      if (res.data.role !== 'ADMIN') {
+      if (!isKnownRole(res.data.role)) {
         setSession(null);
         setStoredRole(null);
-        setError('บัญชีนี้ไม่มีสิทธิ์ ADMIN');
+        setError('รหัสนี้ไม่มีสิทธิ์เข้า Admin OS');
         return;
       }
       setSession(res.data);
-      setStoredRole(res.data.role as AdminRole);
+      setStoredRole(res.data.role);
       setActorState(res.data.actor);
       setActor(res.data.actor);
       setError(null);
@@ -75,35 +83,32 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
     })();
   }, [refreshSession]);
 
-  const login = useCallback(
-    async (key: string, nextActor?: string) => {
-      setApiKey(key.trim());
-      setApiKeyState(key.trim());
-      if (nextActor?.trim()) {
-        setActor(nextActor.trim());
-        setActorState(nextActor.trim());
-      }
-      try {
-        const res = await fetchAdminSession();
-        if (res.data.role !== 'ADMIN') {
-          clearApiKey();
-          setSession(null);
-          setError('เข้าถึงได้เฉพาะบัญชี ADMIN');
-          return false;
-        }
-        setSession(res.data);
-        setStoredRole('ADMIN');
-        setError(null);
-        return true;
-      } catch (e) {
+  const login = useCallback(async (key: string, nextActor?: string) => {
+    setApiKey(key.trim());
+    setApiKeyState(key.trim());
+    if (nextActor?.trim()) {
+      setActor(nextActor.trim());
+      setActorState(nextActor.trim());
+    }
+    try {
+      const res = await fetchAdminSession();
+      if (!isKnownRole(res.data.role)) {
         clearApiKey();
         setSession(null);
-        setError(e instanceof Error ? e.message : 'เข้าสู่ระบบไม่สำเร็จ');
+        setError('รหัสนี้ไม่มีสิทธิ์เข้า Admin OS');
         return false;
       }
-    },
-    [],
-  );
+      setSession(res.data);
+      setStoredRole(res.data.role);
+      setError(null);
+      return true;
+    } catch (e) {
+      clearApiKey();
+      setSession(null);
+      setError(e instanceof Error ? e.message : 'เข้าสู่ระบบไม่สำเร็จ');
+      return false;
+    }
+  }, []);
 
   const logout = useCallback(() => {
     clearApiKey();
@@ -112,6 +117,9 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
     setError(null);
   }, []);
 
+  const signedIn = Boolean(session);
+  const isPlatformAdmin = session?.role === 'ADMIN' || session?.role === 'SUPER_ADMIN';
+
   const value = useMemo<AuthState>(
     () => ({
       ready,
@@ -119,12 +127,14 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
       error,
       apiKey,
       actor,
-      isAdmin: session?.role === 'ADMIN',
+      signedIn,
+      isPlatformAdmin,
+      isAdmin: signedIn,
       login,
       logout,
       refreshSession,
     }),
-    [ready, session, error, apiKey, actor, login, logout, refreshSession],
+    [ready, session, error, apiKey, actor, signedIn, isPlatformAdmin, login, logout, refreshSession],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

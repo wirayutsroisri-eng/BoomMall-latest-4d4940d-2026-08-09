@@ -4,6 +4,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '@/shared/theme/colors';
+import { getLegalUrl } from '@/shared/legal/legalUrls';
+import { openLegalDocument } from '@/shared/legal/openLegal';
 
 type DocKey = 'privacy' | 'terms';
 
@@ -33,7 +35,7 @@ const DOCS: Record<
       },
       {
         h: '5. การลบบัญชี',
-        p: 'คุณสามารถลบบัญชีได้จากเมนูตั้งค่าความปลอดภัยในแอป เมื่อลบแล้วข้อมูลบัญชีบนอุปกรณ์นี้จะถูกลบตามขั้นตอนของแอป',
+        p: 'คุณสามารถลบบัญชีและข้อมูลทั้งหมดได้จาก โปรไฟล์ → ตั้งค่า → ลบบัญชีและข้อมูลทั้งหมด เมื่อลบแล้วโปรไฟล์ การล็อกอิน โพสต์ และการติดตามจะถูกลบจากเซิร์ฟเวอร์ ทำแล้วกู้คืนไม่ได้',
       },
       {
         h: '6. ติดต่อ',
@@ -83,6 +85,7 @@ export function LegalDocScreen() {
   const raw = Array.isArray(docParam) ? docParam[0] : docParam;
   const key: DocKey = raw === 'terms' ? 'terms' : 'privacy';
   const doc = DOCS[key];
+  const publicUrl = getLegalUrl(key);
 
   return (
     <View style={[styles.root, { paddingTop: insets.top + 8 }]}>
@@ -101,6 +104,11 @@ export function LegalDocScreen() {
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.updated}>{doc.updated}</Text>
+        {publicUrl ? (
+          <Pressable onPress={() => void openLegalDocument(key)} style={styles.webBtn}>
+            <Text style={styles.link}>เปิดฉบับบนเว็บ (HTTPS)</Text>
+          </Pressable>
+        ) : null}
         {doc.sections.map((s) => (
           <View key={s.h} style={styles.block}>
             <Text style={styles.h}>{s.h}</Text>
@@ -147,6 +155,7 @@ const styles = StyleSheet.create({
     color: colors.text.muted,
     marginBottom: 16,
   },
+  webBtn: { marginBottom: 16 },
   block: { marginBottom: 18, gap: 6 },
   h: { fontSize: 15, fontWeight: '800', color: colors.text.primary },
   p: { fontSize: 14, lineHeight: 22, color: colors.text.secondary },
