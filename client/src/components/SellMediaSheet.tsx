@@ -87,7 +87,6 @@ export function SellMediaSheet({
       <input
         ref={mixedGalleryRef}
         type="file"
-        accept="image/*,video/*"
         multiple
         className={HIDDEN_FILE_INPUT}
         aria-hidden="true"
@@ -131,7 +130,7 @@ export function SellMediaSheet({
               icon={<ImageIcon className="w-5 h-5 text-foreground" />}
               iconClassName="bg-muted"
               title="เลือกจากคลัง"
-              subtitle="เปิดอัลบั้มเดียว เลือกได้ทั้งรูปและวิดีโอ"
+              subtitle="เปิดคลังรวมให้เห็นรูปและวิดีโอด้วยกัน"
               onClick={() => mixedGalleryRef.current?.click()}
             />
             <MediaOption
@@ -182,7 +181,6 @@ export function SellMediaPicker({
       <input
         ref={fallbackRef}
         type="file"
-        accept="image/*,video/*"
         multiple
         className={HIDDEN_FILE_INPUT}
         aria-hidden="true"
