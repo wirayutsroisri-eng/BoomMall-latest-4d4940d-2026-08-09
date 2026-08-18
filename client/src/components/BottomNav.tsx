@@ -10,18 +10,17 @@ import {
   User,
   ShieldCheck,
 } from "lucide-react";
-import { Link, useLocation, useRouter } from "wouter";
-import { useRef, useCallback } from "react";
+import { Link, useLocation } from "wouter";
+import { useCallback } from "react";
 import { toast } from "sonner";
 import { prepareImageForUpload, ImageUploadError } from "@/lib/imageUpload";
+import { ImageSourcePicker } from "@/components/ImageSourceSheet";
 
 export default function BottomNav() {
   const { isAuthenticated, user } = useAuth();
   const isAdmin = (user as any)?.role === "admin";
   const [location] = useLocation();
-  const router = useRouter();
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const searchByImageMutation = trpc.products.searchByImage.useMutation({
     onSuccess: (result) => {
       // navigate ไป /products พร้อม query string ที่ AI สร้าง
@@ -49,8 +48,12 @@ export default function BottomNav() {
       toast.dismiss("image-search-toast");
       toast.error(err instanceof ImageUploadError ? err.message : "อัปโหลดรูปไม่สำเร็จ");
     }
-    if (fileInputRef.current) fileInputRef.current.value = "";
   }, [searchByImageMutation]);
+
+  const handleFiles = useCallback((files: File[]) => {
+    const file = files[0];
+    if (file) void handleImageSelect(file);
+  }, [handleImageSelect]);
 
   const { data: unreadData } = trpc.chat.getUnreadCount.useQuery(undefined, {
     enabled: isAuthenticated && !isDevBypassEnabled(),
@@ -89,44 +92,41 @@ export default function BottomNav() {
           active={isActive("/products")}
         />
 
-        {/* Center: ปุ่มกล้อง — เปิด file picker โดยตรง */}
-        <div className="flex flex-col items-center justify-center -mt-8">
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isSearchLoading}
-            className="relative w-16 h-16 rounded-full bg-orange-600 hover:bg-orange-700 flex items-center justify-center shadow-lg shadow-orange-600/40 active:scale-95 transition-all duration-150 disabled:opacity-70"
-            aria-label="ค้นหาด้วยรูปภาพ AI"
-          >
-            {isSearchLoading ? (
-              <div className="w-7 h-7 border-3 border-white/40 border-t-white rounded-full animate-spin" />
-            ) : (
-              <Camera className="w-8 h-8 text-white stroke-[1.5]" />
-            )}
-            {/* AI sparkle badge */}
-            {!isSearchLoading && (
-              <span className="absolute -top-1 -right-1 w-5 h-5 bg-amber-400 rounded-full flex items-center justify-center shadow-md">
-                <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z" />
-                </svg>
+        {/* Center: ปุ่มกล้อง — เลือกถ่ายรูปหรือคลังรูป */}
+        <ImageSourcePicker
+          onFiles={handleFiles}
+          disabled={isSearchLoading}
+          title="ค้นหาด้วยรูป"
+          description="ถ่ายสินค้าแล้วให้ AI หาของใกล้เคียง"
+        >
+          {(openPicker) => (
+            <div className="flex flex-col items-center justify-center -mt-8">
+              <button
+                type="button"
+                onClick={openPicker}
+                disabled={isSearchLoading}
+                className="relative w-16 h-16 rounded-full bg-orange-600 hover:bg-orange-700 flex items-center justify-center shadow-lg shadow-orange-600/40 active:scale-95 transition-all duration-150 disabled:opacity-70"
+                aria-label="ค้นหาด้วยรูปภาพ AI"
+              >
+                {isSearchLoading ? (
+                  <div className="w-7 h-7 border-3 border-white/40 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <Camera className="w-8 h-8 text-white stroke-[1.5]" />
+                )}
+                {!isSearchLoading && (
+                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-amber-400 rounded-full flex items-center justify-center shadow-md">
+                    <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z" />
+                    </svg>
+                  </span>
+                )}
+              </button>
+              <span className="text-[11px] font-bold text-orange-600 mt-1">
+                {isSearchLoading ? "วิเคราะห์..." : "สแกน"}
               </span>
-            )}
-          </button>
-          <span className="text-[11px] font-bold text-orange-600 mt-1">
-            {isSearchLoading ? "วิเคราะห์..." : "สแกน"}
-          </span>
-        </div>
-
-        {/* Hidden file input */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) handleImageSelect(file);
-          }}
-        />
+            </div>
+          )}
+        </ImageSourcePicker>
 
         {/* Tab 3: แชท */}
         <TabItem

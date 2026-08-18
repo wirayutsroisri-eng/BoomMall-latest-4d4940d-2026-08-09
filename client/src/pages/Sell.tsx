@@ -14,6 +14,7 @@ import { LISTING_TYPE_LABELS } from "@shared/types";
 import { normalizeWholesalePriceTiers, WholesalePriceTierError } from "@shared/wholesale-pricing";
 import { MAX_VIDEO_UPLOAD_BYTES, formatUploadLimit } from "@shared/upload-limits";
 import { fileToBase64Raw, prepareImageForUpload, ImageUploadError } from "@/lib/imageUpload";
+import { ImageSourcePicker } from "@/components/ImageSourceSheet";
 
 export default function SellPage() {
   const { user, isAuthenticated } = useAuth();
@@ -21,8 +22,6 @@ export default function SellPage() {
   const params = new URLSearchParams(search);
   const editId = params.get("edit") ? parseInt(params.get("edit")!) : undefined;
   const isEditMode = !!editId;
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -212,7 +211,7 @@ export default function SellPage() {
     }
   }
 
-  async function handleImageUpload(files: FileList) {
+  async function handleImageUpload(files: File[] | FileList) {
     setUploadingImages(true);
     try {
       for (const file of Array.from(files)) {
@@ -434,24 +433,27 @@ export default function SellPage() {
                   </div>
                 ))}
                 {images.length < 10 && (
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
+                  <ImageSourcePicker
+                    onFiles={(files) => void handleImageUpload(files)}
+                    multiple
                     disabled={uploadingImages}
-                    className="aspect-square rounded-lg border-2 border-dashed border-border hover:border-primary flex flex-col items-center justify-center gap-1 text-muted-foreground hover:text-primary transition-colors"
+                    title="รูปสินค้า"
+                    description="ถ่ายรูปสินค้า หรือเลือกจากคลัง"
                   >
-                    <Upload className="w-5 h-5" />
-                    <span className="text-xs">{uploadingImages ? "กำลังอัปโหลด..." : "เพิ่มรูป"}</span>
-                  </button>
+                    {(openPicker) => (
+                      <button
+                        type="button"
+                        onClick={openPicker}
+                        disabled={uploadingImages}
+                        className="aspect-square rounded-lg border-2 border-dashed border-border hover:border-primary flex flex-col items-center justify-center gap-1 text-muted-foreground hover:text-primary transition-colors"
+                      >
+                        <Upload className="w-5 h-5" />
+                        <span className="text-xs">{uploadingImages ? "กำลังอัปโหลด..." : "เพิ่มรูป"}</span>
+                      </button>
+                    )}
+                  </ImageSourcePicker>
                 )}
               </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={(e) => e.target.files && handleImageUpload(e.target.files)}
-              />
               <p className="text-xs text-muted-foreground">อัปโหลดได้สูงสุด 10 รูป, ขนาดไม่เกิน 10MB ต่อรูป (บีบอัดอัตโนมัติ)</p>
             </CardContent>
           </Card>
