@@ -470,90 +470,77 @@ export default function SellPage() {
                           : "ถ่ายรูปหรือวิดีโอสินค้า"}
                       </span>
                       <span className="text-xs text-muted-foreground">
-                        สูงสุด 10 รูป · วิดีโอ 1 คลิป · 50MB
+                        สูงสุด 10 รูป · 1 วิดีโอ · เลือกจากคลังได้ทั้งสองแบบ
                       </span>
                     </button>
                   )}
                 </SellMediaPicker>
               ) : (
                 <>
-                  {images.length > 0 && (
-                    <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
-                      {images.map((img, i) => (
-                        <div key={i} className="relative aspect-square rounded-lg overflow-hidden bg-muted">
-                          <img src={img} alt="" className="w-full h-full object-cover" />
-                          <button
-                            type="button"
-                            onClick={() => setImages((prev) => prev.filter((_, idx) => idx !== i))}
-                            className="absolute top-1 right-1 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center"
-                          >
-                            <X className="w-3 h-3 text-white" />
-                          </button>
-                          {i === 0 && (
-                            <div className="absolute bottom-0 left-0 right-0 bg-primary/80 text-white text-xs text-center py-0.5">
-                              หลัก
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                      {images.length < 10 && (
-                        <SellMediaPicker
-                          onFiles={(files) => void handleMediaUpload(files)}
-                          disabled={uploadingImages || uploadingVideo}
-                          title="เพิ่มรูปหรือวิดีโอ"
-                          description="ถ่ายหรือเลือกจากคลัง"
-                        >
-                          {(openPicker) => (
-                            <button
-                              type="button"
-                              onClick={openPicker}
-                              disabled={uploadingImages || uploadingVideo}
-                              className="aspect-square rounded-lg border-2 border-dashed border-border hover:border-primary flex flex-col items-center justify-center gap-1 text-muted-foreground hover:text-primary transition-colors"
-                            >
-                              <Upload className="w-5 h-5" />
-                              <span className="text-xs">
-                                {uploadingImages || uploadingVideo ? "กำลังอัปโหลด..." : "เพิ่ม"}
-                              </span>
-                            </button>
-                          )}
-                        </SellMediaPicker>
-                      )}
-                    </div>
-                  )}
-
-                  {videoUrl ? (
-                    <div className="space-y-2">
-                      <p className="text-xs font-semibold text-muted-foreground">วิดีโอสินค้า</p>
-                      <video src={videoUrl} controls className="w-full rounded-lg max-h-56" />
-                      <Button variant="outline" size="sm" onClick={() => setVideoUrl(null)}>
-                        ลบวิดีโอ
-                      </Button>
-                    </div>
-                  ) : (
-                    <SellMediaPicker
-                      onFiles={(files) => void handleMediaUpload(files)}
-                      disabled={uploadingImages || uploadingVideo}
-                      title="เพิ่มวิดีโอ"
-                      description="ถ่ายหรือเลือกวิดีโอจากคลัง"
-                    >
-                      {(openPicker) => (
+                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
+                    {images.map((img, i) => (
+                      <div key={i} className="relative aspect-square rounded-lg overflow-hidden bg-muted">
+                        <img src={img} alt="" className="w-full h-full object-cover" />
                         <button
                           type="button"
-                          onClick={openPicker}
-                          disabled={uploadingImages || uploadingVideo}
-                          className="w-full border-2 border-dashed border-border rounded-lg p-4 flex items-center justify-center gap-2 text-muted-foreground hover:border-primary hover:text-primary transition-colors"
+                          onClick={() => setImages((prev) => prev.filter((_, idx) => idx !== i))}
+                          className="absolute top-1 right-1 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center"
                         >
-                          <Video className="w-5 h-5" />
-                          <span className="text-sm">
-                            {uploadingVideo ? "กำลังอัปโหลดวิดีโอ..." : "เพิ่มวิดีโอ (ไม่บังคับ)"}
-                          </span>
+                          <X className="w-3 h-3 text-white" />
                         </button>
-                      )}
-                    </SellMediaPicker>
-                  )}
+                        {i === 0 && (
+                          <div className="absolute bottom-0 left-0 right-0 bg-primary/80 text-white text-xs text-center py-0.5">
+                            หลัก
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {videoUrl && (
+                      <div className="relative aspect-square rounded-lg overflow-hidden bg-black">
+                        <video
+                          src={videoUrl}
+                          controls
+                          playsInline
+                          className="w-full h-full object-cover"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setVideoUrl(null)}
+                          className="absolute top-1 right-1 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center"
+                        >
+                          <X className="w-3 h-3 text-white" />
+                        </button>
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-white text-xs text-center py-0.5">
+                          วิดีโอ
+                        </div>
+                      </div>
+                    )}
+                    {(images.length < 10 || !videoUrl) && (
+                      <SellMediaPicker
+                        onFiles={(files) => void handleMediaUpload(files)}
+                        disabled={uploadingImages || uploadingVideo}
+                        title="เพิ่มรูปหรือวิดีโอ"
+                        description="ถ่ายหรือเลือกจากคลังเดียวกัน"
+                      >
+                        {(openPicker) => (
+                          <button
+                            type="button"
+                            onClick={openPicker}
+                            disabled={uploadingImages || uploadingVideo}
+                            className="aspect-square rounded-lg border-2 border-dashed border-border hover:border-primary flex flex-col items-center justify-center gap-1 text-muted-foreground hover:text-primary transition-colors"
+                          >
+                            <Upload className="w-5 h-5" />
+                            <span className="text-xs">
+                              {uploadingImages || uploadingVideo ? "กำลังอัปโหลด..." : "เพิ่ม"}
+                            </span>
+                          </button>
+                        )}
+                      </SellMediaPicker>
+                    )}
+                  </div>
 
                   <p className="text-xs text-muted-foreground">
-                    ต้องมีรูปอย่างน้อย 1 รูป · วิดีโอไม่บังคับ
+                    ต้องมีรูปอย่างน้อย 1 รูป · วิดีโอไม่บังคับ · คลังภาพเลือกได้ทั้งรูปและวิดีโอ
                   </p>
                 </>
               )}

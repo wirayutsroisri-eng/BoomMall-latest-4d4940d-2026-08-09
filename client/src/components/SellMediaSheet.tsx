@@ -1,4 +1,4 @@
-import { Camera, ImageIcon, Video, Clapperboard } from "lucide-react";
+import { Camera, ImageIcon, Clapperboard } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 import {
   Drawer,
@@ -60,9 +60,8 @@ export function SellMediaSheet({
   description = "ถ่ายหรือเลือกจากคลัง แล้วไปกรอกรายละเอียด",
 }: SellMediaSheetProps) {
   const photoCameraRef = useRef<HTMLInputElement>(null);
-  const photoGalleryRef = useRef<HTMLInputElement>(null);
+  const mixedGalleryRef = useRef<HTMLInputElement>(null);
   const videoCameraRef = useRef<HTMLInputElement>(null);
-  const videoGalleryRef = useRef<HTMLInputElement>(null);
 
   function emitFiles(fileList: FileList | null) {
     if (!fileList?.length) return;
@@ -86,9 +85,9 @@ export function SellMediaSheet({
         }}
       />
       <input
-        ref={photoGalleryRef}
+        ref={mixedGalleryRef}
         type="file"
-        accept="image/*"
+        accept="image/*,video/*"
         multiple
         className={HIDDEN_FILE_INPUT}
         aria-hidden="true"
@@ -111,19 +110,6 @@ export function SellMediaSheet({
           e.target.value = "";
         }}
       />
-      <input
-        ref={videoGalleryRef}
-        type="file"
-        accept="video/*"
-        className={HIDDEN_FILE_INPUT}
-        aria-hidden="true"
-        tabIndex={-1}
-        onChange={(e) => {
-          emitFiles(e.target.files);
-          e.target.value = "";
-        }}
-      />
-
       <Drawer open={open} onOpenChange={onOpenChange}>
         <DrawerContent className="z-[70] max-w-lg mx-auto">
           <DrawerHeader className="pb-2">
@@ -144,9 +130,9 @@ export function SellMediaSheet({
             <MediaOption
               icon={<ImageIcon className="w-5 h-5 text-foreground" />}
               iconClassName="bg-muted"
-              title="เลือกรูปจากคลัง"
-              subtitle="เลือกได้หลายรูป สูงสุด 10 รูป"
-              onClick={() => photoGalleryRef.current?.click()}
+              title="เลือกจากคลัง"
+              subtitle="เปิดอัลบั้มเดียว เลือกได้ทั้งรูปและวิดีโอ"
+              onClick={() => mixedGalleryRef.current?.click()}
             />
             <MediaOption
               icon={<Clapperboard className="w-5 h-5 text-white" />}
@@ -154,13 +140,6 @@ export function SellMediaSheet({
               title="ถ่ายวิดีโอ"
               subtitle="บันทึกคลิปสินค้าด้วยกล้อง"
               onClick={() => videoCameraRef.current?.click()}
-            />
-            <MediaOption
-              icon={<Video className="w-5 h-5 text-foreground" />}
-              iconClassName="bg-muted"
-              title="เลือกวิดีโอจากคลัง"
-              subtitle="สูงสุด 50MB ต่อคลิป"
-              onClick={() => videoGalleryRef.current?.click()}
             />
           </div>
         </DrawerContent>
