@@ -6,10 +6,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { SlidersHorizontal, X, Camera, Sparkles, ImageOff } from "lucide-react";
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useSearch } from "wouter";
 import { toast } from "sonner";
 import { prepareImageForUpload, ImageUploadError } from "@/lib/imageUpload";
+import { ImageSourcePicker } from "@/components/ImageSourceSheet";
 
 type SortBy = "smart" | "popular" | "newest" | "price_asc" | "price_desc";
 
@@ -56,7 +57,6 @@ export default function ProductsPage() {
     confidence: number;
     description: string;
   } | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // อ่านผลจาก BottomNav camera (sessionStorage)
   useEffect(() => {
@@ -132,7 +132,6 @@ export default function ProductsPage() {
     setPreviewImage(null);
     setImageAnalysis(null);
     setSearchText("");
-    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   const handleImageSelect = useCallback(async (file: File) => {
@@ -148,7 +147,6 @@ export default function ProductsPage() {
     } catch (err) {
       toast.error(err instanceof ImageUploadError ? err.message : "อัปโหลดรูปไม่สำเร็จ");
     }
-    if (fileInputRef.current) fileInputRef.current.value = "";
   }, [searchByImageMutation, limit]);
 
   const isImageSearchLoading = searchByImageMutation.isPending;
@@ -249,43 +247,40 @@ export default function ProductsPage() {
             </div>
 
             {/* Camera button — Image Search */}
-            <button
-              onClick={() => fileInputRef.current?.click()}
+            <ImageSourcePicker
+              onFiles={(files) => { if (files[0]) void handleImageSelect(files[0]); }}
               disabled={isImageSearchLoading}
-              className={`
-                relative shrink-0 w-10 h-10 rounded-xl flex items-center justify-center
-                border border-border/60 transition-all duration-200
-                ${isImageSearchLoading
-                  ? "bg-primary/10 border-primary/30 cursor-not-allowed"
-                  : "bg-card hover:bg-accent hover:border-primary/40 active:scale-95"
-                }
-              `}
-              title="ค้นหาด้วยรูปภาพ (AI)"
+              title="ค้นหาด้วยรูป"
+              description="ถ่ายสินค้าแล้วให้ AI หาของใกล้เคียง"
             >
-              {isImageSearchLoading ? (
-                <div className="w-4 h-4 border-2 border-primary/40 border-t-primary rounded-full animate-spin" />
-              ) : (
-                <Camera className="w-4.5 h-4.5 text-muted-foreground" />
+              {(openPicker) => (
+                <button
+                  type="button"
+                  onClick={openPicker}
+                  disabled={isImageSearchLoading}
+                  className={`
+                    relative shrink-0 w-10 h-10 rounded-xl flex items-center justify-center
+                    border border-border/60 transition-all duration-200
+                    ${isImageSearchLoading
+                      ? "bg-primary/10 border-primary/30 cursor-not-allowed"
+                      : "bg-card hover:bg-accent hover:border-primary/40 active:scale-95"
+                    }
+                  `}
+                  title="ค้นหาด้วยรูปภาพ (AI)"
+                >
+                  {isImageSearchLoading ? (
+                    <div className="w-4 h-4 border-2 border-primary/40 border-t-primary rounded-full animate-spin" />
+                  ) : (
+                    <Camera className="w-4.5 h-4.5 text-muted-foreground" />
+                  )}
+                  {!isImageSearchLoading && (
+                    <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-primary rounded-full flex items-center justify-center">
+                      <Sparkles className="w-2 h-2 text-white" />
+                    </span>
+                  )}
+                </button>
               )}
-              {/* Sparkle badge */}
-              {!isImageSearchLoading && (
-                <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-primary rounded-full flex items-center justify-center">
-                  <Sparkles className="w-2 h-2 text-white" />
-                </span>
-              )}
-            </button>
-
-            {/* Hidden file input — ไม่ใส่ capture เพื่อให้เลือกจาก gallery หรือกล้องได้ */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleImageSelect(file);
-              }}
-            />
+            </ImageSourcePicker>
           </div>
 
           {/* Sort selector */}

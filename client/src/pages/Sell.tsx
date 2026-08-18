@@ -1,6 +1,6 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
-import { ShieldCheck, Upload, Video, X, Truck, Wallet, Package, CreditCard, QrCode } from "lucide-react";
+import { ShieldCheck, Upload, Video, X, Truck, Wallet, Package, CreditCard, QrCode, Camera } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,6 +14,13 @@ import { LISTING_TYPE_LABELS } from "@shared/types";
 import { normalizeWholesalePriceTiers, WholesalePriceTierError } from "@shared/wholesale-pricing";
 import { MAX_VIDEO_UPLOAD_BYTES, formatUploadLimit } from "@shared/upload-limits";
 import { fileToBase64Raw, prepareImageForUpload, ImageUploadError } from "@/lib/imageUpload";
+import { SellMediaPicker, SellMediaSheet } from "@/components/SellMediaSheet";
+import {
+  SELL_MEDIA_EVENT,
+  splitMediaFiles,
+  takePendingSellMedia,
+  type PendingSellMedia,
+} from "@/lib/sellMedia";
 
 export default function SellPage() {
   const { user, isAuthenticated } = useAuth();
@@ -21,8 +28,6 @@ export default function SellPage() {
   const params = new URLSearchParams(search);
   const editId = params.get("edit") ? parseInt(params.get("edit")!) : undefined;
   const isEditMode = !!editId;
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -32,11 +37,12 @@ export default function SellPage() {
   const [location, setLocation] = useState("");
   const [images, setImages] = useState<string[]>([]);
   const [uploadingImages, setUploadingImages] = useState(false);
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
+  const [pendingMedia, setPendingMedia] = useState<PendingSellMedia | null>(null);
   const [productStatus, setProductStatus] = useState<"active" | "hidden">("active");
   const [quantity, setQuantity] = useState<number>(1);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [uploadingVideo, setUploadingVideo] = useState(false);
-  const videoInputRef = useRef<HTMLInputElement>(null);
   // Contact info (per-product override)
   const [contactPhone, setContactPhone] = useState("");
   const [contactLineId, setContactLineId] = useState("");
@@ -64,39 +70,59 @@ export default function SellPage() {
   const [listingType, setListingType] = useState<"c2c" | "b2b" | "both">("both");
 
   const DRAFT_KEY = "boommall_sell_draft";
+  const startedPhotoFlow = useRef(false);
 
-  // Restore draft from localStorage on mount (new listing only)
+  // Restore draft, then continue the media-first listing flow.
   useEffect(() => {
-    if (isEditMode) return;
+    if (isEditMode || startedPhotoFlow.current) return;
+    if (!isAuthenticated) return;
+    if (user?.kycStatus !== "approved") return;
+    startedPhotoFlow.current = true;
+
+    const pending = takePendingSellMedia();
     try {
       const saved = localStorage.getItem(DRAFT_KEY);
-      if (!saved) return;
-      const d = JSON.parse(saved);
-      if (d.title) setTitle(d.title);
-      if (d.description) setDescription(d.description);
-      if (d.price) setPrice(d.price);
-      if (d.condition) setCondition(d.condition);
-      if (d.categoryId) setCategoryId(d.categoryId);
-      if (d.location) setLocation(d.location);
-      if (d.images?.length) setImages(d.images);
-      if (d.quantity) setQuantity(d.quantity);
-      if (d.videoUrl) setVideoUrl(d.videoUrl);
-      if (d.contactPhone) setContactPhone(d.contactPhone);
-      if (d.contactLineId) setContactLineId(d.contactLineId);
-      if (d.contactFacebookUrl) setContactFacebookUrl(d.contactFacebookUrl);
-      if (typeof d.shippingFee === "number") setShippingFee(d.shippingFee);
-      if (typeof d.allowCod === "boolean") setAllowCod(d.allowCod);
-      if (typeof d.allowWallet === "boolean") setAllowWallet(d.allowWallet);
-      if (typeof d.allowPromptpay === "boolean") setAllowPromptpay(d.allowPromptpay);
-      if (d.deliveryDays) setDeliveryDays(d.deliveryDays);
-      if (d.bankName) setBankName(d.bankName);
-      if (d.bankAccountNumber) setBankAccountNumber(d.bankAccountNumber);
-      if (d.bankAccountName) setBankAccountName(d.bankAccountName);
-      if (d.promptpayNumber) setPromptpayNumber(d.promptpayNumber);
-      if (d.promptpayQrUrl) setPromptpayQrUrl(d.promptpayQrUrl);
+      if (saved) {
+        const d = JSON.parse(saved);
+        if (d.title) setTitle(d.title);
+        if (d.description) setDescription(d.description);
+        if (d.price) setPrice(d.price);
+        if (d.condition) setCondition(d.condition);
+        if (d.categoryId) setCategoryId(d.categoryId);
+        if (d.location) setLocation(d.location);
+        if (!pending.images.length && d.images?.length) setImages(d.images);
+        if (d.quantity) setQuantity(d.quantity);
+        if (!pending.video && d.videoUrl) setVideoUrl(d.videoUrl);
+        if (d.contactPhone) setContactPhone(d.contactPhone);
+        if (d.contactLineId) setContactLineId(d.contactLineId);
+        if (d.contactFacebookUrl) setContactFacebookUrl(d.contactFacebookUrl);
+        if (typeof d.shippingFee === "number") setShippingFee(d.shippingFee);
+        if (typeof d.allowCod === "boolean") setAllowCod(d.allowCod);
+        if (typeof d.allowWallet === "boolean") setAllowWallet(d.allowWallet);
+        if (typeof d.allowPromptpay === "boolean") setAllowPromptpay(d.allowPromptpay);
+        if (d.deliveryDays) setDeliveryDays(d.deliveryDays);
+        if (d.bankName) setBankName(d.bankName);
+        if (d.bankAccountNumber) setBankAccountNumber(d.bankAccountNumber);
+        if (d.bankAccountName) setBankAccountName(d.bankAccountName);
+        if (d.promptpayNumber) setPromptpayNumber(d.promptpayNumber);
+        if (d.promptpayQrUrl) setPromptpayQrUrl(d.promptpayQrUrl);
+      }
     } catch {}
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditMode]);
+
+    if (pending.images.length || pending.video) {
+      setPendingMedia(pending);
+      return;
+    }
+
+    let draftHasMedia = false;
+    try {
+      const saved = localStorage.getItem(DRAFT_KEY);
+      const d = saved ? JSON.parse(saved) : {};
+      draftHasMedia =
+        (Array.isArray(d.images) && d.images.length > 0) || Boolean(d.videoUrl);
+    } catch {}
+    if (!draftHasMedia) setMediaPickerOpen(true);
+  }, [isEditMode, isAuthenticated, user?.kycStatus]);
 
   // Auto-save draft to localStorage whenever form changes (new listing only)
   useEffect(() => {
@@ -212,7 +238,7 @@ export default function SellPage() {
     }
   }
 
-  async function handleImageUpload(files: FileList) {
+  async function handleImageUpload(files: File[] | FileList) {
     setUploadingImages(true);
     try {
       for (const file of Array.from(files)) {
@@ -238,6 +264,65 @@ export default function SellPage() {
       setUploadingImages(false);
     }
   }
+
+  async function handleMediaUpload(files: File[] | FileList) {
+    const { images: imageFiles, videos } = splitMediaFiles(Array.from(files));
+    if (imageFiles.length) await handleImageUpload(imageFiles);
+    if (videos[0]) await handleVideoUpload(videos[0]);
+  }
+
+  const handleMediaUploadRef = useRef(handleMediaUpload);
+  handleMediaUploadRef.current = handleMediaUpload;
+
+  useEffect(() => {
+    function onMedia(event: Event) {
+      const files = (event as CustomEvent<{ files: File[] }>).detail?.files;
+      if (files?.length) void handleMediaUploadRef.current(files);
+    }
+    window.addEventListener(SELL_MEDIA_EVENT, onMedia);
+    return () => window.removeEventListener(SELL_MEDIA_EVENT, onMedia);
+  }, []);
+
+  useEffect(() => {
+    if (!pendingMedia) return;
+    const { images: pendingImages, video } = pendingMedia;
+    setPendingMedia(null);
+    void (async () => {
+      if (pendingImages.length) {
+        setUploadingImages(true);
+        try {
+          for (const item of pendingImages) {
+            const result = await uploadImage.mutateAsync({
+              filename: item.filename,
+              contentType: item.contentType,
+              base64: item.base64,
+            });
+            setImages((prev) => [...prev, result.url]);
+          }
+        } catch {
+          toast.error("อัปโหลดรูปภาพล้มเหลว");
+        } finally {
+          setUploadingImages(false);
+        }
+      }
+      if (video) {
+        setUploadingVideo(true);
+        try {
+          const result = await uploadVideo.mutateAsync({
+            filename: video.filename,
+            contentType: video.contentType,
+            base64: video.base64,
+          });
+          setVideoUrl(result.url);
+          toast.success("อัปโหลดวิดีโอสำเร็จ");
+        } catch {
+          toast.error("อัปโหลดวิดีโอล้มเหลว");
+        } finally {
+          setUploadingVideo(false);
+        }
+      }
+    })();
+  }, [pendingMedia, uploadImage, uploadVideo]);
 
   function handleSubmit() {
     const basePrice = parseFloat(price);
@@ -347,37 +432,117 @@ export default function SellPage() {
   return (
     <div className="min-h-screen bg-background">
       <div className="container py-8 max-w-2xl">
-        <h1 className="text-2xl font-bold mb-6" style={{ fontFamily: "Prompt, sans-serif" }}>
-          {isEditMode ? "แก้ไขสินค้า" : "ลงขายสินค้า"}
+        <h1 className="text-2xl font-bold mb-2" style={{ fontFamily: "Prompt, sans-serif" }}>
+          {isEditMode ? "แก้ไขสินค้า" : "ลงรูปภาพและวิดีโอ"}
         </h1>
+        {!isEditMode && (
+          <p className="text-sm text-muted-foreground mb-6">
+            ถ่ายหรือเลือกรูปและวิดีโอก่อน แล้วค่อยกรอกรายละเอียด
+          </p>
+        )}
 
         <div className="space-y-6">
-          {/* Video */}
-          <Card>
-            <CardHeader><CardTitle className="text-base">วีดีโอสินค้า (ไม่บังคับ)</CardTitle></CardHeader>
-            <CardContent>
-              <input
-                ref={videoInputRef}
-                type="file"
-                accept="video/*"
-                className="hidden"
-                onChange={(e) => e.target.files?.[0] && handleVideoUpload(e.target.files[0])}
-              />
-              {videoUrl ? (
-                <div className="space-y-2">
-                  <video src={videoUrl} controls className="w-full rounded-lg max-h-48" />
-                  <Button variant="outline" size="sm" onClick={() => setVideoUrl(null)}>ลบวีดีโอ</Button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => videoInputRef.current?.click()}
-                  disabled={uploadingVideo}
-                  className="w-full border-2 border-dashed border-border rounded-lg p-6 flex flex-col items-center gap-2 text-muted-foreground hover:border-primary hover:text-primary transition-colors"
+          <Card className="border-orange-200">
+            <CardHeader>
+              <CardTitle className="text-base">รูปภาพและวิดีโอ *</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {images.length === 0 && !videoUrl ? (
+                <SellMediaPicker
+                  onFiles={(files) => void handleMediaUpload(files)}
+                  disabled={uploadingImages || uploadingVideo}
+                  title="ลงรูปภาพและวิดีโอ"
+                  description="ถ่ายหรือเลือกรูปและวิดีโอสินค้า"
                 >
-                  <Video className="w-6 h-6" />
-                  <span className="text-sm">{uploadingVideo ? "กำลังอัปโหลด..." : "อัปโหลดวีดีโอ (สูงสุด 50MB)"}</span>
-                </button>
+                  {(openPicker) => (
+                    <button
+                      type="button"
+                      onClick={openPicker}
+                      disabled={uploadingImages || uploadingVideo}
+                      className="w-full min-h-48 rounded-2xl border-2 border-dashed border-orange-300 bg-orange-50/70 flex flex-col items-center justify-center gap-3 text-orange-800 hover:bg-orange-50 transition-colors px-4 py-8"
+                    >
+                      <span className="w-16 h-16 rounded-full bg-orange-600 flex items-center justify-center shadow-md">
+                        <Camera className="w-8 h-8 text-white" />
+                      </span>
+                      <span className="text-base font-bold">
+                        {uploadingImages || uploadingVideo
+                          ? "กำลังอัปโหลด..."
+                          : "ถ่ายรูปหรือวิดีโอสินค้า"}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        สูงสุด 10 รูป · 1 วิดีโอ · เลือกจากคลังได้ทั้งสองแบบ
+                      </span>
+                    </button>
+                  )}
+                </SellMediaPicker>
+              ) : (
+                <>
+                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
+                    {images.map((img, i) => (
+                      <div key={i} className="relative aspect-square rounded-lg overflow-hidden bg-muted">
+                        <img src={img} alt="" className="w-full h-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => setImages((prev) => prev.filter((_, idx) => idx !== i))}
+                          className="absolute top-1 right-1 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center"
+                        >
+                          <X className="w-3 h-3 text-white" />
+                        </button>
+                        {i === 0 && (
+                          <div className="absolute bottom-0 left-0 right-0 bg-primary/80 text-white text-xs text-center py-0.5">
+                            หลัก
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {videoUrl && (
+                      <div className="relative aspect-square rounded-lg overflow-hidden bg-black">
+                        <video
+                          src={videoUrl}
+                          controls
+                          playsInline
+                          className="w-full h-full object-cover"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setVideoUrl(null)}
+                          className="absolute top-1 right-1 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center"
+                        >
+                          <X className="w-3 h-3 text-white" />
+                        </button>
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-white text-xs text-center py-0.5">
+                          วิดีโอ
+                        </div>
+                      </div>
+                    )}
+                    {(images.length < 10 || !videoUrl) && (
+                      <SellMediaPicker
+                        onFiles={(files) => void handleMediaUpload(files)}
+                        disabled={uploadingImages || uploadingVideo}
+                        title="เพิ่มรูปหรือวิดีโอ"
+                        description="ถ่ายหรือเลือกจากคลังเดียวกัน"
+                      >
+                        {(openPicker) => (
+                          <button
+                            type="button"
+                            onClick={openPicker}
+                            disabled={uploadingImages || uploadingVideo}
+                            className="aspect-square rounded-lg border-2 border-dashed border-border hover:border-primary flex flex-col items-center justify-center gap-1 text-muted-foreground hover:text-primary transition-colors"
+                          >
+                            <Upload className="w-5 h-5" />
+                            <span className="text-xs">
+                              {uploadingImages || uploadingVideo ? "กำลังอัปโหลด..." : "เพิ่ม"}
+                            </span>
+                          </button>
+                        )}
+                      </SellMediaPicker>
+                    )}
+                  </div>
+
+                  <p className="text-xs text-muted-foreground">
+                    ต้องมีรูปอย่างน้อย 1 รูป · วิดีโอไม่บังคับ · คลังภาพเลือกได้ทั้งรูปและวิดีโอ
+                  </p>
+                </>
               )}
             </CardContent>
           </Card>
@@ -409,50 +574,6 @@ export default function SellPage() {
               <p className="text-xs text-muted-foreground mt-2">
                 กำหนดว่าผู้ซื้อจะทักแชทแบบไหนได้ — มือสอง (C2C), ราคาส่ง (B2B), หรือทั้งสอง
               </p>
-            </CardContent>
-          </Card>
-
-          {/* Images */}
-          <Card>
-            <CardHeader><CardTitle className="text-base">รูปภาพสินค้า</CardTitle></CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-3 sm:grid-cols-5 gap-3 mb-3">
-                {images.map((img, i) => (
-                  <div key={i} className="relative aspect-square rounded-lg overflow-hidden bg-muted">
-                    <img src={img} alt="" className="w-full h-full object-cover" />
-                    <button
-                      onClick={() => setImages((prev) => prev.filter((_, idx) => idx !== i))}
-                      className="absolute top-1 right-1 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center"
-                    >
-                      <X className="w-3 h-3 text-white" />
-                    </button>
-                    {i === 0 && (
-                      <div className="absolute bottom-0 left-0 right-0 bg-primary/80 text-white text-xs text-center py-0.5">
-                        หลัก
-                      </div>
-                    )}
-                  </div>
-                ))}
-                {images.length < 10 && (
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={uploadingImages}
-                    className="aspect-square rounded-lg border-2 border-dashed border-border hover:border-primary flex flex-col items-center justify-center gap-1 text-muted-foreground hover:text-primary transition-colors"
-                  >
-                    <Upload className="w-5 h-5" />
-                    <span className="text-xs">{uploadingImages ? "กำลังอัปโหลด..." : "เพิ่มรูป"}</span>
-                  </button>
-                )}
-              </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={(e) => e.target.files && handleImageUpload(e.target.files)}
-              />
-              <p className="text-xs text-muted-foreground">อัปโหลดได้สูงสุด 10 รูป, ขนาดไม่เกิน 10MB ต่อรูป (บีบอัดอัตโนมัติ)</p>
             </CardContent>
           </Card>
 
@@ -1012,6 +1133,13 @@ export default function SellPage() {
           </Button>
         </div>
       </div>
+      <SellMediaSheet
+        open={mediaPickerOpen}
+        onOpenChange={setMediaPickerOpen}
+        onFiles={(files) => void handleMediaUpload(files)}
+        title="ลงรูปภาพและวิดีโอ"
+        description="ถ่ายหรือเลือกรูปและวิดีโอสินค้า"
+      />
     </div>
   );
 }

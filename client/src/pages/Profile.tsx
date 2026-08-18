@@ -3,7 +3,7 @@ import { trpc } from "@/lib/trpc";
 import {
   User, ShieldCheck, Camera, Settings, LogOut,
   Package, Star, RotateCcw, Truck, CreditCard, MapPinned, Bell, BellOff,
-  HelpCircle, ChevronRight, Store, Tag, ShoppingBag, Heart, Wallet
+  HelpCircle, ChevronRight, Store, ShoppingBag, Heart, Wallet
 } from "lucide-react";
 import { useRef } from "react";
 import { usePushNotification } from "@/hooks/usePushNotification";
@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { Link } from "wouter";
 import { getLoginUrl } from "@/const";
 import { prepareImageForUpload, ImageUploadError } from "@/lib/imageUpload";
+import { SellPhotoEntry } from "@/components/SellPhotoEntry";
 
 export default function ProfilePage() {
   const { user, isAuthenticated, refresh } = useAuth();
@@ -249,14 +250,23 @@ export default function ProfilePage() {
 
         {/* Seller quick actions */}
         <div className="grid grid-cols-3 gap-2 px-4 py-3">
-          <Link href="/sell">
-            <div className="flex flex-col items-center gap-1.5 py-2 bg-orange-50 hover:bg-orange-100 rounded-xl transition-colors cursor-pointer">
-              <div className="w-9 h-9 bg-orange-500 rounded-full flex items-center justify-center text-white shadow-sm">
-                <Tag className="w-4 h-4" />
-              </div>
-              <span className="text-[11px] font-medium text-orange-800">ลงขาย</span>
-            </div>
-          </Link>
+          <SellPhotoEntry>
+            {(openPicker, busy) => (
+              <button
+                type="button"
+                onClick={openPicker}
+                disabled={busy}
+                className="flex flex-col items-center gap-1.5 py-2 bg-orange-50 hover:bg-orange-100 rounded-xl transition-colors cursor-pointer w-full"
+              >
+                <div className="w-9 h-9 bg-orange-500 rounded-full flex items-center justify-center text-white shadow-sm">
+                  <Camera className="w-4 h-4" />
+                </div>
+                <span className="text-[11px] font-medium text-orange-800">
+                  {busy ? "กำลังโหลด..." : "ลงรูป/วิดีโอ"}
+                </span>
+              </button>
+            )}
+          </SellPhotoEntry>
 
           <Link href="/seller/orders">
             <div className="flex flex-col items-center gap-1.5 py-2 bg-orange-50 hover:bg-orange-100 rounded-xl transition-colors cursor-pointer">
