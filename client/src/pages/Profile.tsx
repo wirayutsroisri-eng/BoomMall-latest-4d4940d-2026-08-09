@@ -262,7 +262,7 @@ export default function ProfilePage() {
                   <Camera className="w-4 h-4" />
                 </div>
                 <span className="text-[11px] font-medium text-orange-800">
-                  {busy ? "กำลังโหลด..." : "ลงรูปขาย"}
+                  {busy ? "กำลังโหลด..." : "ลงรูป/วิดีโอ"}
                 </span>
               </button>
             )}

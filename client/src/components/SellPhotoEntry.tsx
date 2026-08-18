@@ -3,19 +3,19 @@ import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { getLoginUrl } from "@/const";
-import { ImageUploadError } from "@/lib/imageUpload";
-import { ImageSourcePicker } from "@/components/ImageSourceSheet";
+import { SellMediaPicker } from "@/components/SellMediaSheet";
 import {
-  SELL_PHOTOS_EVENT,
-  stashPendingSellImages,
-} from "@/lib/sellPhotos";
-import { SELL_PENDING_IMAGES_KEY } from "@shared/sell-photos";
+  SELL_MEDIA_EVENT,
+  hasPendingSellMedia,
+  stashPendingSellMedia,
+  SellMediaError,
+} from "@/lib/sellMedia";
+import { ImageUploadError } from "@/lib/imageUpload";
 
 type SellPhotoEntryProps = {
   children: (openPicker: () => void, busy: boolean) => ReactNode;
 };
 
-/** Old /sell form-first entry is replaced by pick photos, then continue to the listing form. */
 export function SellPhotoEntry({ children }: SellPhotoEntryProps) {
   const { isAuthenticated, user } = useAuth();
   const [location] = useLocation();
@@ -25,28 +25,31 @@ export function SellPhotoEntry({ children }: SellPhotoEntryProps) {
     if (!files.length) return;
     if (location.startsWith("/sell")) {
       window.dispatchEvent(
-        new CustomEvent(SELL_PHOTOS_EVENT, { detail: { files } })
+        new CustomEvent(SELL_MEDIA_EVENT, { detail: { files } })
       );
       return;
     }
     setBusy(true);
     try {
-      await stashPendingSellImages(files);
+      await stashPendingSellMedia(files);
       window.location.assign("/sell");
     } catch (err) {
-      toast.error(err instanceof ImageUploadError ? err.message : "อ่านรูปไม่สำเร็จ");
+      toast.error(
+        err instanceof SellMediaError || err instanceof ImageUploadError
+          ? err.message
+          : "อ่านไฟล์ไม่สำเร็จ"
+      );
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <ImageSourcePicker
+    <SellMediaPicker
       onFiles={(files) => void onFiles(files)}
-      multiple
       disabled={busy}
-      title="ลงขายด้วยรูปภาพ"
-      description="ถ่ายรูปสินค้า หรือเลือกจากคลัง แล้วไปกรอกรายละเอียด"
+      title="ลงรูปภาพและวิดีโอ"
+      description="ถ่ายหรือเลือกรูปและวิดีโอ แล้วไปกรอกรายละเอียด"
     >
       {(openPicker) =>
         children(() => {
@@ -58,13 +61,13 @@ export function SellPhotoEntry({ children }: SellPhotoEntryProps) {
             window.location.assign("/kyc");
             return;
           }
-          if (sessionStorage.getItem(SELL_PENDING_IMAGES_KEY)) {
+          if (hasPendingSellMedia(sessionStorage)) {
             window.location.assign("/sell");
             return;
           }
           openPicker();
         }, busy)
       }
-    </ImageSourcePicker>
+    </SellMediaPicker>
   );
 }

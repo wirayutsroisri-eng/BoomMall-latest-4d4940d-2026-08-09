@@ -188,7 +188,7 @@ export default function SellerDashboardPage() {
                       {(openPicker, busy) => (
                         <Button className="flex items-center gap-2" onClick={openPicker} disabled={busy}>
                           <Plus className="w-4 h-4" />
-                          {busy ? "กำลังโหลด..." : "ลงรูปขาย"}
+                          {busy ? "กำลังโหลด..." : "ลงรูป/วิดีโอ"}
                         </Button>
                       )}
                     </SellPhotoEntry>
@@ -272,7 +272,7 @@ export default function SellerDashboardPage() {
                       <SellPhotoEntry>
                         {(openPicker, busy) => (
                           <Button className="mt-4" onClick={openPicker} disabled={busy}>
-                            {busy ? "กำลังโหลด..." : "ลงรูปขายชิ้นแรก"}
+                            {busy ? "กำลังโหลด..." : "ลงรูป/วิดีโอชิ้นแรก"}
                           </Button>
                         )}
                       </SellPhotoEntry>

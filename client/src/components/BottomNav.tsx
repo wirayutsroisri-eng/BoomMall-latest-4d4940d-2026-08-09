@@ -58,7 +58,7 @@ export default function BottomNav() {
                 onClick={openPicker}
                 disabled={busy}
                 className="relative w-16 h-16 rounded-full bg-orange-600 hover:bg-orange-700 flex items-center justify-center shadow-lg shadow-orange-600/40 active:scale-95 transition-all duration-150 disabled:opacity-70"
-                aria-label="ลงขายด้วยรูปภาพ"
+                aria-label="ลงรูปภาพและวิดีโอ"
               >
                 {busy ? (
                   <div className="w-7 h-7 border-3 border-white/40 border-t-white rounded-full animate-spin" />

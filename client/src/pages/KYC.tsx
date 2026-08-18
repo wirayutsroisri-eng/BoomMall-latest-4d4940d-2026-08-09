@@ -180,7 +180,7 @@ export default function KYCPage() {
           <SellPhotoEntry>
             {(openPicker, busy) => (
               <Button type="button" className="w-full" size="lg" onClick={openPicker} disabled={busy}>
-                {busy ? "กำลังโหลด..." : "เริ่มลงขายด้วยรูปภาพ"}
+                {busy ? "กำลังโหลด..." : "เริ่มลงรูปและวิดีโอ"}
               </Button>
             )}
           </SellPhotoEntry>
