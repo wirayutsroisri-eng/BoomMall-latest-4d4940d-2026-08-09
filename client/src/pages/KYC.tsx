@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { Link } from "wouter";
+import { SellPhotoEntry } from "@/components/SellPhotoEntry";
 
 function firstZodIssueMessage(error: { issues: { message: string }[] }): string {
   return error.issues[0]?.message ?? "ข้อมูลไม่ถูกต้อง";
@@ -176,9 +177,13 @@ export default function KYCPage() {
 
         {/* Approved — CTA */}
         {status === "approved" && (
-          <Link href="/sell">
-            <Button type="button" className="w-full" size="lg">เริ่มลงขายสินค้าเลย</Button>
-          </Link>
+          <SellPhotoEntry>
+            {(openPicker, busy) => (
+              <Button type="button" className="w-full" size="lg" onClick={openPicker} disabled={busy}>
+                {busy ? "กำลังโหลด..." : "เริ่มลงขายด้วยรูปภาพ"}
+              </Button>
+            )}
+          </SellPhotoEntry>
         )}
 
         {/* Pending */}

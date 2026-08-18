@@ -27,6 +27,7 @@ import { prepareImageForUpload, type PreparedImageUpload, ImageUploadError } fro
 import { Link } from "wouter";
 import { toast } from "sonner";
 import { useRef, useState } from "react";
+import { SellPhotoEntry } from "@/components/SellPhotoEntry";
 
 const STATUS_LABELS: Record<string, string> = {
   pending_fee: "รออนุมัติ",
@@ -183,12 +184,14 @@ export default function SellerDashboardPage() {
               คำสั่งซื้อ
             </Button>
           </Link>
-                    <Link href="/sell">
-            <Button className="flex items-center gap-2">
-              <Plus className="w-4 h-4" />
-              ลงขายสินค้า
-            </Button>
-          </Link>
+                    <SellPhotoEntry>
+                      {(openPicker, busy) => (
+                        <Button className="flex items-center gap-2" onClick={openPicker} disabled={busy}>
+                          <Plus className="w-4 h-4" />
+                          {busy ? "กำลังโหลด..." : "ลงรูปขาย"}
+                        </Button>
+                      )}
+                    </SellPhotoEntry>
           </div>
         </div>
         {/* Warning: ใกล้หมดอายุ */}
@@ -266,9 +269,13 @@ export default function SellerDashboardPage() {
                     <Package className="w-12 h-12 mx-auto mb-3 opacity-30" />
                     <p>ไม่มีสินค้าในหมวดนี้</p>
                     {tab === "all" && (
-                      <Link href="/sell">
-                        <Button className="mt-4">ลงขายสินค้าแรก</Button>
-                      </Link>
+                      <SellPhotoEntry>
+                        {(openPicker, busy) => (
+                          <Button className="mt-4" onClick={openPicker} disabled={busy}>
+                            {busy ? "กำลังโหลด..." : "ลงรูปขายชิ้นแรก"}
+                          </Button>
+                        )}
+                      </SellPhotoEntry>
                     )}
                   </div>
                 ) : (
