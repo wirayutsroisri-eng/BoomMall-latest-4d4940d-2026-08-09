@@ -11,12 +11,16 @@ import {
   DEFAULT_OVERLAY_TRANSFORM,
   type OverlayTransform,
 } from '@/modules/create/domain/overlay';
+import type { OverlayFontKey } from '@/modules/create/domain/overlayText';
 
 type Props = {
   text: string;
   color: string;
+  fontKey?: OverlayFontKey;
   italic?: boolean;
+  background?: string | null;
   initialTransform?: OverlayTransform;
+  interactive?: boolean;
   onEdit: () => void;
   onTransformChange?: (t: OverlayTransform) => void;
 };
@@ -27,11 +31,29 @@ type Props = {
 export function MovableTextLayer({
   text,
   color,
+  fontKey = 'classic',
   italic,
+  background,
   initialTransform = DEFAULT_OVERLAY_TRANSFORM,
+  interactive = true,
   onEdit,
   onTransformChange,
 }: Props) {
+  const fontFamily =
+    fontKey === 'system'
+      ? undefined
+      : fontKey === 'kanit'
+        ? 'Kanit'
+        : fontKey === 'mitr'
+          ? 'Mitr'
+          : fontKey === 'prompt'
+            ? 'Prompt'
+            : fontKey === 'sarabun'
+              ? 'Sarabun'
+              : fontKey === 'halloween'
+                ? 'Creepster'
+                : undefined;
+
   const [frame, setFrame] = useState({ w: 0, h: 0 });
 
   const nx = useSharedValue(initialTransform.x);
@@ -64,7 +86,9 @@ export function MovableTextLayer({
   };
 
   const pan = Gesture.Pan()
+    .enabled(interactive)
     .minDistance(4)
+
     .onStart(() => {
       startNx.value = nx.value;
       startNy.value = ny.value;
@@ -134,11 +158,14 @@ export function MovableTextLayer({
                 {
                   color,
                   fontStyle: italic ? 'italic' : 'normal',
+                  fontFamily,
+                  backgroundColor: background ?? 'transparent',
                 },
               ]}
             >
               {text}
             </Text>
+
           </Animated.View>
         </GestureDetector>
       ) : null}

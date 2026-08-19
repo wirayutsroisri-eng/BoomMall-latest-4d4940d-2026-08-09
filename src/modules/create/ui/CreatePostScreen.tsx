@@ -126,7 +126,7 @@ export function CreatePostScreen() {
     prefill ? String(prefill.basePrice) : '1990',
   );
   const [simpleStock, setSimpleStock] = useState(() => (prefill ? '0' : '10'));
-  const [simpleStock, setSimpleStock] = useState(() => (prefill ? '0' : '10'));
+
   const [hasVariants, setHasVariants] = useState(true);
   const [draftVariants, setDraftVariants] = useState<DraftVariant[]>(() => {
     if (prefill?.variants.length) {

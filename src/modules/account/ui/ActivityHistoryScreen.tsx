@@ -50,7 +50,8 @@ export function ActivityHistoryScreen({ category }: { category: ActivityCategory
       });
     }
     return entries
-      .filter((e) => e.category === category && e.category !== 'shop' && e.subtitle !== 'สินค้า')
+      .filter((e) => e.category === category && e.subtitle !== 'สินค้า')
+
       .map((e) => ({ id: e.id, title: e.title, subtitle: e.subtitle, at: e.at }));
   }, [allTracks, category, entries, watchHistory]);
 

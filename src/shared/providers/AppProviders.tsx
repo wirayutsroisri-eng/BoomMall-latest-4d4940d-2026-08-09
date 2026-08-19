@@ -62,9 +62,18 @@ export function AppProviders({ children }: Props) {
       startChatRealtime({
         onMessage: (msg) => useChatStore.getState().applyRemoteMessage(msg),
         onRead: (payload) =>
-          useChatStore.getState().applyReceipt({ ...payload, kind: 'read' }),
+          useChatStore.getState().applyReceipt({
+            conversationId: payload.conversationId,
+            lastReadAt: payload.lastReadAt ?? undefined,
+            kind: 'read',
+          }),
         onDelivered: (payload) =>
-          useChatStore.getState().applyReceipt({ ...payload, kind: 'delivered' }),
+          useChatStore.getState().applyReceipt({
+            conversationId: payload.conversationId,
+            lastDeliveredAt: payload.lastDeliveredAt ?? undefined,
+            kind: 'delivered',
+          }),
+
         onTyping: (payload) => {
           const conv = useChatStore
             .getState()

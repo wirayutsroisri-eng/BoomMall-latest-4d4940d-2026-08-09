@@ -575,7 +575,8 @@ export function SellerFinanceScreen() {
               <Ionicons name="card-outline" size={18} color={colors.text.secondary} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.bankMiniTitle}>
-                  โอนเข้า · {bank?.bankName} · {maskAccountNo(bank?.bankAccountNo)}
+                  โอนเข้า · {bank?.bankName} · {maskAccountNo(bank?.bankAccountNo ?? undefined)}
+
                 </Text>
                 <Text style={styles.bankMiniSub}>ชื่อบัญชี: {bank?.bankAccountName}</Text>
               </View>

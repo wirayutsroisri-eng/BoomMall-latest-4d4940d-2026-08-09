@@ -7,6 +7,9 @@ import {
 type CreateDraftState = {
   uri: string | null;
   type: 'image' | 'video';
+  /** All edited media URIs (multi-photo publish) */
+  mediaUris: string[];
+
   /** true = ข้อความ/ฟิลเตอร์ถูก bake เข้าไฟล์แล้ว — อย่ารีเรนเดอร์ overlay ทับอีก */
   baked: boolean;
   overlayText: string;
@@ -30,7 +33,9 @@ type CreateDraftState = {
 export const useCreateDraftStore = create<CreateDraftState>((set) => ({
   uri: null,
   type: 'image',
+  mediaUris: [],
   baked: false,
+
   overlayText: '',
   overlayColor: '#FFFFFF',
   overlayTransform: { ...DEFAULT_OVERLAY_TRANSFORM },
@@ -47,7 +52,9 @@ export const useCreateDraftStore = create<CreateDraftState>((set) => ({
     set({
       uri: null,
       type: 'image',
+      mediaUris: [],
       baked: false,
+
       overlayText: '',
       overlayColor: '#FFFFFF',
       overlayTransform: { ...DEFAULT_OVERLAY_TRANSFORM },

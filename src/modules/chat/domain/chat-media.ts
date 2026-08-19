@@ -12,7 +12,8 @@ export function attachmentsToMessageFields(
   attachments?: ChatAttachmentLike[] | null,
 ): Pick<ChatMessage, 'kind' | 'imageUri' | 'imageUris' | 'fileUri' | 'fileName' | 'mimeType' | 'fileSize' | 'audioUri' | 'durationSec'> {
   const rows = (attachments ?? []).filter((a) => a.url);
-  if (!rows.length) return {};
+  if (!rows.length) return { kind: 'text' };
+
 
   const images = rows.filter((a) => a.mimeType.startsWith('image/') || a.mimeType.startsWith('video/'));
   const audio = rows.find((a) => a.mimeType.startsWith('audio/'));

@@ -1,12 +1,14 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Image as RNImage,
+  Keyboard,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -15,6 +17,8 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Slider from '@react-native-community/slider';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
+import { captureRef } from 'react-native-view-shot';
 import {
   FlipType,
   ImageManipulator,
@@ -35,6 +39,21 @@ import {
 import { colors } from '@/shared/theme/colors';
 import { buildColorMatrix } from '../domain/colorMatrix';
 import { saveSkiaImageToCache } from '../domain/exportSnapshot';
+import { computeContainMediaSize } from '@/modules/create/domain/mediaContain';
+import {
+  DEFAULT_OVERLAY_TRANSFORM,
+  type OverlayTransform,
+} from '@/modules/create/domain/overlay';
+import {
+  OVERLAY_FONTS,
+  OVERLAY_TEXT_BACKGROUNDS,
+  OVERLAY_TEXT_COLORS,
+  type OverlayFontKey,
+} from '@/modules/create/domain/overlayText';
+import { MovableTextLayer } from '@/modules/create/ui/MovableTextLayer';
+import { useCreateDraftStore } from '@/modules/create/state/create-draft-store';
+
+
 import {
   BRUSH_COLORS,
   DEFAULT_ADJUST,
@@ -46,6 +65,7 @@ import {
   type Point,
   type Stroke,
 } from '../domain/types';
+
 
 function toPath(points: Point[]): SkPath {
   const path = Skia.Path.Make();
@@ -74,10 +94,13 @@ function brushOpacity(kind: BrushKind) {
 
 const TABS: Array<{ key: EditorTab; label: string; icon: keyof typeof Ionicons.glyphMap }> = [
   { key: 'draw', label: 'วาด', icon: 'brush-outline' },
+  { key: 'text', label: 'ข้อความ', icon: 'text-outline' },
+  { key: 'background', label: 'พื้นหลัง', icon: 'image-outline' },
   { key: 'crop', label: 'ครอป/หมุน', icon: 'crop-outline' },
   { key: 'filter', label: 'ฟิลเตอร์', icon: 'color-filter-outline' },
   { key: 'adjust', label: 'ปรับแสง', icon: 'options-outline' },
 ];
+
 
 const BRUSHES: Array<{ key: BrushKind; label: string; icon: keyof typeof Ionicons.glyphMap }> = [
   { key: 'pen', label: 'ปากกา', icon: 'pencil-outline' },
@@ -87,21 +110,22 @@ const BRUSHES: Array<{ key: BrushKind; label: string; icon: keyof typeof Ionicon
 ];
 
 /**
- * Full photo editor — วาด / ครอป-หมุน-พลิก / ฟิลเตอร์ / ปรับแสง
- * พลังจาก Skia + expo-image-manipulator (Expo SDK 57)
+ * Per-photo editor canvas + tools. Owns all editor state for a single photo so
+ * the parent pager can swipe between photos without losing each photo's edits.
  */
-export function PhotoEditorScreen() {
+function PhotoEditorCanvas({
+  uri,
+  initialTab,
+  onEditedUri,
+}: {
+  uri: string;
+  initialTab?: EditorTab;
+  onEditedUri: (uri: string) => void;
+}) {
   const insets = useSafeAreaInsets();
   const { width: winW, height: winH } = useWindowDimensions();
-  const params = useLocalSearchParams<{ uri?: string; tab?: string }>();
-  const sourceUri = typeof params.uri === 'string' ? params.uri : null;
 
-  const [uri, setUri] = useState(sourceUri);
-  const [tab, setTab] = useState<EditorTab>(
-    params.tab === 'crop' || params.tab === 'filter' || params.tab === 'adjust' || params.tab === 'draw'
-      ? params.tab
-      : 'draw',
-  );
+  const [tab, setTab] = useState<EditorTab>(initialTab ?? 'draw');
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [live, setLive] = useState<Point[]>([]);
   const [brush, setBrush] = useState<BrushKind>('pen');
@@ -109,28 +133,52 @@ export function PhotoEditorScreen() {
   const [size, setSize] = useState(6);
   const [filter, setFilter] = useState<FilterId>('none');
   const [adjust, setAdjust] = useState<AdjustValues>({ ...DEFAULT_ADJUST });
-  const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const canvasRef = useCanvasRef();
-  const skImage = useImage(uri ?? undefined);
+  // ข้อความตกแต่ง (TikTok-style)
+  const [overlayText, setOverlayText] = useState('');
+  const [textColor, setTextColor] = useState<string>(OVERLAY_TEXT_COLORS[0]);
+  const [textBackground, setTextBackground] = useState<string | null>(null);
+  const [fontKey, setFontKey] = useState<OverlayFontKey>('classic');
+  const [overlayTransform, setOverlayTransform] = useState<OverlayTransform>({
+    ...DEFAULT_OVERLAY_TRANSFORM,
+  });
+  const [textDraft, setTextDraft] = useState('');
+  const [kbHeight, setKbHeight] = useState(0);
+  const [textFocused, setTextFocused] = useState(false);
 
-  const canvasH = Math.min(winH * 0.58, winW * (16 / 9));
-  const canvasW = winW;
+  // พื้นหลัง
+  const [backgroundUri, setBackgroundUri] = useState<string | null>(null);
+
+  const canvasRef = useCanvasRef();
+  const skImage = useImage(uri);
+  const stageRef = useRef<View>(null);
+
+  const availableH = winH * 0.58;
+  const canvasSize = useMemo(() => {
+    if (!skImage) return { width: winW, height: availableH };
+    const iw = skImage.width();
+    const ih = skImage.height();
+    return computeContainMediaSize(winW, availableH, iw, ih);
+  }, [skImage, winW, availableH]);
+  const canvasW = canvasSize.width;
+  const canvasH = canvasSize.height;
+
   const matrix = useMemo(() => buildColorMatrix(filter, adjust), [filter, adjust]);
 
   const imageFit = useMemo(() => {
     if (!skImage) return { x: 0, y: 0, w: canvasW, h: canvasH };
     const iw = skImage.width();
     const ih = skImage.height();
-    const scale = Math.max(canvasW / iw, canvasH / ih);
+    const scale = Math.min(canvasW / iw, canvasH / ih);
     const w = iw * scale;
     const h = ih * scale;
     return { x: (canvasW - w) / 2, y: (canvasH - h) / 2, w, h };
   }, [skImage, canvasW, canvasH]);
 
+
   const pan = Gesture.Pan()
-    .enabled(tab === 'draw' && !saving)
+    .enabled(tab === 'draw' && !busy)
     .minDistance(0)
     .onBegin((e) => {
       setLive([{ x: e.x, y: e.y }]);
@@ -170,7 +218,7 @@ export function PhotoEditorScreen() {
 
   const runManip = useCallback(
     async (op: 'rotate' | 'flipH' | 'flipV' | 'crop43' | 'crop916') => {
-      if (!uri || busy) return;
+      if (busy) return;
       setBusy(true);
       try {
         const dims = await new Promise<{ w: number; h: number }>((resolve, reject) => {
@@ -196,11 +244,8 @@ export function PhotoEditorScreen() {
           });
         }
         const rendered = await ctx.renderAsync();
-        const saved = await rendered.saveAsync({
-          format: SaveFormat.JPEG,
-          compress: 0.92,
-        });
-        setUri(saved.uri);
+        const saved = await rendered.saveAsync({ format: SaveFormat.PNG });
+        onEditedUri(saved.uri);
         setStrokes([]);
         setLive([]);
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -210,124 +255,183 @@ export function PhotoEditorScreen() {
         setBusy(false);
       }
     },
-    [uri, busy],
+    [uri, busy, onEditedUri],
   );
 
+  const pickBackground = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('ต้องอนุญาตเข้าถึงรูปภาพ', 'เปิดสิทธิ์ในตั้งค่าเพื่อเลือกภาพพื้นหลัง');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 1,
+    });
+    if (result.canceled || !result.assets[0]) return;
+    void Haptics.selectionAsync();
+    setBackgroundUri(result.assets[0].uri);
+  };
+
+  const removeBackground = () => {
+    Alert.alert('ลบภาพพื้นหลัง?', 'จะนำภาพพื้นหลังนี้ออกจากภาพ', [
+      { text: 'ยกเลิก', style: 'cancel' },
+      {
+        text: 'ลบ',
+        style: 'destructive',
+        onPress: () => {
+          void Haptics.selectionAsync();
+          setBackgroundUri(null);
+        },
+      },
+    ]);
+  };
+
+  const startTextEdit = () => {
+    setTextDraft(overlayText);
+    setTab('text');
+  };
+
+  const finishTextEdit = () => {
+    const next = textDraft.trim();
+    setOverlayText(next);
+  };
+
+  React.useEffect(() => {
+    const show = Keyboard.addListener('keyboardWillShow', (e) => {
+      setKbHeight(e.endCoordinates.height);
+    });
+    const hide = Keyboard.addListener('keyboardWillHide', () => {
+      setKbHeight(0);
+    });
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
   const exportAndDone = async () => {
-    if (!uri || saving) return;
-    setSaving(true);
+    if (busy) return;
+    setBusy(true);
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      const needsSkiaBake =
-        strokes.length > 0 || filter !== 'none' || adjust.brightness !== 0 || adjust.contrast !== 0 || adjust.saturation !== 0;
+      const hasDecor =
+        strokes.length > 0 ||
+        filter !== 'none' ||
+        adjust.brightness !== 0 ||
+        adjust.contrast !== 0 ||
+        adjust.saturation !== 0 ||
+        !!overlayText.trim() ||
+        !!backgroundUri;
 
       let outUri = uri;
-      if (needsSkiaBake) {
+      if (hasDecor) {
         await new Promise<void>((r) => requestAnimationFrame(() => r()));
-        const snap = canvasRef.current?.makeImageSnapshot();
-        if (!snap) throw new Error('snapshot failed');
-        outUri = saveSkiaImageToCache(snap, 'photo-edit');
+        if (overlayText.trim() || backgroundUri) {
+          const shot = await captureRef(stageRef, {
+            format: 'jpg',
+            quality: 0.92,
+            result: 'tmpfile',
+          });
+          outUri = shot;
+        } else {
+          const snap = canvasRef.current?.makeImageSnapshot();
+          if (!snap) throw new Error('snapshot failed');
+          outUri = saveSkiaImageToCache(snap, 'photo-edit');
+        }
       }
-
-      router.replace({
-        pathname: '/create-preview',
-        params: { uri: outUri, type: 'image' },
-      });
+      onEditedUri(outUri);
     } catch {
       Alert.alert('บันทึกไม่สำเร็จ', 'ลองกดเสร็จอีกครั้ง');
-      setSaving(false);
+    } finally {
+      setBusy(false);
     }
   };
 
-  if (!uri) {
-    return (
-      <View style={[styles.root, { paddingTop: insets.top + 24 }]}>
-        <Text style={styles.missing}>ไม่พบรูป</Text>
-        <Pressable onPress={() => router.back()}>
-          <Text style={styles.link}>กลับ</Text>
-        </Pressable>
-      </View>
-    );
-  }
-
   return (
-    <View style={[styles.root, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Pressable hitSlop={10} onPress={() => router.back()} style={styles.headerBtn}>
-          <Ionicons name="close" size={26} color="#fff" />
-        </Pressable>
-        <Text style={styles.headerTitle}>แต่งรูป</Text>
-        <Pressable
-          hitSlop={10}
-          onPress={() => {
-            void exportAndDone();
-          }}
-          style={styles.doneBtn}
-          disabled={saving}
-        >
-          {saving ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.doneText}>เสร็จ</Text>
-          )}
-        </Pressable>
+    <View style={[styles.canvasRoot, { paddingTop: insets.top }]}>
+      <View
+        ref={stageRef}
+        collapsable={false}
+        style={[styles.canvasWrap, { width: canvasW, height: canvasH }]}
+      >
+        {backgroundUri ? (
+          <RNImage
+            source={{ uri: backgroundUri }}
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
+          />
+        ) : null}
+        <GestureDetector gesture={pan}>
+          <View style={{ width: canvasW, height: canvasH }}>
+            <Canvas ref={canvasRef} style={{ width: canvasW, height: canvasH }}>
+              <Group>
+                {skImage ? (
+                  <SkImage
+                    image={skImage}
+                    x={imageFit.x}
+                    y={imageFit.y}
+                    width={imageFit.w}
+                    height={imageFit.h}
+                    fit="contain"
+                  >
+                    <ColorMatrix matrix={matrix} />
+                  </SkImage>
+                ) : null}
+                <Group layer>
+                  {strokes.map((s) => (
+                    <Path
+                      key={s.id}
+                      path={toPath(s.points)}
+                      color={s.color}
+                      style="stroke"
+                      strokeWidth={s.width}
+                      strokeCap="round"
+                      strokeJoin="round"
+                      opacity={brushOpacity(s.kind)}
+                      blendMode={s.kind === 'eraser' ? 'clear' : undefined}
+                    />
+                  ))}
+                  {live.length > 1 ? (
+                    <Path
+                      path={toPath(live)}
+                      color={brush === 'eraser' ? '#000' : color}
+                      style="stroke"
+                      strokeWidth={brushWidth(brush, size)}
+                      strokeCap="round"
+                      strokeJoin="round"
+                      opacity={brushOpacity(brush)}
+                      blendMode={brush === 'eraser' ? 'clear' : undefined}
+                    />
+                  ) : null}
+                </Group>
+              </Group>
+            </Canvas>
+            {!skImage ? (
+              <RNImage source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="contain" />
+            ) : null}
+          </View>
+        </GestureDetector>
+        {overlayText.trim() ? (
+          <MovableTextLayer
+            text={overlayText}
+            color={textColor}
+            fontKey={fontKey}
+            italic={fontKey === 'halloween'}
+            background={textBackground}
+            initialTransform={overlayTransform}
+            interactive={tab === 'text'}
+            onTransformChange={setOverlayTransform}
+            onEdit={startTextEdit}
+          />
+        ) : null}
+        {busy ? (
+          <View style={styles.busyMask}>
+            <ActivityIndicator color="#fff" size="large" />
+          </View>
+        ) : null}
       </View>
 
-      <GestureDetector gesture={pan}>
-        <View style={[styles.canvasWrap, { width: canvasW, height: canvasH }]}>
-          <Canvas ref={canvasRef} style={{ width: canvasW, height: canvasH }}>
-            <Group>
-              {skImage ? (
-                <SkImage
-                  image={skImage}
-                  x={imageFit.x}
-                  y={imageFit.y}
-                  width={imageFit.w}
-                  height={imageFit.h}
-                  fit="cover"
-                >
-                  <ColorMatrix matrix={matrix} />
-                </SkImage>
-              ) : null}
-              <Group layer>
-                {strokes.map((s) => (
-                  <Path
-                    key={s.id}
-                    path={toPath(s.points)}
-                    color={s.color}
-                    style="stroke"
-                    strokeWidth={s.width}
-                    strokeCap="round"
-                    strokeJoin="round"
-                    opacity={brushOpacity(s.kind)}
-                    blendMode={s.kind === 'eraser' ? 'clear' : undefined}
-                  />
-                ))}
-                {live.length > 1 ? (
-                  <Path
-                    path={toPath(live)}
-                    color={brush === 'eraser' ? '#000' : color}
-                    style="stroke"
-                    strokeWidth={brushWidth(brush, size)}
-                    strokeCap="round"
-                    strokeJoin="round"
-                    opacity={brushOpacity(brush)}
-                    blendMode={brush === 'eraser' ? 'clear' : undefined}
-                  />
-                ) : null}
-              </Group>
-            </Group>
-          </Canvas>
-          {!skImage ? (
-            <RNImage source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-          ) : null}
-          {busy ? (
-            <View style={styles.busyMask}>
-              <ActivityIndicator color="#fff" size="large" />
-            </View>
-          ) : null}
-        </View>
-      </GestureDetector>
 
       <View style={styles.tabRow}>
         {TABS.map((t) => {
@@ -408,13 +512,139 @@ export function PhotoEditorScreen() {
           </>
         ) : null}
 
+        {tab === 'text' ? (
+          <>
+            <View style={styles.textInputRow}>
+              <TextInput
+                style={styles.textInput}
+                placeholder="พิมพ์ข้อความ"
+                placeholderTextColor="rgba(255,255,255,0.35)"
+                value={textDraft}
+                onChangeText={setTextDraft}
+                multiline
+                maxLength={120}
+                selectionColor={textColor}
+                onFocus={() => setTextFocused(true)}
+                onBlur={() => setTextFocused(false)}
+              />
+              <Pressable
+                style={styles.textAddBtn}
+                onPress={() => {
+                  void Haptics.selectionAsync();
+                  finishTextEdit();
+                }}
+              >
+                <Text style={styles.textAddBtnText}>เพิ่ม</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.panelHint}>
+              แตะข้อความบนภาพเพื่อแก้ไข · ใช้นิ้วจีบ (pinch) ย่อ/ขยาย · ลากย้าย · หมุนได้
+            </Text>
+            <View style={styles.styleBar}>
+              <Text style={styles.styleBarLabel}>สีตัวอักษร</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+                {OVERLAY_TEXT_COLORS.map((c) => (
+                  <Pressable
+                    key={c}
+                    onPress={() => {
+                      void Haptics.selectionAsync();
+                      setTextColor(c);
+                    }}
+                    style={[
+                      styles.swatch,
+                      { backgroundColor: c },
+                      textColor === c && styles.swatchActive,
+                    ]}
+                  />
+                ))}
+              </ScrollView>
+            </View>
+            <View style={styles.styleBar}>
+              <Text style={styles.styleBarLabel}>สีพื้นหลัง</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+                {OVERLAY_TEXT_BACKGROUNDS.map((b) => (
+                  <Pressable
+                    key={b.key ?? 'none'}
+                    onPress={() => {
+                      void Haptics.selectionAsync();
+                      setTextBackground(b.key);
+                    }}
+                    style={[
+                      styles.bgSwatch,
+                      { backgroundColor: b.color },
+                      textBackground === b.key && styles.swatchActive,
+                    ]}
+                  >
+                    {b.key === null ? (
+                      <Ionicons name="close" size={16} color="#fff" />
+                    ) : null}
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+              {OVERLAY_FONTS.map((f) => (
+                <Pressable
+                  key={f.key}
+                  style={[styles.chip, fontKey === f.key && styles.chipActive]}
+                  onPress={() => {
+                    void Haptics.selectionAsync();
+                    setFontKey(f.key);
+                  }}
+                >
+                  <Text style={[styles.chipText, fontKey === f.key && styles.chipTextActive]}>
+                    {f.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+            {overlayText.trim() ? (
+              <Pressable
+                style={styles.resetBtn}
+                onPress={() => {
+                  Alert.alert('ลบข้อความ?', 'จะนำข้อความนี้ออกจากภาพ', [
+                    { text: 'ยกเลิก', style: 'cancel' },
+                    {
+                      text: 'ลบ',
+                      style: 'destructive',
+                      onPress: () => {
+                        void Haptics.selectionAsync();
+                        setOverlayText('');
+                        setOverlayTransform({ ...DEFAULT_OVERLAY_TRANSFORM });
+                      },
+                    },
+                  ]);
+                }}
+              >
+                <Text style={styles.resetText}>ลบข้อความ</Text>
+              </Pressable>
+            ) : null}
+          </>
+        ) : null}
+
+        {tab === 'background' ? (
+          <View style={styles.toolsGrid}>
+            <ToolBtn
+              icon="image-outline"
+              label="เลือกภาพพื้นหลัง"
+              onPress={() => void pickBackground()}
+            />
+            {backgroundUri ? (
+              <ToolBtn
+                icon="trash-outline"
+                label="ลบพื้นหลัง"
+                onPress={removeBackground}
+              />
+            ) : null}
+          </View>
+        ) : null}
+
         {tab === 'crop' ? (
           <View style={styles.toolsGrid}>
             <ToolBtn
               icon="crop-outline"
               label="เปิดตัดครอบ"
               onPress={() => {
-                if (!uri) return;
                 router.push({ pathname: '/create-crop', params: { uri } });
               }}
             />
@@ -424,61 +654,92 @@ export function PhotoEditorScreen() {
           </View>
         ) : null}
 
+
         {tab === 'filter' ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
             {FILTER_PRESETS.map((f) => (
               <Pressable
                 key={f.id}
-                style={styles.filterItem}
+                style={[styles.chip, filter === f.id && styles.chipActive]}
                 onPress={() => {
                   void Haptics.selectionAsync();
                   setFilter(f.id);
                 }}
               >
-                <View style={[styles.filterThumb, filter === f.id && styles.filterThumbActive]}>
-                  <RNImage source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-                  {f.tint ? (
-                    <View style={[StyleSheet.absoluteFill, { backgroundColor: f.tint }]} />
-                  ) : null}
-                </View>
-                <Text style={styles.filterLabel}>{f.label}</Text>
+                <Text style={[styles.chipText, filter === f.id && styles.chipTextActive]}>
+                  {f.label}
+                </Text>
               </Pressable>
             ))}
           </ScrollView>
         ) : null}
 
         {tab === 'adjust' ? (
-          <View style={{ gap: 10 }}>
-            {(
-              [
-                ['brightness', 'ความสว่าง'],
-                ['contrast', 'คอนทราสต์'],
-                ['saturation', 'ความอิ่มสี'],
-              ] as const
-            ).map(([key, label]) => (
-              <View key={key} style={styles.sliderRow}>
-                <Text style={styles.sliderLabel}>{label}</Text>
-                <Slider
-                  style={{ flex: 1 }}
-                  minimumValue={-1}
-                  maximumValue={1}
-                  value={adjust[key]}
-                  onValueChange={(v) => setAdjust((a) => ({ ...a, [key]: v }))}
-                  minimumTrackTintColor={colors.brand.pink}
-                  maximumTrackTintColor="rgba(255,255,255,0.25)"
-                  thumbTintColor="#fff"
-                />
-              </View>
-            ))}
+          <View style={styles.adjustList}>
+            <AdjustRow
+              label="ความสว่าง"
+              value={adjust.brightness}
+              min={-1}
+              max={1}
+              onChange={(v) => setAdjust((a) => ({ ...a, brightness: v }))}
+            />
+            <AdjustRow
+              label="คอนทราสต์"
+              value={adjust.contrast}
+              min={-1}
+              max={1}
+              onChange={(v) => setAdjust((a) => ({ ...a, contrast: v }))}
+            />
+            <AdjustRow
+              label="ความอิ่มตัว"
+              value={adjust.saturation}
+              min={-1}
+              max={1}
+              onChange={(v) => setAdjust((a) => ({ ...a, saturation: v }))}
+            />
             <Pressable
-              onPress={() => setAdjust({ ...DEFAULT_ADJUST })}
               style={styles.resetBtn}
+              onPress={() => {
+                void Haptics.selectionAsync();
+                setAdjust({ ...DEFAULT_ADJUST });
+              }}
             >
-              <Text style={styles.resetText}>รีเซ็ตค่าปรับแสง</Text>
+              <Text style={styles.resetText}>รีเซ็ตการปรับ</Text>
             </Pressable>
           </View>
         ) : null}
       </View>
+    </View>
+  );
+}
+
+function AdjustRow({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <View style={styles.adjustRow}>
+      <Text style={styles.adjustLabel}>{label}</Text>
+      <Slider
+        style={{ flex: 1 }}
+        minimumValue={min}
+        maximumValue={max}
+        value={value}
+        onValueChange={onChange}
+        minimumTrackTintColor={colors.brand.pink}
+        maximumTrackTintColor="rgba(255,255,255,0.25)"
+        thumbTintColor="#fff"
+      />
+      <Text style={styles.adjustValue}>{value.toFixed(2)}</Text>
     </View>
   );
 }
@@ -495,69 +756,211 @@ function ToolBtn({
   return (
     <Pressable style={styles.toolBtn} onPress={onPress}>
       <Ionicons name={icon} size={22} color="#fff" />
-      <Text style={styles.toolLabel}>{label}</Text>
+      <Text style={styles.toolBtnText}>{label}</Text>
     </Pressable>
+  );
+}
+
+/**
+ * TikTok-style photo posting first page. After picking photos we land here
+ * directly. Swipe left/right to switch between photos; each photo keeps its own
+ * editor state. "ถัดไป" renders all edited photos and goes to publish.
+ */
+export function PhotoEditorScreen() {
+  const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ uri?: string; uris?: string; tab?: string }>();
+  const { width: winW } = useWindowDimensions();
+
+  const uris = useMemo(() => {
+    if (params.uris) return params.uris.split('|').filter(Boolean);
+    if (params.uri) return [params.uri];
+    return [];
+  }, [params.uris, params.uri]);
+
+  const initialTab = useMemo<EditorTab | undefined>(() => {
+    if (params.tab === 'draw') return 'draw';
+    if (params.tab === 'filter') return 'filter';
+    if (params.tab === 'text') return 'text';
+    return undefined;
+  }, [params.tab]);
+
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [editedUris, setEditedUris] = useState<Record<string, string>>({});
+  const [baking, setBaking] = useState(false);
+  const pagerRef = useRef<ScrollView>(null);
+
+  const handleEditedUri = useCallback((uri: string, edited: string) => {
+    setEditedUris((prev) => ({ ...prev, [uri]: edited }));
+  }, []);
+
+  const goPublish = async () => {
+    if (baking || !uris.length) return;
+    setBaking(true);
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      // Render each edited photo (bake decor) then pass all URIs to publish.
+      const finalUris = uris.map((u) => editedUris[u] ?? u);
+      // Seed the draft store so the publish screen picks up all edited photos.
+      useCreateDraftStore.getState().setDraft({
+        uri: finalUris[0] ?? null,
+        type: 'image',
+        mediaUris: finalUris,
+      });
+      router.push({
+        pathname: '/create-publish',
+        params: { type: 'image' },
+      });
+    } finally {
+      setBaking(false);
+    }
+  };
+
+
+  if (!uris.length) {
+    return (
+      <View style={[styles.root, { paddingTop: insets.top + 24 }]}>
+        <Text style={styles.missing}>ไม่พบรูปภาพ</Text>
+        <Pressable onPress={() => router.back()}>
+          <Text style={styles.postLink}>กลับ</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.root}>
+      <View style={styles.topBar}>
+        <Pressable hitSlop={10} onPress={() => router.back()} style={styles.iconBtn}>
+          <Ionicons name="chevron-back" size={28} color="#fff" />
+        </Pressable>
+        <Text style={styles.topTitle}>
+          {activeIndex + 1} / {uris.length}
+        </Text>
+        <Pressable
+          style={[styles.nextBtn, baking && styles.nextBtnDisabled]}
+          onPress={() => void goPublish()}
+          disabled={baking}
+        >
+          {baking ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <Text style={styles.nextBtnText}>ถัดไป</Text>
+          )}
+        </Pressable>
+      </View>
+
+      <ScrollView
+        ref={pagerRef}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onMomentumScrollEnd={(e) => {
+          const idx = Math.round(e.nativeEvent.contentOffset.x / winW);
+          setActiveIndex(Math.max(0, Math.min(uris.length - 1, idx)));
+        }}
+        style={styles.pager}
+      >
+        {uris.map((u, index) => (
+          <View key={u} style={{ width: winW }}>
+            <PhotoEditorCanvas
+              uri={u}
+              initialTab={index === 0 ? initialTab : undefined}
+              onEditedUri={(edited) => handleEditedUri(u, edited)}
+            />
+          </View>
+        ))}
+      </ScrollView>
+
+      {uris.length > 1 ? (
+        <View style={[styles.thumbStrip, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbRow}>
+            {uris.map((u, index) => (
+              <Pressable
+                key={u}
+                onPress={() => {
+                  void Haptics.selectionAsync();
+                  pagerRef.current?.scrollTo({ x: index * winW, animated: true });
+                  setActiveIndex(index);
+                }}
+                style={[styles.thumbWrap, activeIndex === index && styles.thumbWrapActive]}
+              >
+                <RNImage source={{ uri: editedUris[u] ?? u }} style={styles.thumb} />
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000' },
+  canvasRoot: { flex: 1, backgroundColor: '#000' },
+  canvasWrap: {
+    alignSelf: 'center',
+    overflow: 'hidden',
+    backgroundColor: '#000',
+  },
+  busyMask: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    zIndex: 20,
+  },
   missing: { color: '#fff', textAlign: 'center', fontWeight: '700' },
-  link: { color: colors.brand.pink, textAlign: 'center', marginTop: 12, fontWeight: '800' },
-  header: {
+  postLink: { color: colors.brand.primary, fontWeight: '900', textAlign: 'center', marginTop: 12 },
+  topBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingTop: 8,
+    zIndex: 10,
   },
-  headerBtn: { width: 44, height: 36, justifyContent: 'center' },
-  headerTitle: { color: '#fff', fontWeight: '800', fontSize: 16 },
-  doneBtn: {
-    minWidth: 64,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: colors.brand.pink,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 14,
-  },
-  doneText: { color: '#fff', fontWeight: '900', fontSize: 14 },
-  canvasWrap: {
-    alignSelf: 'center',
-    backgroundColor: '#111',
-    overflow: 'hidden',
-  },
-  busyMask: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+  iconBtn: {
+    width: 40,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  topTitle: { color: '#fff', fontWeight: '800', fontSize: 14 },
+  nextBtn: {
+    paddingHorizontal: 18,
+    paddingVertical: 9,
+    borderRadius: 20,
+    backgroundColor: colors.accent.live,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  nextBtnDisabled: { opacity: 0.7 },
+  nextBtnText: { color: '#fff', fontWeight: '900', fontSize: 14 },
+  pager: { flex: 1 },
   tabRow: {
     flexDirection: 'row',
+    justifyContent: 'space-around',
     paddingHorizontal: 8,
-    gap: 6,
-    marginTop: 10,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(20,20,20,0.95)',
   },
   tabBtn: {
-    flex: 1,
     alignItems: 'center',
-    gap: 3,
-    paddingVertical: 8,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    gap: 2,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
   },
-  tabBtnActive: { backgroundColor: 'rgba(254,44,85,0.35)' },
-  tabLabel: { color: 'rgba(255,255,255,0.65)', fontSize: 11, fontWeight: '700' },
-  tabLabelActive: { color: '#fff' },
+  tabBtnActive: { backgroundColor: 'rgba(255,255,255,0.14)' },
+  tabLabel: { color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: '700' },
+  tabLabelActive: { color: '#fff', fontWeight: '900' },
   panel: {
-    flex: 1,
+    backgroundColor: 'rgba(20,20,20,0.95)',
+    paddingTop: 10,
     paddingHorizontal: 12,
-    paddingTop: 12,
     gap: 10,
   },
-  row: { gap: 8, paddingRight: 8, alignItems: 'center' },
+  row: { gap: 8, alignItems: 'center', paddingRight: 8 },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -565,53 +968,96 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.1)',
   },
   chipActive: { backgroundColor: '#fff' },
   chipText: { color: '#fff', fontWeight: '700', fontSize: 12 },
-  chipTextActive: { color: '#111' },
+  chipTextActive: { color: '#111', fontWeight: '900' },
   swatch: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    marginRight: 8,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     borderWidth: 2,
     borderColor: 'transparent',
   },
-  swatchActive: { borderColor: colors.brand.pink, transform: [{ scale: 1.1 }] },
+  swatchActive: { borderColor: '#fff' },
+  bgSwatch: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   sliderRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  sliderLabel: { color: 'rgba(255,255,255,0.8)', fontWeight: '700', width: 78, fontSize: 12 },
+  sliderLabel: { color: '#fff', fontWeight: '700', fontSize: 12, width: 44 },
+  textInputRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  textInput: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    maxHeight: 90,
+  },
+  textAddBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: colors.brand.pink,
+  },
+  textAddBtnText: { color: '#fff', fontWeight: '900', fontSize: 14 },
+  panelHint: { color: 'rgba(255,255,255,0.6)', fontSize: 11, fontWeight: '600' },
+  styleBar: { gap: 6 },
+  styleBarLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 11, fontWeight: '700' },
+  resetBtn: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: 'rgba(254,44,85,0.2)',
+  },
+  resetText: { color: '#ff6b81', fontWeight: '800', fontSize: 12 },
   toolsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
   },
   toolBtn: {
-    width: '47%',
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 12,
-    paddingVertical: 16,
+    width: '48%',
     alignItems: 'center',
     gap: 6,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.1)',
   },
-  toolLabel: { color: '#fff', fontWeight: '700', fontSize: 13 },
-  filterItem: { alignItems: 'center', width: 64, gap: 4 },
-  filterThumb: {
-    width: 56,
-    height: 72,
+  toolBtnText: { color: '#fff', fontWeight: '700', fontSize: 12 },
+  adjustList: { gap: 10 },
+  adjustRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  adjustLabel: { color: '#fff', fontWeight: '700', fontSize: 12, width: 84 },
+  adjustValue: { color: 'rgba(255,255,255,0.6)', fontSize: 11, width: 40, textAlign: 'right' },
+  thumbStrip: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingTop: 8,
+  },
+  thumbRow: { gap: 8, paddingHorizontal: 12 },
+  thumbWrap: {
+    width: 52,
+    height: 52,
     borderRadius: 8,
     overflow: 'hidden',
     borderWidth: 2,
     borderColor: 'transparent',
   },
-  filterThumbActive: { borderColor: colors.brand.pink },
-  filterLabel: { color: '#fff', fontSize: 10, fontWeight: '700' },
-  resetBtn: {
-    alignSelf: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-  },
-  resetText: { color: '#fff', fontWeight: '700', fontSize: 12 },
+  thumbWrapActive: { borderColor: colors.accent.live },
+  thumb: { width: '100%', height: '100%' },
 });
+
