@@ -9,6 +9,20 @@ export const IOS_SPRING: WithSpringConfig = {
   energyThreshold: 6e-3,
 };
 
+/**
+ * Spring สำหรับปัดข้ามแท็บฟีด — นุ่ม ลื่น ไหลตามนิ้ว ไม่ปุ๊บปั๊บ
+ * ลด stiffness + เพิ่ม damping + ปล่อยให้มี overshoot เล็กน้อยตามธรรมชาติ
+ * เพื่อให้การ snap กลับตำแหน่งรู้สึกต่อเนื่องเหมือน UIScrollView ของ iOS
+ */
+export const PAGER_SPRING: WithSpringConfig = {
+  damping: 22,
+  stiffness: 190,
+  mass: 1,
+  overshootClamping: false,
+  energyThreshold: 4e-3,
+};
+
+
 /** Curve ใกล้ UIView animation push/pop */
 export const IOS_PUSH = {
   duration: 300,
