@@ -221,6 +221,21 @@ export async function notifySeller(input: {
           refId: input.refId,
         },
       });
+      void import('../notify/PushService')
+        .then(({ sendPushToUsers }) =>
+          sendPushToUsers({
+            userIds: [input.userId],
+            title: input.title,
+            body: input.body,
+            data: {
+              type: 'seller',
+              kind: input.kind,
+              notificationId: id,
+              refId: input.refId ?? '',
+            },
+          }),
+        )
+        .catch(() => undefined);
       return;
     } catch {
       /* fall through to file */
@@ -239,6 +254,21 @@ export async function notifySeller(input: {
   });
   store.notifications = store.notifications.slice(0, 400);
   writeStore(store);
+  void import('../notify/PushService')
+    .then(({ sendPushToUsers }) =>
+      sendPushToUsers({
+        userIds: [input.userId],
+        title: input.title,
+        body: input.body,
+        data: {
+          type: 'seller',
+          kind: input.kind,
+          notificationId: id,
+          refId: input.refId ?? '',
+        },
+      }),
+    )
+    .catch(() => undefined);
 }
 
 export function listPackages() {

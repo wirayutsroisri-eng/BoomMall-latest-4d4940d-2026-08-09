@@ -6,11 +6,13 @@ import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
 import { useAuthStore } from '@/modules/auth/state/auth-store';
 import { CHANTHABURI } from '@/modules/matching/domain/geo';
 import { runPostMatching } from '@/modules/matching/domain/run-post-matching';
-import { fetchFeedPosts, publishSocialPost, syncFeedComment } from '@/modules/feed/data/feedEngageApi';
-import { mergeFeedItems, socialPostToFeedItem } from '@/modules/feed/data/mapSocialPost';
+import { fetchFeedPosts, publishSocialPost, syncFeedComment, fetchFeedComments, syncFeedPostUpdate, syncFeedPostDelete } from '@/modules/feed/data/feedEngageApi';
+import type { SocialCommentDto } from '@/modules/feed/data/feedEngageApi';
+import { mergeFeedItems, socialCommentToFeedComment, socialPostToFeedItem } from '@/modules/feed/data/mapSocialPost';
 import { sanitizeMusicTitle, stripFakeMusicCaption } from '@/modules/feed/domain/feedMusic';
 import { isLiveUgcFeedItem, keepPersistedFeedItems } from '@/modules/feed/domain/isLiveUgcFeedItem';
 import { uploadFeedMedia } from '@/modules/feed/data/uploadFeedMedia';
+import { persistCreateMedia } from '@/modules/create/data/persistCreateMedia';
 import {
   DEFAULT_SEARCH_RADIUS,
   type SearchRadiusOption,
@@ -52,6 +54,7 @@ type NewPostInput = {
   intent?: 'content' | 'board' | 'sell';
   /** Sound from Listen Mode “ใช้เสียงนี้” */
   musicTitle?: string;
+  locationLabel?: string;
 };
 
 type FeedState = {
@@ -74,6 +77,8 @@ type FeedState = {
   toggleSave: (id: string) => void;
   tipClip: (id: string, amount: number) => void;
   addPost: (input: NewPostInput) => string;
+  updatePost: (feedId: string, input: NewPostInput) => boolean;
+  deletePost: (feedId: string) => boolean;
   renameOwnPosts: (displayName: string) => void;
   openProductSheet: (productId: string) => void;
   closeProductSheet: () => void;
@@ -82,6 +87,9 @@ type FeedState = {
   openTip: (feedId: string) => void;
   closeTip: () => void;
   addComment: (feedId: string, text: string, author?: string, authorInitial?: string, parentId?: string) => void;
+  updateComment: (feedId: string, commentId: string, text: string) => void;
+  deleteComment: (feedId: string, commentId: string) => void;
+  loadComments: (feedId: string) => Promise<boolean>;
   toggleCommentLike: (feedId: string, commentId: string) => void;
   openCreatorProfile: (handle: string, feedId?: string) => void;
   closeCreatorProfile: () => void;
@@ -155,6 +163,7 @@ export const useFeedStore = create<FeedState>()(
     })),
   addPost: (input) => {
     const profile = useLoyaltyStore.getState().profile;
+    const auth = useAuthStore.getState().user;
     const id = `feed-user-${Date.now()}`;
     const imageUris =
       input.imageUris?.filter(Boolean) ??
@@ -178,6 +187,7 @@ export const useFeedStore = create<FeedState>()(
       id,
       author,
       authorHandle,
+      authorId: auth?.id,
       lane: isJobPost ? 'board' : 'foryou',
       boardSide,
       caption,
@@ -225,9 +235,36 @@ export const useFeedStore = create<FeedState>()(
     set((state) => ({ items: [newItem, ...state.items] }));
 
     void (async () => {
+      let stableImages = imageUris;
+      let stableVideo = input.videoUri;
+      try {
+        if (imageUris?.length) {
+          stableImages = await Promise.all(
+            imageUris.map((uri) => persistCreateMedia(uri, 'image')),
+          );
+        }
+        if (input.videoUri) {
+          stableVideo = await persistCreateMedia(input.videoUri, 'video');
+        }
+        set((state) => ({
+          items: state.items.map((item) =>
+            item.id !== id
+              ? item
+              : {
+                  ...item,
+                  imageUri: stableImages?.[0] ?? item.imageUri,
+                  imageUris: stableImages ?? item.imageUris,
+                  videoUri: stableVideo ?? item.videoUri,
+                },
+          ),
+        }));
+      } catch {
+        /* keep optimistic URIs */
+      }
+
       const uploaded = await uploadFeedMedia({
-        imageUris,
-        videoUri: input.videoUri,
+        imageUris: stableImages,
+        videoUri: stableVideo,
       });
       const saved = await publishSocialPost({
         body: caption,
@@ -248,27 +285,41 @@ export const useFeedStore = create<FeedState>()(
         lane: newItem.lane,
       });
       const auth = useAuthStore.getState().user;
-      set((state) => ({
-        items: state.items.map((item) => {
-          if (item.id !== id) return item;
-          const next = saved
-            ? {
-                ...item,
-                ...socialPostToFeedItem(saved, {
-                  myUserId: auth?.id,
-                  myHandle: authorHandle,
-                }),
-                isUserPost: true,
-              }
-            : item;
-          return {
-            ...next,
-            imageUri: uploaded.imageUris[0] ?? next.imageUri,
-            imageUris: uploaded.imageUris.length ? uploaded.imageUris : next.imageUris,
-            videoUri: uploaded.videoUri ?? next.videoUri,
-          };
-        }),
-      }));
+      set((state) => {
+        const migrated = state.commentsByFeedId[id] ?? [];
+        const nextComments = { ...state.commentsByFeedId };
+        delete nextComments[id];
+        const serverId = saved?.id;
+        if (serverId && serverId !== id && migrated.length) {
+          nextComments[serverId] = [
+            ...(nextComments[serverId] ?? []),
+            ...migrated.map((c) => ({ ...c, feedId: serverId })),
+          ];
+        }
+        return {
+          commentsByFeedId: nextComments,
+          items: state.items.map((item) => {
+            if (item.id !== id) return item;
+            const next = saved
+              ? {
+                  ...item,
+                  ...socialPostToFeedItem(saved, {
+                    myUserId: auth?.id,
+                    myHandle: authorHandle,
+                  }),
+                  legacyLocalId: id,
+                  isUserPost: true,
+                }
+              : item;
+            return {
+              ...next,
+              imageUri: uploaded.imageUris[0] ?? next.imageUri,
+              imageUris: uploaded.imageUris.length ? uploaded.imageUris : next.imageUris,
+              videoUri: uploaded.videoUri ?? next.videoUri,
+            };
+          }),
+        };
+      });
     })();
 
     // Matching only for board demand posts
@@ -285,6 +336,141 @@ export const useFeedStore = create<FeedState>()(
     }
 
     return id;
+  },
+  updatePost: (feedId, input) => {
+    const existing = get().items.find((item) => item.id === feedId);
+    if (!existing?.isUserPost) return false;
+
+    const profile = useLoyaltyStore.getState().profile;
+    const auth = useAuthStore.getState().user;
+    const authorHandle = profile.handle.replace(/^@/, '');
+    const imageUris =
+      input.imageUris?.filter(Boolean) ??
+      (input.imageUri ? [input.imageUri] : undefined);
+    const caption = input.caption || existing.caption;
+    const musicTitle = sanitizeMusicTitle(input.musicTitle ?? existing.musicTitle ?? '');
+
+    set((state) => ({
+      items: state.items.map((item) => {
+        if (item.id !== feedId) return item;
+        return {
+          ...item,
+          caption,
+          musicTitle,
+          imageUri: imageUris?.[0] ?? input.imageUri ?? item.imageUri,
+          imageUris: imageUris ?? item.imageUris,
+          videoUri: input.videoUri ?? item.videoUri,
+          overlayText: input.overlayText?.trim() || undefined,
+          overlayTextColor: input.overlayTextColor,
+          overlayTransform: input.overlayTransform,
+          location: input.locationLabel ?? item.location,
+          imageWidth: input.imageWidth ?? item.imageWidth,
+          imageHeight: input.imageHeight ?? item.imageHeight,
+        };
+      }),
+    }));
+
+    void (async () => {
+      let stableImages = imageUris;
+      let stableVideo = input.videoUri ?? existing.videoUri;
+      try {
+        if (imageUris?.length) {
+          stableImages = await Promise.all(
+            imageUris.map((uri) => persistCreateMedia(uri, 'image')),
+          );
+        }
+        if (stableVideo) {
+          stableVideo = await persistCreateMedia(stableVideo, 'video');
+        }
+        set((state) => ({
+          items: state.items.map((item) =>
+            item.id !== feedId
+              ? item
+              : {
+                  ...item,
+                  imageUri: stableImages?.[0] ?? item.imageUri,
+                  imageUris: stableImages ?? item.imageUris,
+                  videoUri: stableVideo ?? item.videoUri,
+                },
+          ),
+        }));
+      } catch {
+        /* keep optimistic URIs */
+      }
+
+      const uploaded = await uploadFeedMedia({
+        imageUris: stableImages,
+        videoUri: stableVideo,
+      });
+      const saved = await syncFeedPostUpdate(feedId, {
+        body: caption,
+        media: {
+          images: uploaded.imageUris,
+          video: uploaded.videoUri,
+          musicTitle,
+          overlayText: input.overlayText,
+          overlayTextColor: input.overlayTextColor,
+          overlayTransform: input.overlayTransform,
+          authorName: profile.displayName,
+          authorHandle,
+        },
+        lat: existing.gps?.lat ?? CHANTHABURI.lat,
+        lng: existing.gps?.lng ?? CHANTHABURI.lng,
+        locationLabel: input.locationLabel ?? existing.location,
+        tags: existing.product.tags,
+        lane: existing.lane ?? 'foryou',
+      });
+      if (!saved) return;
+      const authUser = useAuthStore.getState().user;
+      set((state) => ({
+        items: state.items.map((item) => {
+          if (item.id !== feedId) return item;
+          const mapped = socialPostToFeedItem(saved, {
+            myUserId: authUser?.id,
+            myHandle: authorHandle,
+          });
+          return {
+            ...item,
+            ...mapped,
+            isUserPost: true,
+            imageUri: uploaded.imageUris[0] ?? mapped.imageUri ?? item.imageUri,
+            imageUris: uploaded.imageUris.length ? uploaded.imageUris : mapped.imageUris ?? item.imageUris,
+            videoUri: uploaded.videoUri ?? mapped.videoUri ?? item.videoUri,
+            likes: item.likes,
+            comments: item.comments,
+            shares: item.shares,
+            tips: item.tips,
+            myTipTotal: item.myTipTotal,
+            liked: item.liked,
+            saved: item.saved,
+          };
+        }),
+      }));
+    })();
+
+    return true;
+  },
+  deletePost: (feedId) => {
+    const existing = get().items.find((item) => item.id === feedId);
+    if (!existing?.isUserPost) return false;
+
+    set((state) => {
+      const nextComments = { ...state.commentsByFeedId };
+      delete nextComments[feedId];
+      if (existing.legacyLocalId) delete nextComments[existing.legacyLocalId];
+
+      return {
+        items: state.items.filter((item) => item.id !== feedId),
+        commentsByFeedId: nextComments,
+        activeCommentsFeedId:
+          state.activeCommentsFeedId === feedId ? null : state.activeCommentsFeedId,
+        activeTipFeedId: state.activeTipFeedId === feedId ? null : state.activeTipFeedId,
+      };
+    });
+
+    useVaultStore.getState().removeItemByRef(feedId);
+    void syncFeedPostDelete(feedId);
+    return true;
   },
   renameOwnPosts: (displayName) => {
     const name = displayName.trim();
@@ -303,30 +489,142 @@ export const useFeedStore = create<FeedState>()(
   closeComments: () => set({ activeCommentsFeedId: null }),
   openTip: (feedId) => set({ activeTipFeedId: feedId }),
   closeTip: () => set({ activeTipFeedId: null }),
-  addComment: (feedId, text, author = 'คุณ', authorInitial = 'ค', parentId) =>
+  addComment: (feedId, text, author = 'คุณ', authorInitial = 'ค', parentId) => {
+    commentSeq += 1;
+    const tempId = `cm-${commentSeq}`;
+    const authorId = useAuthStore.getState().user?.id;
+    const profileName = useLoyaltyStore.getState().profile.displayName;
+    const comment: FeedComment = {
+      id: tempId,
+      feedId,
+      author,
+      authorInitial,
+      authorId,
+      text,
+      likes: 0,
+      createdAt: 'เมื่อสักครู่',
+      parentId,
+    };
+    set((state) => ({
+      commentsByFeedId: {
+        ...state.commentsByFeedId,
+        [feedId]: [...(state.commentsByFeedId[feedId] ?? []), comment],
+      },
+      items: state.items.map((item) =>
+        item.id === feedId ? { ...item, comments: item.comments + 1 } : item,
+      ),
+    }));
+    void (async () => {
+      const saved = await syncFeedComment(feedId, text, parentId);
+      if (!saved) return;
+      const mapped = socialCommentToFeedComment(saved, feedId, {
+        myUserId: authorId,
+        myDisplayName: profileName,
+      });
+      set((state) => ({
+        commentsByFeedId: {
+          ...state.commentsByFeedId,
+          [feedId]: (state.commentsByFeedId[feedId] ?? [])
+            .filter((c) => c.id !== tempId)
+            .concat(mapped),
+        },
+      }));
+    })();
+  },
+  updateComment: (feedId, commentId, text) =>
     set((state) => {
-      commentSeq += 1;
-      const comment: FeedComment = {
-        id: `cm-${commentSeq}`,
-        feedId,
-        author,
-        authorInitial,
-        text,
-        likes: 0,
-        createdAt: 'เมื่อสักครู่',
-        parentId,
-      };
-      void syncFeedComment(feedId, text, parentId);
+      const trimmed = text.trim();
+      if (!trimmed) return state;
       return {
         commentsByFeedId: {
           ...state.commentsByFeedId,
-          [feedId]: [...(state.commentsByFeedId[feedId] ?? []), comment],
+          [feedId]: (state.commentsByFeedId[feedId] ?? []).map((c) =>
+            c.id === commentId ? { ...c, text: trimmed, editedAt: 'แก้ไขแล้ว' } : c,
+          ),
+        },
+      };
+    }),
+  deleteComment: (feedId, commentId) =>
+    set((state) => {
+      const list = state.commentsByFeedId[feedId] ?? [];
+      const next = list.filter((c) => c.id !== commentId && c.parentId !== commentId);
+      const removed = list.length - next.length;
+      if (removed <= 0) return state;
+      return {
+        commentsByFeedId: {
+          ...state.commentsByFeedId,
+          [feedId]: next,
         },
         items: state.items.map((item) =>
-          item.id === feedId ? { ...item, comments: item.comments + 1 } : item,
+          item.id === feedId
+            ? { ...item, comments: Math.max(0, item.comments - removed) }
+            : item,
         ),
       };
     }),
+  loadComments: async (feedId) => {
+    const auth = useAuthStore.getState().user;
+    const profileName = useLoyaltyStore.getState().profile.displayName;
+    const item = get().items.find((row) => row.id === feedId);
+    const postIds = [feedId];
+    if (item?.legacyLocalId && item.legacyLocalId !== feedId) {
+      postIds.push(item.legacyLocalId);
+    }
+
+    const remoteRows: SocialCommentDto[] = [];
+    const seen = new Set<string>();
+    for (const postId of postIds) {
+      const rows = await fetchFeedComments(postId);
+      if (rows === null) return false;
+      for (const row of rows) {
+        if (seen.has(row.id)) continue;
+        seen.add(row.id);
+        remoteRows.push(row);
+      }
+    }
+
+    const remote = remoteRows.map((row) =>
+      socialCommentToFeedComment(row, feedId, {
+        myUserId: auth?.id,
+        myDisplayName: profileName,
+      }),
+    );
+
+    set((state) => {
+      const local = state.commentsByFeedId[feedId] ?? [];
+      const remoteIds = new Set(remote.map((c) => c.id));
+      const pendingLocal = local.filter((c) => {
+        if (!c.id.startsWith('cm-')) return false;
+        if (remoteIds.has(c.id)) return false;
+        return !remote.some(
+          (r) =>
+            r.text === c.text &&
+            r.authorId === c.authorId &&
+            (r.parentId ?? null) === (c.parentId ?? null),
+        );
+      });
+      const byId = new Map<string, FeedComment>();
+      for (const c of [...remote, ...pendingLocal]) byId.set(c.id, c);
+      const list = [...byId.values()].sort((a, b) => {
+        const ta = a.createdAt === 'เมื่อสักครู่' ? Date.now() : 0;
+        const tb = b.createdAt === 'เมื่อสักครู่' ? Date.now() : 0;
+        return ta - tb;
+      });
+
+      return {
+        commentsByFeedId: {
+          ...state.commentsByFeedId,
+          [feedId]: list,
+        },
+        items: state.items.map((row) =>
+          row.id === feedId
+            ? { ...row, comments: Math.max(row.comments, list.length, remote.length) }
+            : row,
+        ),
+      };
+    });
+    return true;
+  },
   toggleCommentLike: (feedId, commentId) =>
     set((state) => ({
       commentsByFeedId: {
@@ -346,6 +644,7 @@ export const useFeedStore = create<FeedState>()(
     })),
   closeCreatorProfile: () => set({ activeCreatorHandle: null, activeCreatorFeedId: null }),
   hydrateFromServer: async () => {
+    if (!useFeedStore.persist.hasHydrated()) return;
     const rows = await fetchFeedPosts();
     const auth = useAuthStore.getState().user;
     const profileName = useLoyaltyStore.getState().profile.displayName.trim();
@@ -367,7 +666,14 @@ export const useFeedStore = create<FeedState>()(
     {
       name: 'boommall-feed-v4',
       storage: createJSONStorage(() => AsyncStorage),
-      partialize: (s) => ({ items: keepPersistedFeedItems(s.items).slice(0, 80) }),
+      partialize: (s) => ({
+        items: keepPersistedFeedItems(s.items).slice(0, 80),
+        commentsByFeedId: Object.fromEntries(
+          Object.entries(s.commentsByFeedId)
+            .slice(0, 40)
+            .map(([feedId, rows]) => [feedId, rows.slice(0, 120)]),
+        ),
+      }),
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<FeedState>;
         const profileName = useLoyaltyStore.getState().profile.displayName.trim();

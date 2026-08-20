@@ -42,6 +42,7 @@ export function pickDevicePhotos(options?: {
   selectionLimit?: number;
   videos?: boolean;
   videosOnly?: boolean;
+  allowModeSwitch?: boolean;
   title?: string;
   sendLabel?: string;
   editAfterPick?: boolean;
@@ -51,7 +52,8 @@ export function pickDevicePhotos(options?: {
     usePhotoLibraryStore.getState().present({
       selectionLimit: Math.max(1, options?.selectionLimit ?? 1),
       initialMode: options?.videosOnly ? 'video' : 'photo',
-      allowModeSwitch: Boolean(options?.videos) && !options?.videosOnly,
+      allowModeSwitch:
+        options?.allowModeSwitch ?? (Boolean(options?.videos) && !options?.videosOnly),
       title: options?.title ?? 'คลังภาพ',
       sendLabel: options?.sendLabel ?? 'เลือก',
       editAfterPick: options?.editAfterPick,

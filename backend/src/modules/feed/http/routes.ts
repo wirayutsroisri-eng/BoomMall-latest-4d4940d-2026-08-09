@@ -7,7 +7,7 @@ import { requireAdmin, adminHasPermission } from '../../../middleware/adminAuth'
 import type { AuthedRequest } from '../../../middleware/adminAuth';
 import { requireUserOrDevHeader } from '../../../middleware/userAuth';
 import type { UserAuthedRequest } from '../../../middleware/userAuth';
-import { createSocialPost, listSocialPosts, socialFeedDomainExtras, toggleSocialPostLike, recordFeedSignal, bumpShareCount } from '../SocialPostService';
+import { createSocialPost, listSocialPosts, socialFeedDomainExtras, toggleSocialPostLike, recordFeedSignal, bumpShareCount, updateSocialPost, deleteSocialPost } from '../SocialPostService';
 import { addComment, listComments, toggleCommentLike } from '../CommentService';
 import { contentFeedDomainStatus } from '../ContentFeedService';
 import { listFollowing } from '../../auth/FollowService';
@@ -80,6 +80,38 @@ feedAppRouter.post('/posts', requireUserOrDevHeader, async (req: UserAuthedReque
         lane: body.lane ? String(body.lane) : undefined,
       }),
     });
+  } catch (e) {
+    next(e);
+  }
+});
+
+feedAppRouter.patch('/posts/:id', requireUserOrDevHeader, async (req: UserAuthedRequest, res, next) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const body = req.body ?? {};
+    const updated = await updateSocialPost(String(id), req.user!.sub, {
+      body: body.body != null ? String(body.body) : undefined,
+      media: body.media,
+      lat: body.lat != null ? Number(body.lat) : undefined,
+      lng: body.lng != null ? Number(body.lng) : undefined,
+      locationLabel: body.locationLabel != null ? String(body.locationLabel) : undefined,
+      tags: Array.isArray(body.tags) ? body.tags.map(String) : undefined,
+      linkUrl: body.linkUrl != null ? String(body.linkUrl) : null,
+      lane: body.lane != null ? String(body.lane) : undefined,
+    });
+    if (!updated) throw new AppError('NOT_FOUND', 'post not found or forbidden', 404);
+    res.json({ ok: true, data: updated });
+  } catch (e) {
+    next(e);
+  }
+});
+
+feedAppRouter.delete('/posts/:id', requireUserOrDevHeader, async (req: UserAuthedRequest, res, next) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const ok = await deleteSocialPost(String(id), req.user!.sub);
+    if (!ok) throw new AppError('NOT_FOUND', 'post not found or forbidden', 404);
+    res.json({ ok: true });
   } catch (e) {
     next(e);
   }

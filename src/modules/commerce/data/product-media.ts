@@ -1,13 +1,10 @@
-import { Alert } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
-import { Directory, File, Paths } from 'expo-file-system';
-import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import type { ProductMediaItem } from '../domain/types';
+import { Directory, File, Paths } from 'expo-file-system';
 import {
   inferMediaType,
   mediaExtension,
-  validateProductVideo,
 } from '../domain/product-media';
+import { pickSystemMediaFromLibrary } from '@/shared/media/systemMediaLibraryPicker';
 
 /**
  * Picked images/videos live in app cache which the OS can purge.
@@ -57,14 +54,6 @@ function copyLocalFile(uri: string, target: File): boolean {
   return false;
 }
 
-/** HEIC / photokit URIs often render as a black tile — transcode to JPEG first. */
-async function toJpegFile(uri: string): Promise<string> {
-  const ctx = ImageManipulator.manipulate(uri);
-  const rendered = await ctx.renderAsync();
-  const saved = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: 0.9 });
-  return saved.uri;
-}
-
 export function persistProductMedia(
   items: ProductMediaItem[],
   masterId: string,
@@ -105,67 +94,23 @@ export function fileSizeBytes(uri: string): number | undefined {
   }
 }
 
-function assetToMedia(
-  asset: ImagePicker.ImagePickerAsset,
-): ProductMediaItem | { reason: string } {
-  const type =
-    asset.type === 'video' || (asset.mimeType ?? '').startsWith('video/')
-      ? ('video' as const)
-      : ('image' as const);
-  const sizeBytes = asset.fileSize ?? fileSizeBytes(asset.uri);
-  if (type === 'video') {
-    const check = validateProductVideo({
-      uri: asset.uri,
-      filename: asset.fileName ?? undefined,
-      sizeBytes,
-    });
-    if (!check.ok) return { reason: check.reason };
-  }
-  return { uri: asset.uri, type, sizeBytes };
-}
-
-/**
- * System Photos picker — returns file:// URIs RN Image can render.
- * Copies into the document dir immediately so the listing keeps the file.
- */
+/** System Photos picker — หน้าลงขายสินค้า / คลัง */
 export async function pickProductMediaFromLibrary(input: {
   selectionLimit: number;
   allowVideo?: boolean;
 }): Promise<ProductMediaItem[] | null> {
-  const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (!perm.granted) {
-    Alert.alert('ต้องการสิทธิ์คลังภาพ', 'อนุญาตให้ BoomMall เข้าถึงรูปและวิดีโอในเครื่อง');
-    return null;
-  }
-
-  const limit = Math.max(1, input.selectionLimit);
-  const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: input.allowVideo ? ['images', 'videos'] : ['images'],
-    allowsMultipleSelection: limit > 1,
-    selectionLimit: limit,
-    quality: 1,
+  const picked = await pickSystemMediaFromLibrary({
+    selectionLimit: input.selectionLimit,
+    allowVideo: input.allowVideo,
     videoMaxDuration: 180,
-    exif: false,
-    preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
   });
-  if (result.canceled || !result.assets?.length) return [];
-
-  const incoming: ProductMediaItem[] = [];
-  for (const asset of result.assets) {
-    const mapped = assetToMedia(asset);
-    if ('reason' in mapped) {
-      Alert.alert('ไฟล์ใช้ไม่ได้', mapped.reason);
-      continue;
-    }
-    if (mapped.type === 'image') {
-      try {
-        mapped.uri = await toJpegFile(mapped.uri);
-      } catch {
-        mapped.uri = displayMediaUri(mapped.uri);
-      }
-    }
-    incoming.push({ ...mapped, uri: displayMediaUri(mapped.uri) });
-  }
-  if (!incoming.length) return [];
-  return persistProductMedia(incoming, `pick-${Date.now()}`);
+  if (!picked?.length) return [];
+  return persistProductMedia(
+    picked.map((item) => ({
+      uri: item.uri,
+      type: item.type,
+      sizeBytes: item.sizeBytes,
+    })),
+    `pick-${Date.now()}`,
+  );
 }

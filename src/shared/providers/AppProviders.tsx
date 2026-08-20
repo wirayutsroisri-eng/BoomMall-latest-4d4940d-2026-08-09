@@ -11,7 +11,8 @@ import { seedActivityFromApp } from '@/modules/account/state/seedActivity';
 import { useFollowStore } from '@/modules/social/state/follow-store';
 import { useChatStore } from '@/modules/chat/state/chat-store';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
-import { subscribeChatReminderTaps } from '@/modules/chat/data/chatReminder';
+import { subscribeRemotePushHandlers } from '@/shared/notifications/remotePushHandlers';
+import { ensurePushRegistered, clearPushRegistrationCache } from '@/shared/notifications/pushRegistration';
 import { startChatRealtime, isChatSocketConnected } from '@/modules/chat/data/chatSocket';
 import { syncModerationContentBlocks } from '@/modules/safety/syncModerationContentBlocks';
 import { setCommerceHooks } from '@/modules/commerce/state/inventory-store';
@@ -22,12 +23,13 @@ import {
 } from '@/modules/commerce/data/commerceSync';
 import { AppPromptHost } from '@/shared/components/AppPrompt';
 import { PhotoLibraryHost } from '@/shared/media/PhotoLibraryHost';
-import { CreateStudioHost } from '@/modules/create/ui/CreateStudioHost';
 import { AvatarPhotoHost } from '@/modules/profile/ui/AvatarPhotoHost';
 import {
   hydrateOwnProfileFromServer,
   syncLocalProfilePhotosIfNeeded,
 } from '@/modules/profile/data/syncOwnProfile';
+import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
+import { whenStoresHydrated } from '@/shared/state/whenStoreHydrated';
 
 type Props = {
   children: React.ReactNode;
@@ -39,6 +41,12 @@ export function AppProviders({ children }: Props) {
   const hydrateWallet = useBoomWalletStore((s) => s.hydrate);
   const hydrateMusic = useMusicLibraryStore((s) => s.hydrate);
   const hydrateAuth = useAuthStore((s) => s.hydrate);
+  const sessionToken = useAuthStore((s) => s.sessionToken);
+
+  useEffect(() => {
+    if (sessionToken) void ensurePushRegistered();
+    else clearPushRegistrationCache();
+  }, [sessionToken]);
 
   useEffect(() => {
     setCommerceHooks({
@@ -51,11 +59,14 @@ export function AppProviders({ children }: Props) {
     void hydrateMusic();
     void hydrateAuth().then(() => {
       void pullCommerceCatalog();
-      void useFollowStore.getState().hydrateFromServer();
-      void useFeedStore.getState().hydrateFromServer();
-      void hydrateOwnProfileFromServer().then(() => {
-        void syncLocalProfilePhotosIfNeeded();
+      whenStoresHydrated([useLoyaltyStore, useFeedStore], () => {
+        void useFollowStore.getState().hydrateFromServer();
+        void useFeedStore.getState().hydrateFromServer();
+        void hydrateOwnProfileFromServer().then(() => {
+          void syncLocalProfilePhotosIfNeeded();
+        });
       });
+      void ensurePushRegistered();
       void useChatStore.getState().hydrateInbox().finally(() => {
         seedActivityFromApp();
       });
@@ -63,17 +74,18 @@ export function AppProviders({ children }: Props) {
         onMessage: (msg) => useChatStore.getState().applyRemoteMessage(msg),
         onRead: (payload) =>
           useChatStore.getState().applyReceipt({
-            conversationId: payload.conversationId,
+            ...payload,
             lastReadAt: payload.lastReadAt ?? undefined,
+            lastDeliveredAt: payload.lastDeliveredAt ?? undefined,
             kind: 'read',
           }),
         onDelivered: (payload) =>
           useChatStore.getState().applyReceipt({
-            conversationId: payload.conversationId,
+            ...payload,
+            lastReadAt: payload.lastReadAt ?? undefined,
             lastDeliveredAt: payload.lastDeliveredAt ?? undefined,
             kind: 'delivered',
           }),
-
         onTyping: (payload) => {
           const conv = useChatStore
             .getState()
@@ -88,7 +100,7 @@ export function AppProviders({ children }: Props) {
       });
     });
     void syncModerationContentBlocks();
-    const reminderUnsub = subscribeChatReminderTaps();
+    const pushUnsub = subscribeRemotePushHandlers();
     const id = setInterval(() => {
       void syncModerationContentBlocks();
       void pullCommerceCatalog();
@@ -100,7 +112,7 @@ export function AppProviders({ children }: Props) {
     }, 8_000);
     return () => {
       clearInterval(id);
-      reminderUnsub();
+      pushUnsub();
     };
   }, [hydrateVault, hydrateKnowledge, hydrateWallet, hydrateMusic, hydrateAuth]);
 
@@ -110,7 +122,6 @@ export function AppProviders({ children }: Props) {
         {children}
         <AppPromptHost />
         <PhotoLibraryHost />
-        <CreateStudioHost />
         <AvatarPhotoHost />
       </BottomSheetModalProvider>
     </GestureHandlerRootView>

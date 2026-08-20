@@ -131,7 +131,11 @@ export function ReportBlockSheet({
           ) : (
             <>
               <Text style={styles.heading}>
-                {kind === 'content' ? 'เหตุใดคุณจึงรายงานรูปภาพนี้' : 'เหตุใดคุณจึงรายงานเนื้อหานี้'}
+                {kind === 'content'
+                  ? 'เหตุใดคุณจึงรายงานรูปภาพนี้'
+                  : kind === 'comment'
+                    ? 'เหตุใดคุณจึงรายงานความคิดเห็นนี้'
+                    : 'เหตุใดคุณจึงรายงานเนื้อหานี้'}
               </Text>
               <Text style={styles.sub}>
                 {targetLabel

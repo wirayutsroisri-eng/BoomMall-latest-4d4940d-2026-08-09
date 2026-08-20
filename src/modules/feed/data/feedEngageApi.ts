@@ -1,4 +1,5 @@
 import { authHeaders, getApiBase } from '@/modules/auth/state/auth-store';
+import { apiFetch } from '@/shared/api/apiBase';
 import type { SocialPostDto } from './mapSocialPost';
 
 async function post(path: string, body: unknown) {
@@ -14,6 +15,36 @@ async function post(path: string, body: unknown) {
     return await res.json().catch(() => null);
   } catch {
     return null;
+  }
+}
+
+async function patch(path: string, body: unknown) {
+  const base = getApiBase();
+  if (!base) return null;
+  try {
+    const res = await apiFetch(`${base}${path}`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return null;
+    return await res.json().catch(() => null);
+  } catch {
+    return null;
+  }
+}
+
+async function del(path: string) {
+  const base = getApiBase();
+  if (!base) return false;
+  try {
+    const res = await apiFetch(`${base}${path}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    });
+    return res.ok;
+  } catch {
+    return false;
   }
 }
 
@@ -47,6 +78,30 @@ export async function publishSocialPost(input: {
   return json?.data ?? null;
 }
 
+export async function syncFeedPostUpdate(
+  postId: string,
+  input: {
+    body: string;
+    media?: unknown;
+    lat?: number;
+    lng?: number;
+    locationLabel?: string;
+    tags?: string[];
+    linkUrl?: string | null;
+    lane?: string;
+  },
+): Promise<SocialPostDto | null> {
+  const json = (await patch(`/api/v1/feed/posts/${encodeURIComponent(postId)}`, input)) as {
+    data?: SocialPostDto;
+  } | null;
+  return json?.data ?? null;
+}
+
+export async function syncFeedPostDelete(postId: string): Promise<boolean> {
+  if (postId.startsWith('feed-user-')) return true;
+  return del(`/api/v1/feed/posts/${encodeURIComponent(postId)}`);
+}
+
 export async function fetchFeedPosts(
   tab?: string,
   geo?: { lat: number; lng: number; radiusKm?: number },
@@ -70,9 +125,44 @@ export async function fetchFeedPosts(
   }
 }
 
-export function syncFeedComment(postId: string, text: string, parentId?: string) {
-  return post(`/api/v1/feed/posts/${encodeURIComponent(postId)}/comments`, {
+export async function syncFeedComment(
+  postId: string,
+  text: string,
+  parentId?: string,
+): Promise<SocialCommentDto | null> {
+  const json = await post(`/api/v1/feed/posts/${encodeURIComponent(postId)}/comments`, {
     body: text,
     parentId,
   });
+  if (!json || typeof json !== 'object') return null;
+  const data = (json as { data?: SocialCommentDto }).data;
+  return data?.id ? data : null;
+}
+
+export type SocialCommentDto = {
+  id: string;
+  postId: string;
+  authorId: string;
+  authorName?: string | null;
+  authorHandle?: string | null;
+  parentId: string | null;
+  body: string;
+  likeCount: number;
+  createdAt: string;
+};
+
+/** `null` = network/API failure (keep cached comments). `[]` = no comments on server. */
+export async function fetchFeedComments(postId: string): Promise<SocialCommentDto[] | null> {
+  const base = getApiBase();
+  if (!base) return null;
+  try {
+    const res = await apiFetch(`${base}/api/v1/feed/posts/${encodeURIComponent(postId)}/comments`, {
+      headers: authHeaders(),
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { data?: SocialCommentDto[] };
+    return Array.isArray(json?.data) ? json.data : [];
+  } catch {
+    return null;
+  }
 }

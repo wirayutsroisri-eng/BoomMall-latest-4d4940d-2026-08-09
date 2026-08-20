@@ -20,6 +20,7 @@ export function supplyPostsToProviders(items: FeedItem[]): ServiceProvider[] {
         id: `supply-${item.id}`,
         name: item.author,
         handle: item.authorHandle.replace(/^@/, ''),
+        userId: item.authorId,
         avatarColor: item.gradient?.[0] ?? '#1A7A55',
         skills: extracted.skills.length > 0 ? extracted.skills : [item.product.name],
         categories: extracted.categories,

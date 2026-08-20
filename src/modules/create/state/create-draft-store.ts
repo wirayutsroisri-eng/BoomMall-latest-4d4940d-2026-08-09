@@ -7,9 +7,6 @@ import {
 type CreateDraftState = {
   uri: string | null;
   type: 'image' | 'video';
-  /** All edited media URIs (multi-photo publish) */
-  mediaUris: string[];
-
   /** true = ข้อความ/ฟิลเตอร์ถูก bake เข้าไฟล์แล้ว — อย่ารีเรนเดอร์ overlay ทับอีก */
   baked: boolean;
   overlayText: string;
@@ -25,6 +22,14 @@ type CreateDraftState = {
   /** When sound comes from a music video upload */
   musicVideoUri: string;
   musicMediaKind: '' | 'audio' | 'video';
+  /** When set, publish flow updates this feed item instead of creating a new post. */
+  editFeedId: string | null;
+  /** Multi-image carousel (publish step). */
+  mediaUris: string[];
+  publishTitle: string;
+  publishDescription: string;
+  publishLocation: string | null;
+  publishLinkLabel: string | null;
   setDraft: (patch: Partial<Omit<CreateDraftState, 'setDraft' | 'clear'>>) => void;
   clear: () => void;
 };
@@ -33,9 +38,7 @@ type CreateDraftState = {
 export const useCreateDraftStore = create<CreateDraftState>((set) => ({
   uri: null,
   type: 'image',
-  mediaUris: [],
   baked: false,
-
   overlayText: '',
   overlayColor: '#FFFFFF',
   overlayTransform: { ...DEFAULT_OVERLAY_TRANSFORM },
@@ -47,14 +50,18 @@ export const useCreateDraftStore = create<CreateDraftState>((set) => ({
   musicTrackId: '',
   musicVideoUri: '',
   musicMediaKind: '',
+  editFeedId: null,
+  mediaUris: [],
+  publishTitle: '',
+  publishDescription: '',
+  publishLocation: null,
+  publishLinkLabel: null,
   setDraft: (patch) => set((s) => ({ ...s, ...patch })),
   clear: () =>
     set({
       uri: null,
       type: 'image',
-      mediaUris: [],
       baked: false,
-
       overlayText: '',
       overlayColor: '#FFFFFF',
       overlayTransform: { ...DEFAULT_OVERLAY_TRANSFORM },
@@ -66,5 +73,11 @@ export const useCreateDraftStore = create<CreateDraftState>((set) => ({
       musicTrackId: '',
       musicVideoUri: '',
       musicMediaKind: '',
+      editFeedId: null,
+      mediaUris: [],
+      publishTitle: '',
+      publishDescription: '',
+      publishLocation: null,
+      publishLinkLabel: null,
     }),
 }));

@@ -24,8 +24,7 @@ function normalizeHandle(h: string) {
 }
 
 /**
- * QR Code Scanner — mock camera viewfinder (Simulator has no real camera, so this mirrors
- * the same "camera-look" mock pattern already used by CameraStudioScreen). Resolves a scan
+ * QR Code Scanner — mock camera viewfinder (Simulator has no real camera). Resolves a scan
  * against the friend directory and jumps straight into 1-on-1 Super Chat, LINE/WeChat-style.
  */
 export function QrScanScreen() {

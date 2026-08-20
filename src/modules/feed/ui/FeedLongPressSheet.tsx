@@ -14,9 +14,12 @@ import {
 type Props = {
   visible: boolean;
   item: FeedItem | null;
+  isOwnPost?: boolean;
   canReport?: boolean;
   saved?: boolean;
   onClose: () => void;
+  onEditPost?: () => void;
+  onDeletePost?: () => void;
   onInterested?: () => void;
   onNotInterested: () => void;
   onSave?: () => void;
@@ -29,9 +32,12 @@ const RATES: PlaybackRate[] = [0.5, 1, 1.5, 2];
 export function FeedLongPressSheet({
   visible,
   item,
+  isOwnPost = false,
   canReport = true,
   saved = false,
   onClose,
+  onEditPost,
+  onDeletePost,
   onInterested,
   onNotInterested,
   onSave,
@@ -67,6 +73,33 @@ export function FeedLongPressSheet({
       >
         <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
           <View style={styles.handle} />
+
+          {isOwnPost && onEditPost ? (
+            <View style={styles.group}>
+              <MenuRow
+                icon="create-outline"
+                label="แก้ไขโพสต์"
+                onPress={() => {
+                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  onEditPost();
+                }}
+              />
+              {onDeletePost ? (
+                <>
+                  <View style={styles.divider} />
+                  <MenuRow
+                    icon="trash-outline"
+                    label="ลบโพสต์"
+                    destructive
+                    onPress={() => {
+                      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                      onDeletePost();
+                    }}
+                  />
+                </>
+              ) : null}
+            </View>
+          ) : null}
 
           <View style={styles.group}>
             {onInterested ? (
@@ -232,6 +265,7 @@ function MenuRow({
   trailing,
   chevron,
   expanded,
+  destructive,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
@@ -239,11 +273,12 @@ function MenuRow({
   trailing?: React.ReactNode;
   chevron?: boolean;
   expanded?: boolean;
+  destructive?: boolean;
 }) {
   return (
     <Pressable style={styles.row} onPress={onPress} disabled={!onPress && !trailing}>
-      <Ionicons name={icon} size={22} color={colors.text.primary} />
-      <Text style={styles.rowLabel}>{label}</Text>
+      <Ionicons name={icon} size={22} color={destructive ? '#DC2626' : colors.text.primary} />
+      <Text style={[styles.rowLabel, destructive && styles.rowLabelDestructive]}>{label}</Text>
       {trailing}
       {chevron ? (
         <Ionicons
@@ -292,6 +327,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   rowLabel: { flex: 1, fontSize: 16, fontWeight: '600', color: colors.text.primary },
+  rowLabelDestructive: { color: '#DC2626' },
   hint: { fontSize: 13, color: colors.text.secondary, fontWeight: '600' },
   seg: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   segBtn: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },

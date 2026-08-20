@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -27,6 +27,7 @@ import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
 import { Avatar } from '@/shared/components/Avatar';
 import { RightActionBar } from './RightActionBar';
 import { FeedVideoLayer } from './FeedVideoLayer';
+import { FeedPinchZoomLayer } from './FeedPinchZoomLayer';
 import { IOS_SPRING, clampPagerX, snapPagerIndex } from './feedMotion';
 import { hasFeedMusic } from '@/modules/feed/domain/feedMusic';
 
@@ -110,17 +111,19 @@ export function FeedReelCard({
   const captionsEnabled = useFeedChromeStore((s) => s.captionsEnabled);
   const playbackRate = useFeedChromeStore((s) => s.playbackRate);
   const setChromeHidden = useFeedChromeStore((s) => s.setChromeHidden);
+  const setMediaZoomed = useFeedChromeStore((s) => s.setMediaZoomed);
   const hasMusic = hasFeedMusic(item.musicTitle);
-  const listeningNow = hasMusic && musicPlaying && musicTrackTitle === item.musicTitle;
+  const listenTitle = hasMusic ? item.musicTitle : `Original Sound — ${authorName}`;
+  const listeningNow = musicPlaying && musicTrackTitle === listenTitle;
 
   const openListenMode = () => {
-    if (!hasMusic) return;
     // Lock + push immediately so a double-tap cannot stack two /listen modals
     // (previously we awaited audio load first — second tap slipped through).
     if (!openListenScreenNow()) return;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     expandMusic();
-    void playFromFeedMusic(item.musicTitle, authorName);
+    const title = hasMusic ? item.musicTitle : listenTitle;
+    void playFromFeedMusic(title, authorName);
   };
   const caption = item.caption?.trim() ?? '';
   const captionCollapsible = caption.length > CAPTION_COLLAPSE_CHARS;
@@ -132,6 +135,23 @@ export function FeedReelCard({
   const tabCountSV = useSharedValue(tabCount);
   const panStartPagerX = useSharedValue(0);
   const draggingTabs = useSharedValue(0);
+  const zoomed = useSharedValue(0);
+
+  const onMediaZoomChange = useCallback(
+    (next: boolean) => {
+      zoomed.value = next ? 1 : 0;
+      setMediaZoomed(next);
+      setChromeHidden(next);
+    },
+    [setChromeHidden, setMediaZoomed, zoomed],
+  );
+
+  useEffect(() => {
+    zoomed.value = 0;
+    setMediaZoomed(false);
+  }, [item.id, page, setMediaZoomed, zoomed]);
+
+  useEffect(() => () => setMediaZoomed(false), [setMediaZoomed]);
 
   useEffect(() => {
     widthSV.value = screenWidth;
@@ -260,6 +280,10 @@ export function FeedReelCard({
       draggingTabs.value = 0;
     })
     .onUpdate((e) => {
+      if (zoomed.value > 0.5) {
+        pagerX.value = panStartPagerX.value;
+        return;
+      }
       const w = widthSV.value;
       const pages = tabCountSV.value;
       const dx = e.translationX;
@@ -294,6 +318,10 @@ export function FeedReelCard({
       }
     })
     .onEnd((e) => {
+      if (zoomed.value > 0.5) {
+        pagerX.value = withSpring(panStartPagerX.value, IOS_SPRING);
+        return;
+      }
       const w = widthSV.value;
       const dx = e.translationX;
       const vx = e.velocityX;
@@ -352,13 +380,19 @@ export function FeedReelCard({
   return (
     <GestureDetector gesture={composedGesture}>
       <View style={[styles.card, { height }]}>
-        {item.videoUri ? (
-          <FeedVideoLayer uri={item.videoUri} isActive={isActive} />
-        ) : activeUri ? (
-          <Image source={{ uri: activeUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-        ) : (
-          <LinearGradient colors={item.gradient} style={StyleSheet.absoluteFill} />
-        )}
+        <FeedPinchZoomLayer
+          resetKey={`${item.id}:${page}`}
+          enabled={Boolean(item.videoUri || activeUri)}
+          onZoomChange={onMediaZoomChange}
+        >
+          {item.videoUri ? (
+            <FeedVideoLayer uri={item.videoUri} isActive={isActive} />
+          ) : activeUri ? (
+            <Image source={{ uri: activeUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          ) : (
+            <LinearGradient colors={item.gradient} style={StyleSheet.absoluteFill} />
+          )}
+        </FeedPinchZoomLayer>
         {!chromeHidden ? (
           <LinearGradient
             colors={[colors.feed.gradientTop, 'transparent', colors.feed.gradientBottom]}
@@ -394,11 +428,6 @@ export function FeedReelCard({
               <View style={styles.liveBadge}>
                 <View style={styles.liveDot} />
                 <Text style={styles.liveText}>LIVE</Text>
-              </View>
-            ) : null}
-            {item.isUserPost ? (
-              <View style={styles.newBadge}>
-                <Text style={styles.newBadgeText}>โพสต์ของคุณ</Text>
               </View>
             ) : null}
 
@@ -499,7 +528,7 @@ export function FeedReelCard({
             onLike={onLike}
             liked={liked}
             likes={likes ?? item.likes}
-            onMusic={hasMusic ? openListenMode : undefined}
+            onMusic={openListenMode}
             musicActive={listeningNow}
           />
         ) : null}
@@ -568,14 +597,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   liveText: { color: '#fff', fontWeight: '900', fontSize: 13 },
-  newBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: colors.brand.primary,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 4,
-  },
-  newBadgeText: { color: colors.brand.ink, fontWeight: '900', fontSize: 13 },
   /** TikTok shop pin — เหนือชื่อผู้ใช้ มุมล่างซ้าย */
   productPin: {
     alignSelf: 'flex-start',

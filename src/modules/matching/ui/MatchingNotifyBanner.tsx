@@ -8,7 +8,7 @@ import { colors } from '@/shared/theme/colors';
 const AUTO_DISMISS_MS = 5200;
 
 /**
- * Lightweight in-app stub for provider push notifications after Community Board matching.
+ * In-app banner when a matching job push arrives while the app is open.
  */
 export function MatchingNotifyBanner() {
   const banner = useMatchingNotifyStore((s) => s.activeBanner);

@@ -36,6 +36,21 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen
+          name="create-capture"
+          options={{
+            presentation: 'fullScreenModal',
+            ...dismissibleModalOptions,
+          }}
+        />
+        <Stack.Screen
+          name="media-gallery"
+          options={{
+            presentation: 'fullScreenModal',
+            ...dismissibleModalOptions,
+            animation: 'slide_from_bottom',
+          }}
+        />
+        <Stack.Screen
           name="board-create"
           options={{
             presentation: 'modal',

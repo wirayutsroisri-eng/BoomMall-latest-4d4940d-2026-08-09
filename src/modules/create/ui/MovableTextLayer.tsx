@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   runOnJS,
@@ -12,48 +12,30 @@ import {
   type OverlayTransform,
 } from '@/modules/create/domain/overlay';
 import type { OverlayFontKey } from '@/modules/create/domain/overlayText';
+import { OverlayTextLabel } from './OverlayTextLabel';
 
 type Props = {
   text: string;
   color: string;
   fontKey?: OverlayFontKey;
   italic?: boolean;
-  background?: string | null;
   initialTransform?: OverlayTransform;
-  interactive?: boolean;
   onEdit: () => void;
   onTransformChange?: (t: OverlayTransform) => void;
 };
 
 /**
- * TikTok-style movable text — ตำแหน่งเก็บเป็น 0–1 ของเฟรม เพื่อล็อกข้ามหน้าพรีวิว/ฟีด
+ * TikTok-style movable text — normalized 0–1 coords for export across screens.
  */
 export function MovableTextLayer({
   text,
   color,
   fontKey = 'classic',
   italic,
-  background,
   initialTransform = DEFAULT_OVERLAY_TRANSFORM,
-  interactive = true,
   onEdit,
   onTransformChange,
 }: Props) {
-  const fontFamily =
-    fontKey === 'system'
-      ? undefined
-      : fontKey === 'kanit'
-        ? 'Kanit'
-        : fontKey === 'mitr'
-          ? 'Mitr'
-          : fontKey === 'prompt'
-            ? 'Prompt'
-            : fontKey === 'sarabun'
-              ? 'Sarabun'
-              : fontKey === 'halloween'
-                ? 'Creepster'
-                : undefined;
-
   const [frame, setFrame] = useState({ w: 0, h: 0 });
 
   const nx = useSharedValue(initialTransform.x);
@@ -67,6 +49,13 @@ export function MovableTextLayer({
   const startNy = useSharedValue(initialTransform.y);
   const startScale = useSharedValue(initialTransform.scale);
   const startRotation = useSharedValue(initialTransform.rotation);
+
+  useEffect(() => {
+    nx.value = initialTransform.x;
+    ny.value = initialTransform.y;
+    scale.value = initialTransform.scale;
+    rotation.value = initialTransform.rotation;
+  }, [initialTransform, nx, ny, rotation, scale]);
 
   const emit = () => {
     onTransformChange?.({
@@ -86,9 +75,7 @@ export function MovableTextLayer({
   };
 
   const pan = Gesture.Pan()
-    .enabled(interactive)
-    .minDistance(4)
-
+    .minDistance(6)
     .onStart(() => {
       startNx.value = nx.value;
       startNy.value = ny.value;
@@ -131,13 +118,14 @@ export function MovableTextLayer({
   };
 
   const tap = Gesture.Tap()
-    .maxDuration(220)
+    .maxDuration(250)
+    .maxDistance(8)
     .onEnd(() => {
       runOnJS(buzz)();
       runOnJS(onEdit)();
     });
 
-  const gesture = Gesture.Simultaneous(pan, pinch, rotate, tap);
+  const gesture = Gesture.Simultaneous(Gesture.Exclusive(pan, tap), pinch, rotate);
 
   const animatedStyle = useAnimatedStyle(() => ({
     left: nx.value * frameW.value,
@@ -152,20 +140,12 @@ export function MovableTextLayer({
       {frame.w > 0 ? (
         <GestureDetector gesture={gesture}>
           <Animated.View style={[styles.anchor, animatedStyle]}>
-            <Text
-              style={[
-                styles.label,
-                {
-                  color,
-                  fontStyle: italic ? 'italic' : 'normal',
-                  fontFamily,
-                  backgroundColor: background ?? 'transparent',
-                },
-              ]}
-            >
-              {text}
-            </Text>
-
+            <OverlayTextLabel
+              text={text}
+              color={color}
+              fontKey={fontKey}
+              italic={italic}
+            />
           </Animated.View>
         </GestureDetector>
       ) : null}
@@ -189,14 +169,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'visible',
-  },
-  label: {
-    width: 280,
-    fontSize: 36,
-    fontWeight: '900',
-    textAlign: 'center',
-    textShadowColor: 'rgba(0,0,0,0.55)',
-    textShadowRadius: 8,
-    textShadowOffset: { width: 0, height: 2 },
   },
 });

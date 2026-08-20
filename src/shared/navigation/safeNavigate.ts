@@ -1,6 +1,5 @@
 import { router, type Href } from 'expo-router';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
-import { openIPhoneCameraFromCreate } from '@/modules/create/data/openDeviceCapture';
 
 /**
  * Prevents double-tap from stacking screens (esp. fullScreenModal /listen).
@@ -127,10 +126,10 @@ export function openCreateHub(): boolean {
   return safePush('/create-hub');
 }
 
-/** Tab กล้อง — เปิดกล้อง iPhone เต็มจอทันที ไม่ดึงคลังรูปมาทับ */
+/** Tab สร้าง — กล้อง + คลังรูป/วิดีโอในหน้าเดียว */
 export function openCreateCamera(): boolean {
-  openIPhoneCameraFromCreate();
-  return true;
+  if (isRouteMounted('create-capture') || isRouteMounted('create-preview')) return false;
+  return safePush('/create-capture');
 }
 
 export function openBoardCreate(side: 'demand' | 'supply', locked = true): boolean {

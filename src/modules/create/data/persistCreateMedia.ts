@@ -1,5 +1,7 @@
 import { Directory, File, Paths } from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
+import { normalizeMediaUri } from '@/shared/media/resolveMediaLibraryUri';
 
 /**
  * ImagePicker / Camera cache files can vanish before publish.
@@ -10,12 +12,13 @@ export async function persistCreateMedia(
   type: 'image' | 'video',
 ): Promise<string> {
   if (!uri) return uri;
+  const source = normalizeMediaUri(uri);
   const dir = new Directory(Paths.document, 'create-media');
   if (!dir.exists) dir.create({ intermediates: true, idempotent: true });
 
   if (type === 'image') {
     try {
-      const ctx = ImageManipulator.manipulate(uri);
+      const ctx = ImageManipulator.manipulate(source);
       const rendered = await ctx.renderAsync();
       const saved = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: 0.88 });
       const target = new File(dir, `${Date.now()}.jpg`);
@@ -28,14 +31,19 @@ export async function persistCreateMedia(
   }
 
   const ext =
-    uri.match(/\.([a-z0-9]+)(?:\?|$)/i)?.[1]?.toLowerCase() ??
-    (type === 'video' ? 'mp4' : 'jpg');
+    source.match(/\.([a-z0-9]+)(?:[?#]|$)/i)?.[1]?.toLowerCase() ??
+    (type === 'video' ? 'mov' : 'jpg');
   const target = new File(dir, `${Date.now()}.${ext}`);
   try {
-    new File(uri).copy(target, { overwrite: true });
+    new File(source).copy(target, { overwrite: true });
     if (target.exists) return target.uri;
   } catch {
-    // keep original if copy fails (e.g. ph:// already resolved)
+    /* try legacy copy */
   }
-  return uri;
+  try {
+    await FileSystem.copyAsync({ from: source, to: target.uri });
+    return target.uri;
+  } catch {
+    return source;
+  }
 }

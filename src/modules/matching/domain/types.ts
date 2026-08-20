@@ -9,6 +9,8 @@ export type ServiceProvider = {
   id: string;
   name: string;
   handle: string;
+  /** Real account id when supply card came from a synced post. */
+  userId?: string;
   avatarColor: string;
   skills: string[];
   categories: JobCategory[];

@@ -11,16 +11,6 @@ import { CHAT_IMAGE_MAX_BYTES, nextImageCompressStep } from '../domain/chat-medi
 
 const UPLOAD_MAX_BYTES = 12 * 1024 * 1024;
 
-/** Convert a Uint8Array to a Blob, copying into a fresh ArrayBuffer-backed
- *  Uint8Array so the generic satisfies the fetch BodyInit type. */
-function toBlob(bytes: Uint8Array): Blob {
-  const copy = new Uint8Array(bytes.byteLength);
-  copy.set(bytes);
-  return new Blob([copy]);
-}
-
-
-
 function authUploadHeaders(mimeType: string, filename: string) {
   const token = useAuthStore.getState().sessionToken;
   const headers: Record<string, string> = {
@@ -174,10 +164,8 @@ async function uploadViaPresign(
     const put = await fetch(data.uploadUrl, {
       method: 'PUT',
       headers: data.headers ?? { 'Content-Type': mimeType },
-      body: toBlob(bytes),
+      body: bytes as BodyInit,
     });
-
-
     if (!put.ok) return null;
     return {
       url: data.publicUrl,
@@ -207,9 +195,8 @@ async function uploadViaApi(
   const res = await fetch(`${base}/api/v1/chat-domain/media`, {
     method: 'POST',
     headers: authUploadHeaders(mimeType, filename),
-    body: toBlob(bytes),
+    body: bytes as BodyInit,
   });
-
   const json = (await res.json().catch(() => null)) as
     | { data?: ChatSendAttachment; url?: string }
     | null;

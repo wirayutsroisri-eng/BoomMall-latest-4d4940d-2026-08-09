@@ -30,12 +30,16 @@ export async function hydrateOwnProfileFromServer() {
   const remote = await apiGetProfile(user.id);
   if (!remote) return;
   const local = useLoyaltyStore.getState().profile;
+  const remoteAvatar = asHttp(remote.avatarUrl);
+  const remoteCover = asHttp(remote.coverUrl);
   useLoyaltyStore.getState().updateProfile({
     displayName: remote.displayName?.trim() || local.displayName,
     handle: remote.handle?.trim() || local.handle,
     bio: remote.bio ?? local.bio,
-    avatarUri: asHttp(remote.avatarUrl) || local.avatarUri,
-    coverUri: asHttp(remote.coverUrl) || local.coverUri,
+    ...(remoteAvatar || local.avatarUri
+      ? { avatarUri: remoteAvatar || local.avatarUri }
+      : {}),
+    ...(remoteCover || local.coverUri ? { coverUri: remoteCover || local.coverUri } : {}),
   });
 }
 

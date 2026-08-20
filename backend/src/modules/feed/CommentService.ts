@@ -8,6 +8,8 @@ export type CommentDto = {
   id: string;
   postId: string;
   authorId: string;
+  authorName?: string | null;
+  authorHandle?: string | null;
   parentId: string | null;
   body: string;
   likeCount: number;
@@ -48,11 +50,23 @@ export async function listComments(postId: string, limit = 80): Promise<CommentD
       orderBy: { createdAt: 'asc' },
       take: Math.min(limit, 200),
     });
-    return rows.map(mapComment);
+    if (rows.length > 0) {
+      const authorIds = [...new Set(rows.map((row) => row.authorId))];
+      const profiles =
+        authorIds.length > 0
+          ? await prisma.userProfile.findMany({
+              where: { userId: { in: authorIds } },
+              select: { userId: true, displayName: true, handle: true },
+            })
+          : [];
+      const profileByUserId = new Map(profiles.map((p) => [p.userId, p]));
+      return rows.map((row) => mapComment(row, profileByUserId.get(row.authorId)));
+    }
   }
   return readStore()
     .comments.filter((c) => c.postId === postId)
-    .slice(0, limit);
+    .slice(0, limit)
+    .map((row) => mapComment(row));
 }
 
 export async function addComment(input: {
@@ -132,22 +146,27 @@ export async function toggleCommentLike(commentId: string, liked: boolean) {
   return store.comments[idx];
 }
 
-function mapComment(row: {
-  id: string;
-  postId: string;
-  authorId: string;
-  parentId: string | null;
-  body: string;
-  likeCount: number;
-  createdAt: Date;
-}): CommentDto {
+function mapComment(
+  row: {
+    id: string;
+    postId: string;
+    authorId: string;
+    parentId: string | null;
+    body: string;
+    likeCount: number;
+    createdAt: Date | string;
+  },
+  profile?: { displayName: string | null; handle: string | null } | null,
+): CommentDto {
   return {
     id: row.id,
     postId: row.postId,
     authorId: row.authorId,
+    authorName: profile?.displayName ?? null,
+    authorHandle: profile?.handle ?? null,
     parentId: row.parentId,
     body: row.body,
     likeCount: row.likeCount,
-    createdAt: row.createdAt.toISOString(),
+    createdAt: typeof row.createdAt === 'string' ? row.createdAt : row.createdAt.toISOString(),
   };
 }

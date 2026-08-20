@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -7,7 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,17 +20,18 @@ import {
   DEFAULT_OVERLAY_TRANSFORM,
   type OverlayTransform,
 } from '@/modules/create/domain/overlay';
+import { computeContainMediaSize } from '@/modules/create/domain/cameraPreviewLayout';
 import { persistCreateMedia } from '@/modules/create/data/persistCreateMedia';
 import { useCreateDraftStore } from '@/modules/create/state/create-draft-store';
 import { openListenScreenNow } from '@/shared/navigation/safeNavigate';
+import { useMusicPlayerStore } from '@/modules/music/state/music-player-store';
 import { ProductVideoThumb } from '@/modules/store/ui/sell/ProductVideoThumb';
-import { LockedOverlayText } from './LockedOverlayText';
 import { LockedStickerOverlay } from './LockedStickerOverlay';
 import { MovableStickerLayer } from './MovableStickerLayer';
-import { MovableTextLayer } from './MovableTextLayer';
+import { InteractiveTextOverlay } from './InteractiveTextOverlay';
+import type { OverlayFontKey } from '@/modules/create/domain/overlayText';
 
 type FilterKey = 'none' | 'vivid' | 'warm' | 'cool' | 'mono' | 'fade';
-type FontKey = 'classic' | 'kanit' | 'mitr' | 'halloween';
 
 const FILTERS: Array<{ key: FilterKey; label: string; overlay: string | null }> = [
   { key: 'none', label: 'ต้นฉบับ', overlay: null },
@@ -39,13 +40,6 @@ const FILTERS: Array<{ key: FilterKey; label: string; overlay: string | null }> 
   { key: 'cool', label: 'เย็น', overlay: 'rgba(60,140,255,0.18)' },
   { key: 'mono', label: 'ขาวดำ', overlay: 'rgba(0,0,0,0.4)' },
   { key: 'fade', label: 'ฟุ้ง', overlay: 'rgba(255,255,255,0.2)' },
-];
-
-const FONTS: Array<{ key: FontKey; label: string }> = [
-  { key: 'halloween', label: 'ฮาโลวีน' },
-  { key: 'classic', label: 'Classic' },
-  { key: 'kanit', label: 'Kanit' },
-  { key: 'mitr', label: 'Mitr' },
 ];
 
 const EDIT_TOOLS: Array<{
@@ -81,7 +75,11 @@ export function ContentPreviewScreen() {
     type?: string;
     textMode?: string;
     filter?: string;
+    edit?: string;
   }>();
+
+  const draftSnapshot = useCreateDraftStore.getState();
+  const isEditing = params.edit === '1' || Boolean(draftSnapshot.editFeedId);
 
   const draftUri = useCreateDraftStore((s) => s.uri);
   const draftType = useCreateDraftStore((s) => s.type);
@@ -95,19 +93,21 @@ export function ContentPreviewScreen() {
     params.textMode === '1' ? 'text' : null,
   );
   const [filter, setFilter] = useState<FilterKey>(() => {
-    const raw = params.filter;
+    const raw = params.filter ?? draftSnapshot.filter;
     if (raw === 'vivid' || raw === 'warm' || raw === 'cool' || raw === 'mono' || raw === 'fade') {
       return raw;
     }
     return 'none';
   });
-  const [overlayText, setOverlayText] = useState(params.textMode === '1' ? '' : '');
-  const [overlayTransform, setOverlayTransform] = useState<OverlayTransform>({
-    ...DEFAULT_OVERLAY_TRANSFORM,
-  });
-  const [font, setFont] = useState<FontKey>('classic');
-  const [textColor, setTextColor] = useState('#FFFFFF');
-  const [sticker, setSticker] = useState<string | null>(null);
+  const [overlayText, setOverlayText] = useState(
+    () => draftSnapshot.overlayText || (params.textMode === '1' ? '' : ''),
+  );
+  const [overlayTransform, setOverlayTransform] = useState<OverlayTransform>(() => ({
+    ...(draftSnapshot.overlayTransform ?? DEFAULT_OVERLAY_TRANSFORM),
+  }));
+  const [font, setFont] = useState<OverlayFontKey>('classic');
+  const [textColor, setTextColor] = useState(() => draftSnapshot.overlayColor || '#FFFFFF');
+  const [sticker, setSticker] = useState<string | null>(draftSnapshot.sticker || null);
   const [stickerTransform, setStickerTransform] = useState<OverlayTransform>({
     ...DEFAULT_STICKER_TRANSFORM,
   });
@@ -116,14 +116,62 @@ export function ContentPreviewScreen() {
   /** แตะพื้นว่างแล้ว → บีบขยายได้ทั้งจอ */
   const [stickerResizeArmed, setStickerResizeArmed] = useState(false);
   const draftMusic = useCreateDraftStore((s) => s.music);
-  const [musicTitle, setMusicTitle] = useState(draftMusic || '');
+  const draftMusicArtist = useCreateDraftStore((s) => s.musicArtist);
+  const [musicTitle, setMusicTitle] = useState(() => draftSnapshot.music || draftMusic || '');
   const [textEditing, setTextEditing] = useState(params.textMode === '1');
   const [baking, setBaking] = useState(false);
   const canvasRef = useRef<View>(null);
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const [mediaPixelSize, setMediaPixelSize] = useState<{ width: number; height: number } | null>(
+    null,
+  );
+
+  useEffect(() => {
+    if (!uri || mediaType !== 'image') {
+      setMediaPixelSize(null);
+      return;
+    }
+    let alive = true;
+    Image.getSize(
+      uri,
+      (width, height) => {
+        if (alive) setMediaPixelSize({ width, height });
+      },
+      () => {
+        if (alive) setMediaPixelSize(null);
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [mediaType, uri]);
+
+  const canvasLayout = useMemo(() => {
+    if (mediaType === 'video') {
+      return computeContainMediaSize(screenWidth, screenHeight, 9, 16);
+    }
+    if (!mediaPixelSize) {
+      return { width: screenWidth, height: screenHeight };
+    }
+    return computeContainMediaSize(
+      screenWidth,
+      screenHeight,
+      mediaPixelSize.width,
+      mediaPixelSize.height,
+    );
+  }, [mediaPixelSize, mediaType, screenHeight, screenWidth]);
 
   React.useEffect(() => {
     if (draftMusic) setMusicTitle(draftMusic);
   }, [draftMusic]);
+
+  React.useEffect(() => {
+    if (!draftMusic.trim()) return;
+    void useMusicPlayerStore.getState().playFromFeedMusic(
+      draftMusic,
+      draftMusicArtist || undefined,
+    );
+  }, [draftMusic, draftMusicArtist]);
 
   const activeFilter = useMemo(
     () => FILTERS.find((f) => f.key === filter) ?? FILTERS[0],
@@ -172,6 +220,12 @@ export function ContentPreviewScreen() {
       return;
     }
 
+    const prevMediaUris = useCreateDraftStore.getState().mediaUris;
+    const nextMediaUris =
+      prevMediaUris.length > 0
+        ? prevMediaUris.map((u, index) => (index === 0 ? finalUri : u))
+        : [finalUri];
+
     setDraft({
       uri: finalUri,
       type: mediaType,
@@ -183,6 +237,7 @@ export function ContentPreviewScreen() {
       filter: baked ? 'none' : filter,
       sticker: baked ? '' : sticker ?? '',
       music: musicTitle.trim(),
+      mediaUris: nextMediaUris,
     });
     router.push({
       pathname: '/create-publish',
@@ -201,108 +256,22 @@ export function ContentPreviewScreen() {
     );
   }
 
-  /** Full-screen text editor (เสร็จสิ้น) */
-  if (textEditing) {
-    return (
-      <View style={styles.root}>
-        {uri ? (
-          <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-        ) : (
-          <View style={[StyleSheet.absoluteFill, styles.textCanvas]} />
-        )}
-        <View style={styles.dim} />
-
-        <View style={[styles.textTopBar, { paddingTop: insets.top + 8 }]}>
-          <View style={styles.textToolRow}>
-            {(['A', 'color', 'Aa', 'align', 'fx'] as const).map((k) => (
-              <Pressable
-                key={k}
-                style={styles.textToolBtn}
-                onPress={() => {
-                  if (k === 'color') {
-                    const palette = ['#FFFFFF', '#FE2C55', '#FF6B8A', '#25F4EE', '#F5A524'];
-                    setTextColor((c) => {
-                      const i = palette.indexOf(c);
-                      return palette[(i + 1) % palette.length];
-                    });
-                  }
-                }}
-              >
-                {k === 'color' ? (
-                  <View style={[styles.colorDot, { backgroundColor: textColor }]} />
-                ) : (
-                  <Text style={styles.textToolGlyph}>
-                    {k === 'align' ? '☰' : k === 'fx' ? 'A✦' : k}
-                  </Text>
-                )}
-              </Pressable>
-            ))}
-          </View>
-          <Pressable
-            onPress={() => {
-              setTextEditing(false);
-              setTool(null);
-              void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            }}
-          >
-            <Text style={styles.doneLink}>เสร็จสิ้น</Text>
-          </Pressable>
-        </View>
-
-        <TextInput
-          style={[
-            styles.centerTextInput,
-            {
-              color: textColor,
-              fontWeight: font === 'halloween' ? '400' : '900',
-              fontStyle: font === 'halloween' ? 'italic' : 'normal',
-            },
-          ]}
-          placeholder="พิมพ์ข้อความ"
-          placeholderTextColor="rgba(255,255,255,0.35)"
-          value={overlayText}
-          onChangeText={setOverlayText}
-          multiline
-          autoFocus
-          textAlign="center"
-        />
-
-        <Text style={styles.moveHint}>หลังเสร็จสิ้น — ลากย้าย · บีบขยาย · หมุน · แตะเพื่อแก้</Text>
-
-        <View style={[styles.fontBar, { bottom: Math.max(insets.bottom, 12) + 8 }]}>
-          <Text style={styles.fontBarTitle}>สไตล์</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            {FONTS.map((f) => (
-              <Pressable
-                key={f.key}
-                style={[styles.fontChip, font === f.key && styles.fontChipActive]}
-                onPress={() => setFont(f.key)}
-              >
-                <Text style={[styles.fontChipText, font === f.key && styles.fontChipTextActive]}>
-                  {f.label}
-                </Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </View>
-      </View>
-    );
-  }
-
   return (
     <View style={styles.root}>
-      {/* เฉพาะเลเยอร์สื่อ — จับภาพส่วนนี้ตอนกดถัดไป (ไม่รวม UI chrome) */}
-      <View ref={canvasRef} style={styles.canvas} collapsable={false}>
+      <View style={styles.mediaStage}>
+        {/* เฉพาะเลเยอร์สื่อ — จับภาพส่วนนี้ตอนกดถัดไป (ไม่รวม UI chrome) */}
+        <View ref={canvasRef} style={[styles.canvas, canvasLayout]} collapsable={false}>
         {mediaType === 'video' && uri ? (
           <ProductVideoThumb
             uri={uri}
             autoPlay
-            muted
+            muted={!!draftMusic.trim()}
             interactive={false}
+            contentFit="contain"
             style={StyleSheet.absoluteFill}
           />
         ) : uri ? (
-          <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="contain" />
         ) : (
           <View style={[StyleSheet.absoluteFill, styles.textCanvas]} />
         )}
@@ -313,27 +282,23 @@ export function ContentPreviewScreen() {
           />
         ) : null}
 
-        {overlayText.trim() ? (
-          baking ? (
-            <LockedOverlayText
-              text={overlayText}
-              color={textColor}
-              transform={overlayTransform}
-              italic={font === 'halloween'}
-            />
-          ) : (
-            <MovableTextLayer
-              text={overlayText}
-              color={textColor}
-              italic={font === 'halloween'}
-              initialTransform={overlayTransform}
-              onTransformChange={setOverlayTransform}
-              onEdit={() => {
-                setTextEditing(true);
-                setTool('text');
-              }}
-            />
-          )
+        {overlayText.trim() || textEditing ? (
+          <InteractiveTextOverlay
+            editing={textEditing}
+            locked={baking}
+            text={overlayText}
+            color={textColor}
+            fontKey={font}
+            transform={overlayTransform}
+            onTextChange={setOverlayText}
+            onColorChange={setTextColor}
+            onFontChange={setFont}
+            onTransformChange={setOverlayTransform}
+            onEditingChange={(next) => {
+              setTextEditing(next);
+              if (!next) setTool(null);
+            }}
+          />
         ) : null}
         {sticker ? (
           baking ? (
@@ -353,8 +318,10 @@ export function ContentPreviewScreen() {
             />
           )
         ) : null}
+        </View>
       </View>
 
+      {!textEditing ? (
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
         <Pressable hitSlop={10} onPress={() => router.back()} style={styles.iconBtn}>
           <Ionicons name="chevron-back" size={28} color="#fff" />
@@ -370,6 +337,7 @@ export function ContentPreviewScreen() {
         >
           <Ionicons name="musical-notes" size={13} color="#fff" />
           <Text style={styles.musicPillText} numberOfLines={1}>
+            {isEditing ? 'แก้ไขโพสต์ · ' : ''}
             {musicTitle || draftMusic || 'เพิ่มเสียง'}
           </Text>
         </Pressable>
@@ -378,7 +346,9 @@ export function ContentPreviewScreen() {
           <Ionicons name="share-outline" size={22} color="#fff" />
         </View>
       </View>
+      ) : null}
 
+      {!textEditing ? (
       <View style={[styles.rightRail, { top: insets.top + 70 }]}>
         {EDIT_TOOLS.map((t) => (
           <Pressable
@@ -422,8 +392,9 @@ export function ContentPreviewScreen() {
         ))}
         <Ionicons name="chevron-down" size={16} color="rgba(255,255,255,0.7)" />
       </View>
+      ) : null}
 
-      {tool === 'sticker' ? (
+      {!textEditing && tool === 'sticker' ? (
         <View style={styles.stickerPanel}>
           <Text style={styles.stickerHint}>
             เลือกไอคอน → แตะพื้นว่าง 1 ครั้ง → บีบสองนิ้วย่อ/ขยาย · แล้วกดถัดไป
@@ -494,7 +465,7 @@ export function ContentPreviewScreen() {
         </View>
       ) : null}
 
-      {tool === 'effects' ? (
+      {!textEditing && tool === 'effects' ? (
         <ScrollView
           horizontal
           style={styles.filterStrip}
@@ -505,7 +476,7 @@ export function ContentPreviewScreen() {
             <Pressable key={f.key} style={styles.filterItem} onPress={() => setFilter(f.key)}>
               <View style={[styles.filterSwatch, filter === f.key && styles.filterSwatchActive]}>
                 {uri ? (
-                  <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                  <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="contain" />
                 ) : (
                   <View style={[StyleSheet.absoluteFill, styles.textCanvas]} />
                 )}
@@ -519,6 +490,7 @@ export function ContentPreviewScreen() {
         </ScrollView>
       ) : null}
 
+      {!textEditing ? (
       <View style={[styles.bottomActions, { paddingBottom: Math.max(insets.bottom, 14) }]}>
         <Pressable
           style={styles.storyBtn}
@@ -548,14 +520,21 @@ export function ContentPreviewScreen() {
           )}
         </Pressable>
       </View>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000' },
-  canvas: {
+  mediaStage: {
     ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#000',
+  },
+  canvas: {
+    overflow: 'hidden',
     backgroundColor: '#000',
   },
   textCanvas: {
@@ -696,6 +675,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     flexDirection: 'row',
     gap: 10,
+    zIndex: 10,
   },
   storyBtn: {
     flex: 1,

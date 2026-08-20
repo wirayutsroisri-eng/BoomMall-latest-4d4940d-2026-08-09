@@ -1,4 +1,4 @@
-export type EditorTab = 'draw' | 'text' | 'background' | 'crop' | 'filter' | 'adjust';
+export type EditorTab = 'draw' | 'crop' | 'filter' | 'adjust';
 
 export type BrushKind = 'pen' | 'marker' | 'highlighter' | 'eraser';
 

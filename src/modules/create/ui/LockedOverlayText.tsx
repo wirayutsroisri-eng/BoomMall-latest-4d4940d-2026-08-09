@@ -1,24 +1,24 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
+import { StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import type { OverlayTransform } from '@/modules/create/domain/overlay';
+import type { OverlayFontKey } from '@/modules/create/domain/overlayText';
+import { OverlayTextLabel } from './OverlayTextLabel';
 
 type Props = {
   text: string;
   color: string;
   transform: OverlayTransform;
-  /** base font size at scale=1 — ใช้ค่าเล็กกว่าบน thumbnail */
+  fontKey?: OverlayFontKey;
   fontSize?: number;
   italic?: boolean;
 };
 
-/**
- * เรนเดอร์ข้อความที่ตำแหน่ง normalized เดียวกับตอนแต่ง
- * anchor จุด (x,y) = กลางข้อความ
- */
+/** Static overlay for view-shot bake — same normalized anchor as MovableTextLayer */
 export function LockedOverlayText({
   text,
   color,
   transform,
+  fontKey = 'classic',
   fontSize = 36,
   italic,
 }: Props) {
@@ -47,18 +47,13 @@ export function LockedOverlayText({
             },
           ]}
         >
-          <Text
-            style={[
-              styles.label,
-              {
-                color,
-                fontSize,
-                fontStyle: italic ? 'italic' : 'normal',
-              },
-            ]}
-          >
-            {text}
-          </Text>
+          <OverlayTextLabel
+            text={text}
+            color={color}
+            fontKey={fontKey}
+            italic={italic}
+            fontSize={fontSize}
+          />
         </View>
       ) : null}
     </View>
@@ -81,13 +76,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'visible',
-  },
-  label: {
-    width: 280,
-    fontWeight: '900',
-    textAlign: 'center',
-    textShadowColor: 'rgba(0,0,0,0.55)',
-    textShadowRadius: 8,
-    textShadowOffset: { width: 0, height: 2 },
   },
 });

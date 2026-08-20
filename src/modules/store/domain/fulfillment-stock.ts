@@ -3,7 +3,6 @@ import type { WarehouseId } from '@/modules/commerce/domain/types';
 import { linesOfOrder } from './pack-lines';
 import type { IncomingOrder } from './types';
 
-
 /** Commit reserved units after the seller marks packed. No-op if already deducted. */
 export function commitPackedOrdersLocally(orders: IncomingOrder[]) {
   const inv = useInventoryStore.getState();
@@ -15,7 +14,6 @@ export function commitPackedOrdersLocally(orders: IncomingOrder[]) {
       const row = inv.listStockRows(variantId).find((item) => item.warehouseId === warehouseId);
       if (!row || row.reserved < line.qty) continue;
       inv.commitSale(variantId, warehouseId as WarehouseId, line.qty, order.id);
-
     }
   }
 }

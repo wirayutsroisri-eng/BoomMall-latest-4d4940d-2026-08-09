@@ -5,9 +5,9 @@ import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
-import { useFeedStore } from '@/modules/feed/state/feed-store';
-import { useAuthStore } from '@/modules/auth/state/auth-store';
-import { apiUpsertProfile } from '@/modules/social/data/socialApi';
+// import { useFeedStore } from '@/modules/feed/state/feed-store'; // ไม่ใช้แล้ว
+// import { useAuthStore } from '@/modules/auth/state/auth-store'; // ไม่ใช้แล้ว
+// import { apiUpsertProfile } from '@/modules/social/data/socialApi'; // ไม่ใช้แล้ว
 import { FormTextInput } from '@/shared/components/FormTextInput';
 import { DragDownDismiss } from '@/shared/components/DragDownDismiss';
 import { colors } from '@/shared/theme/colors';
@@ -64,8 +64,10 @@ export function EditProfileFieldScreen() {
   const limit = PROFILE_FIELD_LIMITS[field];
 
   const profile = useLoyaltyStore((s) => s.profile);
-  const updateProfile = useLoyaltyStore((s) => s.updateProfile);
-  const renameOwnPosts = useFeedStore((s) => s.renameOwnPosts);
+  // ลบ updateProfile และ renameOwnPosts, useAuthStore, apiUpsertProfile ออกจากไฟล์นี้
+  // const updateProfile = useLoyaltyStore((s) => s.updateProfile);
+  // const renameOwnPosts = useFeedStore((s) => s.renameOwnPosts);
+  // const useAuthStore = useAuthStore((s) => s); // ไม่ได้ใช้ตรงๆ
 
   const initial = useMemo(() => {
     if (field === 'name') return profile.displayName;
@@ -96,26 +98,18 @@ export function EditProfileFieldScreen() {
   const save = () => {
     if (!canSave) return;
     const trimmed = value.trim();
-    if (field === 'name') {
-      updateProfile({ displayName: trimmed, displayNameChangedAt: new Date().toISOString() });
-      renameOwnPosts(trimmed);
-      useAuthStore.setState((s) => (s.user ? { user: { ...s.user, displayName: trimmed } } : s));
-      void apiUpsertProfile({ displayName: trimmed });
-    } else if (field === 'username') {
-      const handle = formatHandle(trimmed);
-      if (handle.length < 2) {
+
+    // สำหรับชื่อผู้ใช้งาน ตรวจสอบความยาวขั้นต่ำ
+    if (field === 'username') {
+      const formattedHandle = formatHandle(trimmed);
+      if (formattedHandle.length < 2) {
         Alert.alert('ชื่อผู้ใช้งานไม่ถูกต้อง', 'กรุณาใส่ตัวอักษรหรือตัวเลขอย่างน้อย 1 ตัว');
         return;
       }
-      updateProfile({ handle, handleChangedAt: new Date().toISOString() });
-      useAuthStore.setState((s) => (s.user ? { user: { ...s.user, handle } } : s));
-      void apiUpsertProfile({ handle });
-    } else if (field === 'bio') {
-      updateProfile({ bio: trimmed });
-      void apiUpsertProfile({ bio: trimmed });
-    } else {
-      updateProfile({ websiteUrl: normalizeWebsite(trimmed) });
     }
+
+    // ส่งค่ากลับไปยัง EditProfileScreen
+    router.setParams({ field, value: trimmed });
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     close();
   };

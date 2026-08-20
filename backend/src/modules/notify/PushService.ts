@@ -127,6 +127,6 @@ export function pushDomainStatus() {
   return {
     domain: 'push-notifications',
     provider: 'expo-push',
-    events: ['chat', 'comment', 'post_follow'],
+    events: ['chat', 'comment', 'post_follow', 'matching', 'seller'],
   };
 }

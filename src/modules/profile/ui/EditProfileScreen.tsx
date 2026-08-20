@@ -1,21 +1,32 @@
-import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
 import { Avatar } from '@/shared/components/Avatar';
 import { colors } from '@/shared/theme/colors';
-import { pickProfileAvatar } from './AvatarPhotoHost';
+import { pickProfileAvatar, pickProfileCover } from './AvatarPhotoHost';
+import { saveProfilePhoto } from '../data/syncOwnProfile';
+import { apiUpsertProfile } from '@/modules/social/data/socialApi';
+import { useAuthStore } from '@/modules/auth/state/auth-store';
+import { useFeedStore } from '@/modules/feed/state/feed-store';
 import {
+  cooldownUntil,
+  formatCooldownDate,
+  formatHandle,
+  normalizeWebsite,
   profilePublicLink,
   stripHandle,
   type ProfileEditField,
 } from '../domain/edit-profile';
+import { PROFILE_COVER_HEIGHT } from '../domain/profile-cover';
 
 const PAGE_BG = '#F2F2F7';
+const PINK = '#FE2C55';
 
 function openField(field: ProfileEditField) {
   void Haptics.selectionAsync();
@@ -25,12 +36,159 @@ function openField(field: ProfileEditField) {
 export function EditProfileScreen() {
   const insets = useSafeAreaInsets();
   const profile = useLoyaltyStore((s) => s.profile);
+  const updateProfile = useLoyaltyStore((s) => s.updateProfile);
+  const renameOwnPosts = useFeedStore((s) => s.renameOwnPosts);
+
+  // สถานะ Draft สำหรับรูปภาพ
+  const [avatarUriDraft, setAvatarUriDraft] = useState<string | null>(profile.avatarUri ?? null);
+  const [coverUriDraft, setCoverUriDraft] = useState<string | null>(profile.coverUri ?? null);
+
+  // สถานะ Draft สำหรับข้อมูลข้อความ
+  const [displayNameDraft, setDisplayNameDraft] = useState(profile.displayName);
+  const [handleDraft, setHandleDraft] = useState(stripHandle(profile.handle));
+  const [bioDraft, setBioDraft] = useState(profile.bio);
+  const [websiteUrlDraft, setWebsiteUrlDraft] = useState(profile.websiteUrl ?? '');
+
+  const [isSaving, setIsSaving] = useState(false);
+
+  // อัปเดต draft จาก useLoyaltyStore เมื่อมีการเปลี่ยนแปลง
+  useEffect(() => {
+    setAvatarUriDraft(profile.avatarUri ?? null);
+    setCoverUriDraft(profile.coverUri ?? null);
+    setDisplayNameDraft(profile.displayName);
+    setHandleDraft(stripHandle(profile.handle));
+    setBioDraft(profile.bio);
+    setWebsiteUrlDraft(profile.websiteUrl ?? '');
+  }, [profile]);
+
+  // รับค่าที่ส่งกลับมาจาก EditProfileFieldScreen
+  const params = useLocalSearchParams();
+  useFocusEffect(
+    React.useCallback(() => {
+      if (params.field && params.value) {
+        const field = params.field as ProfileEditField;
+        const value = params.value as string;
+        if (field === 'name') setDisplayNameDraft(value);
+        else if (field === 'username') setHandleDraft(value);
+        else if (field === 'bio') setBioDraft(value);
+        else if (field === 'link') setWebsiteUrlDraft(value);
+      }
+    }, [params])
+  );
+
   const handle = stripHandle(profile.handle);
   const publicLink = profilePublicLink(profile.handle);
 
   const copyLink = async () => {
     await Clipboard.setStringAsync(publicLink);
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  const handlePickAvatar = async () => {
+    const uri = await pickProfileAvatar();
+    if (uri) {
+      setAvatarUriDraft(uri);
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+  };
+
+  const handlePickCover = async () => {
+    const uri = await pickProfileCover();
+    if (uri) {
+      setCoverUriDraft(uri);
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+  };
+
+  // ตรวจสอบว่ามีการเปลี่ยนแปลงใดๆ หรือไม่
+  const isDirty =
+    avatarUriDraft !== profile.avatarUri ||
+    coverUriDraft !== profile.coverUri ||
+    displayNameDraft !== profile.displayName ||
+    handleDraft !== stripHandle(profile.handle) ||
+    bioDraft !== profile.bio ||
+    websiteUrlDraft !== (profile.websiteUrl ?? '');
+
+  const canSave = isDirty && !isSaving;
+
+  const saveAllProfileChanges = async () => {
+    if (!canSave) return;
+    setIsSaving(true);
+
+    try {
+      // บันทึกรูปโปรไฟล์ (Avatar)
+      if (avatarUriDraft && avatarUriDraft !== profile.avatarUri) {
+        await saveProfilePhoto('avatar', avatarUriDraft);
+      }
+      // บันทึกรูปภาพหน้าปก (Cover Photo)
+      if (coverUriDraft && coverUriDraft !== profile.coverUri) {
+        await saveProfilePhoto('cover', coverUriDraft);
+      }
+
+      // บันทึกข้อมูลข้อความ
+      const updates: Record<string, any> = {};
+      const localUpdates: Record<string, any> = {};
+
+      if (displayNameDraft !== profile.displayName) {
+        const lockedUntil = cooldownUntil(profile.displayNameChangedAt);
+        if (lockedUntil) {
+          Alert.alert(
+            'เปลี่ยนชื่อไม่ได้',
+            `คุณสามารถเปลี่ยนชื่อได้อีกครั้งในวันที่ ${formatCooldownDate(lockedUntil)}`
+          );
+          return;
+        }
+        updates.displayName = displayNameDraft;
+        localUpdates.displayName = displayNameDraft;
+        localUpdates.displayNameChangedAt = new Date().toISOString();
+        renameOwnPosts(displayNameDraft);
+        useAuthStore.setState((s) => (s.user ? { user: { ...s.user, displayName: displayNameDraft } } : s));
+      }
+
+      if (handleDraft !== stripHandle(profile.handle)) {
+        const lockedUntil = cooldownUntil(profile.handleChangedAt);
+        if (lockedUntil) {
+          Alert.alert(
+            'เปลี่ยนชื่อผู้ใช้งานไม่ได้',
+            `คุณสามารถเปลี่ยนชื่อผู้ใช้งานได้อีกครั้งในวันที่ ${formatCooldownDate(lockedUntil)}`
+          );
+          return;
+        }
+        const formattedHandle = formatHandle(handleDraft);
+        if (formattedHandle.length < 2) {
+          Alert.alert('ชื่อผู้ใช้งานไม่ถูกต้อง', 'กรุณาใส่ตัวอักษรหรือตัวเลขอย่างน้อย 1 ตัว');
+          return;
+        }
+        updates.handle = formattedHandle;
+        localUpdates.handle = formattedHandle;
+        localUpdates.handleChangedAt = new Date().toISOString();
+        useAuthStore.setState((s) => (s.user ? { user: { ...s.user, handle: formattedHandle } } : s));
+      }
+
+      if (bioDraft !== profile.bio) {
+        updates.bio = bioDraft;
+        localUpdates.bio = bioDraft;
+      }
+
+      if (websiteUrlDraft !== (profile.websiteUrl ?? '')) {
+        updates.websiteUrl = normalizeWebsite(websiteUrlDraft);
+        localUpdates.websiteUrl = normalizeWebsite(websiteUrlDraft);
+      }
+
+      if (Object.keys(updates).length > 0) {
+        await apiUpsertProfile(updates);
+        updateProfile(localUpdates); // อัปเดต zustand store
+      }
+
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      router.back();
+    } catch (error) {
+      console.error('Failed to save profile changes:', error);
+      Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถบันทึกการเปลี่ยนแปลงโปรไฟล์ได้');
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -44,42 +202,80 @@ export function EditProfileScreen() {
           <Ionicons name="chevron-back" size={26} color={colors.text.primary} />
         </Pressable>
         <Text style={styles.topTitle}>แก้ไขโปรไฟล์</Text>
-        <View style={styles.topSpacer} />
+        <Pressable
+          onPress={saveAllProfileChanges}
+          disabled={!canSave}
+          hitSlop={10}
+          accessibilityLabel="บันทึก"
+        >
+          <Text style={[styles.saveButton, !canSave && styles.saveButtonOff]}>บันทึก</Text>
+        </Pressable>
       </View>
 
       <ScrollView
         contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}
         showsVerticalScrollIndicator={false}
       >
-        <Pressable
-          style={styles.avatarBlock}
-          onPress={() => void pickProfileAvatar()}
-          accessibilityLabel="เปลี่ยนรูปโปรไฟล์"
-        >
-          <View>
-            <Avatar
-              uri={profile.avatarUri}
-              initial={profile.displayName.slice(0, 1)}
-              size={96}
-              radius={48}
-              borderWidth={0}
-            />
-            <View style={styles.camBadge}>
-              <Ionicons name="camera" size={16} color={colors.text.primary} />
-            </View>
-          </View>
-          <Text style={styles.changePhoto}>เปลี่ยนรูป</Text>
-        </Pressable>
+        <View style={styles.headerBlock}>
+          <Pressable
+            style={styles.coverBanner}
+            onPress={() => void handlePickCover()}
+            accessibilityLabel="เปลี่ยนรูปปก"
+            accessibilityHint="แตะที่รูปปกหรือไอคอนกล้องเพื่อเปลี่ยนรูปปก"
+          >
+            {coverUriDraft ? (
+              <Image source={{ uri: coverUriDraft }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+            ) : (
+              <LinearGradient
+                colors={[colors.brand.forest, colors.brand.primaryDark]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={StyleSheet.absoluteFill}
+              />
+            )}
+          </Pressable>
 
+          <Pressable
+            style={styles.coverCamBtn}
+            onPress={() => void handlePickCover()}
+            hitSlop={8}
+            accessibilityLabel="เปลี่ยนรูปปก"
+          >
+            <Ionicons name="camera" size={18} color={colors.text.primary} />
+          </Pressable>
+
+          <View style={styles.identityRow} pointerEvents="box-none">
+            <Pressable
+              style={styles.avatarHit}
+              onPress={() => void handlePickAvatar()}
+              accessibilityLabel="เปลี่ยนรูปโปรไฟล์"
+              accessibilityHint="แตะที่รูปโปรไฟล์หรือไอคอนกล้องเพื่อเปลี่ยนรูป"
+            >
+              <Avatar
+                uri={avatarUriDraft}
+                initial={displayNameDraft.slice(0, 1)}
+                size={108}
+                radius={54}
+                borderWidth={3}
+                borderColor="#fff"
+              />
+              <View style={styles.avatarCamBtn}>
+                <Ionicons name="camera" size={14} color={colors.text.primary} />
+              </View>
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={styles.formSection}>
         <View style={styles.card}>
           <Row
             label="ชื่อ"
-            value={profile.displayName}
+            value={displayNameDraft}
             onPress={() => openField('name')}
           />
           <Row
             label="ชื่อผู้ใช้งาน"
-            value={handle}
+            value={handleDraft}
             onPress={() => openField('username')}
           />
           <Pressable style={styles.row} onPress={() => void copyLink()}>
@@ -94,17 +290,18 @@ export function EditProfileScreen() {
         <View style={styles.card}>
           <Row
             label="ประวัติ"
-            value={profile.bio.trim() || 'เขียนคำอธิบายสั้น ๆ ว่าคุณเป็นใคร หรือบัญชีของคุณเกี่ยวข้องกับอะไร'}
-            placeholder={!profile.bio.trim()}
+            value={bioDraft.trim() || 'เขียนคำอธิบายสั้น ๆ ว่าคุณเป็นใคร หรือบัญชีของคุณเกี่ยวข้องกับอะไร'}
+            placeholder={!bioDraft.trim()}
             onPress={() => openField('bio')}
           />
           <Row
             label="ลิงก์"
-            value={profile.websiteUrl?.trim() || 'เพิ่มลิงก์'}
-            placeholder={!profile.websiteUrl?.trim()}
+            value={websiteUrlDraft.trim() || 'เพิ่มลิงก์'}
+            placeholder={!websiteUrlDraft.trim()}
             onPress={() => openField('link')}
             last
           />
+        </View>
         </View>
       </ScrollView>
     </View>
@@ -144,13 +341,14 @@ function Row({
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: PAGE_BG },
+  root: { flex: 1, backgroundColor: '#fff' },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 8,
     paddingBottom: 8,
-    backgroundColor: PAGE_BG,
+    backgroundColor: '#fff',
+    justifyContent: 'space-between',
   },
   topTitle: {
     flex: 1,
@@ -159,16 +357,55 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: colors.text.primary,
   },
-  topSpacer: { width: 26 },
-  avatarBlock: {
-    alignItems: 'center',
-    paddingTop: 18,
-    paddingBottom: 22,
+  saveButton: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: PINK,
+    paddingHorizontal: 8,
   },
-  camBadge: {
+  saveButtonOff: {
+    color: '#FFB3C2',
+  },
+  headerBlock: {
+    position: 'relative',
+    backgroundColor: '#fff',
+  },
+  coverBanner: {
+    width: '100%',
+    height: PROFILE_COVER_HEIGHT,
+    backgroundColor: colors.brand.forest,
+    overflow: 'hidden',
+  },
+  coverCamBtn: {
     position: 'absolute',
-    right: 0,
-    bottom: 0,
+    right: 16,
+    top: PROFILE_COVER_HEIGHT - 16 - 36,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,0,0,0.08)',
+    zIndex: 4,
+  },
+  identityRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    marginTop: -52,
+    paddingHorizontal: 16,
+    zIndex: 8,
+    elevation: 8,
+  },
+  avatarHit: {
+    width: 108,
+    height: 108,
+  },
+  avatarCamBtn: {
+    position: 'absolute',
+    right: 4,
+    bottom: 4,
     width: 28,
     height: 28,
     borderRadius: 14,
@@ -178,14 +415,13 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(0,0,0,0.08)',
   },
-  changePhoto: {
-    marginTop: 10,
-    color: '#5AC8FA',
-    fontSize: 15,
-    fontWeight: '700',
+  formSection: {
+    backgroundColor: PAGE_BG,
+    paddingTop: 14,
+    flex: 1,
   },
   sectionLabel: {
-    marginTop: 18,
+    marginTop: 4,
     marginBottom: 8,
     marginHorizontal: 20,
     fontSize: 13,

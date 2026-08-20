@@ -5,6 +5,7 @@ import {
   Text,
   useWindowDimensions,
   View,
+  Alert,
   type LayoutChangeEvent,
   type ViewToken,
 } from 'react-native';
@@ -27,6 +28,7 @@ import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
 import { FeedHeader } from './FeedHeader';
 import { FeedReelCard } from './FeedReelCard';
 import { FeedLongPressSheet } from './FeedLongPressSheet';
+import { beginEditPostFromFeedItem } from '@/modules/create/data/beginEditPostFromFeed';
 import { FeedShareSheet } from './FeedShareSheet';
 import { CommunityBoardList } from './CommunityBoardList';
 import { ProductBottomSheet } from './ProductBottomSheet';
@@ -65,6 +67,7 @@ export function HomeFeedScreen() {
   const setTab = useFeedStore((s) => s.setTab);
   const toggleLike = useFeedStore((s) => s.toggleLike);
   const toggleSave = useFeedStore((s) => s.toggleSave);
+  const deletePost = useFeedStore((s) => s.deletePost);
   const bumpShare = useFeedStore((s) => s.bumpShare);
   const activeProductId = useFeedStore((s) => s.activeProductId);
   const openProductSheet = useFeedStore((s) => s.openProductSheet);
@@ -84,10 +87,12 @@ export function HomeFeedScreen() {
   const hiddenContentIds = useModerationStore((s) => s.hiddenContentIds);
   const removedContentIds = useModerationStore((s) => s.removedContentIds);
   const hideContent = useModerationStore((s) => s.hideContent);
+  const removeContent = useModerationStore((s) => s.removeContent);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const authHydrated = useAuthStore((s) => s.hydrated);
   const chromeHidden = useFeedChromeStore((s) => s.chromeHidden);
   const autoAdvance = useFeedChromeStore((s) => s.autoAdvance);
+  const mediaZoomed = useFeedChromeStore((s) => s.mediaZoomed);
   const playbackRate = useFeedChromeStore((s) => s.playbackRate);
 
   /** กำลังดูคลิปในฟีด → heartbeat ออนไลน์ (ขอบเขียวโมเมนต์ของเรา) */
@@ -363,7 +368,7 @@ export function HomeFeedScreen() {
                     keyExtractor={(item) => `${laneTab}:${item.id}`}
                     renderItem={({ item }) => renderLaneItem(laneTab, item)}
                     pagingEnabled
-                    scrollEnabled={laneTab === tab}
+                    scrollEnabled={laneTab === tab && !mediaZoomed}
                     decelerationRate="fast"
                     showsVerticalScrollIndicator={false}
                     snapToInterval={viewportHeight}
@@ -388,7 +393,7 @@ export function HomeFeedScreen() {
           })}
         </Animated.View>
 
-        {!chromeHidden || onBoard ? (
+        {(!chromeHidden || onBoard) ? (
           <FeedHeader
             tab={tab}
             onChangeTab={(next) => {
@@ -424,9 +429,34 @@ export function HomeFeedScreen() {
       <FeedLongPressSheet
         visible={Boolean(menuItem)}
         item={menuItem}
+        isOwnPost={Boolean(menuItem?.isUserPost)}
         canReport={Boolean(menuItem) && !menuItem?.isUserPost}
         saved={Boolean(menuItem?.saved)}
         onClose={() => setMenuItem(null)}
+        onEditPost={() => {
+          const target = menuItem;
+          setMenuItem(null);
+          if (!target?.isUserPost) return;
+          beginEditPostFromFeedItem(target);
+        }}
+        onDeletePost={() => {
+          const target = menuItem;
+          setMenuItem(null);
+          if (!target?.isUserPost) return;
+          Alert.alert('ลบโพสต์นี้?', 'โพสต์จะถูกเอาออกถาวร', [
+            { text: 'ยกเลิก', style: 'cancel' },
+            {
+              text: 'ลบ',
+              style: 'destructive',
+              onPress: () => {
+                if (deletePost(target.id)) {
+                  removeContent(target.id);
+                  if (target.legacyLocalId) removeContent(target.legacyLocalId);
+                }
+              },
+            },
+          ]);
+        }}
         onInterested={() => {
           if (!menuItem) return;
           void syncFeedInterested(menuItem.id);

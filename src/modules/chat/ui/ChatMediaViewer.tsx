@@ -867,14 +867,14 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   editorBusy: {
-    ...{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 },
+    ...StyleSheet.absoluteFill,
     zIndex: 40,
     backgroundColor: 'rgba(0,0,0,0.45)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   editorLayer: {
-    ...{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 },
+    ...StyleSheet.absoluteFill,
     zIndex: 50,
   },
   moreActionIcon: {

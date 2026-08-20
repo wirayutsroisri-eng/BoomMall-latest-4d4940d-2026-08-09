@@ -6,6 +6,7 @@ import {
   Text,
   useWindowDimensions,
   View,
+  Alert,
   type LayoutChangeEvent,
   type ViewToken,
 } from 'react-native';
@@ -22,6 +23,7 @@ import { useCallStore } from '@/modules/chat/state/call-store';
 import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
 import { FeedReelCard } from '@/modules/feed/ui/FeedReelCard';
 import { FeedLongPressSheet } from '@/modules/feed/ui/FeedLongPressSheet';
+import { beginEditPostFromFeedItem } from '@/modules/create/data/beginEditPostFromFeed';
 import { FeedShareSheet } from '@/modules/feed/ui/FeedShareSheet';
 import { ProductBottomSheet } from '@/modules/feed/ui/ProductBottomSheet';
 import { CommentsBottomSheet } from '@/modules/feed/ui/CommentsBottomSheet';
@@ -51,6 +53,7 @@ export function ProfileFeedScreen({ handle, startId }: Props) {
   const storeItems = useFeedStore((s) => s.items);
   const toggleLike = useFeedStore((s) => s.toggleLike);
   const toggleSave = useFeedStore((s) => s.toggleSave);
+  const deletePost = useFeedStore((s) => s.deletePost);
   const bumpShare = useFeedStore((s) => s.bumpShare);
   const openComments = useFeedStore((s) => s.openComments);
   const openProductSheet = useFeedStore((s) => s.openProductSheet);
@@ -60,6 +63,7 @@ export function ProfileFeedScreen({ handle, startId }: Props) {
   const setActive = useCallStore((s) => s.setActive);
   const profile = useLoyaltyStore((s) => s.profile);
   const hideContent = useModerationStore((s) => s.hideContent);
+  const removeContent = useModerationStore((s) => s.removeContent);
   const hiddenContentIds = useModerationStore((s) => s.hiddenContentIds);
   const removedContentIds = useModerationStore((s) => s.removedContentIds);
   const chromeHidden = useFeedChromeStore((s) => s.chromeHidden);
@@ -305,9 +309,35 @@ export function ProfileFeedScreen({ handle, startId }: Props) {
       <FeedLongPressSheet
         visible={Boolean(menuItem)}
         item={menuItem}
+        isOwnPost={Boolean(menuItem && isSelf)}
         canReport={Boolean(menuItem) && !isSelf}
         saved={Boolean(menuItem?.saved)}
         onClose={() => setMenuItem(null)}
+        onEditPost={() => {
+          const target = menuItem;
+          setMenuItem(null);
+          if (!target || !isSelf) return;
+          beginEditPostFromFeedItem(target);
+        }}
+        onDeletePost={() => {
+          const target = menuItem;
+          setMenuItem(null);
+          if (!target || !isSelf) return;
+          Alert.alert('ลบโพสต์นี้?', 'โพสต์จะถูกเอาออกถาวร', [
+            { text: 'ยกเลิก', style: 'cancel' },
+            {
+              text: 'ลบ',
+              style: 'destructive',
+              onPress: () => {
+                if (deletePost(target.id)) {
+                  removeContent(target.id);
+                  if (target.legacyLocalId) removeContent(target.legacyLocalId);
+                  if (router.canGoBack()) router.back();
+                }
+              },
+            },
+          ]);
+        }}
         onInterested={() => {
           if (!menuItem) return;
           void syncFeedInterested(menuItem.id);

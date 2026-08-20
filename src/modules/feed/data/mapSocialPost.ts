@@ -1,4 +1,6 @@
-import type { FeedItem } from '../domain/types';
+import type { FeedComment, FeedItem } from '../domain/types';
+import type { SocialCommentDto } from './feedEngageApi';
+import { inferBoardSide } from '@/modules/matching/domain/board-side';
 import { isDemoCatalogFeedItem, isLiveUgcFeedItem, mediaUriLooksLive } from '../domain/isLiveUgcFeedItem';
 
 export type SocialPostDto = {
@@ -77,11 +79,17 @@ export function socialPostToFeedItem(
     ? post.lane
     : 'foryou') as FeedItem['lane'];
   const tags = Array.isArray(post.tags) ? post.tags.map(String) : [];
+  const boardSide =
+    lane === 'board' || tags.includes('เว็บบอร์ด')
+      ? inferBoardSide(post.body || '', tags)
+      : undefined;
   return {
     id: post.id,
     author,
     authorHandle: handle.startsWith('@') ? handle : `@${handle}`,
+    authorId: post.authorId,
     lane,
+    boardSide,
     caption: post.body || 'โพสต์จาก BoomMall',
     location: post.locationLabel || 'จันทบุรี',
     gps:
@@ -146,4 +154,39 @@ export function mergeFeedItems(remote: FeedItem[], local: FeedItem[]): FeedItem[
     if (aUser !== bUser) return bUser - aUser;
     return b.id.localeCompare(a.id);
   });
+}
+
+function formatCommentTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 'เมื่อสักครู่';
+  const diffMs = Date.now() - d.getTime();
+  if (diffMs < 60_000) return 'เมื่อสักครู่';
+  if (diffMs < 3_600_000) return `${Math.max(1, Math.floor(diffMs / 60_000))} นาทีที่แล้ว`;
+  if (diffMs < 86_400_000) return `${Math.max(1, Math.floor(diffMs / 3_600_000))} ชม.ที่แล้ว`;
+  return d.toLocaleDateString('th-TH');
+}
+
+export function socialCommentToFeedComment(
+  dto: SocialCommentDto,
+  feedId: string,
+  opts?: { myUserId?: string; myDisplayName?: string },
+): FeedComment {
+  const mine = Boolean(opts?.myUserId && dto.authorId === opts.myUserId);
+  const handle = (dto.authorHandle || dto.authorId || 'user').replace(/^@/, '');
+  const author =
+    (mine && opts?.myDisplayName?.trim()) ||
+    dto.authorName?.trim() ||
+    handle ||
+    'ผู้ใช้';
+  return {
+    id: dto.id,
+    feedId,
+    author,
+    authorInitial: author.slice(0, 1) || '?',
+    authorId: dto.authorId,
+    text: dto.body,
+    likes: dto.likeCount ?? 0,
+    createdAt: formatCommentTime(dto.createdAt),
+    parentId: dto.parentId ?? undefined,
+  };
 }

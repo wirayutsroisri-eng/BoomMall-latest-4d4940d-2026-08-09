@@ -2,17 +2,16 @@ import { useChatStore } from '@/modules/chat/state/chat-store';
 import type { JobMatchCard } from '@/modules/chat/domain/types';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
 import type { BoardSide } from '@/modules/feed/domain/types';
-import { MOCK_PROVIDERS } from '../data/mockProviders';
+import { notifyMatchedProviders } from '../data/matchingNotifyApi';
 import { extractJobKeywords } from './extract-keywords';
 import { CHANTHABURI } from './geo';
 import { matchProviders } from './match-providers';
-import { mergeProviders, supplyPostsToProviders } from './match-supply';
+import { supplyPostsToProviders } from './match-supply';
 import {
   formatSearchRadiusLabel,
   resolveSearchRadiusKm,
   type SearchRadiusOption,
 } from './search-radius';
-import { useMatchingNotifyStore } from '../state/matching-notify-store';
 import type { GeoPoint, MatchingResult } from './types';
 
 export type RunPostMatchingInput = {
@@ -45,7 +44,7 @@ const MISS_COMMENT =
 
 /**
  * Community Board Smart Matching orchestrator (demand → supply cross-tab).
- * Keyword extract → GPS radius match (Chanthaburi base) → bot comment + DMs + notify stub.
+ * Keyword extract → GPS radius match → bot comment + DMs + server push to providers.
  */
 export function runPostMatching(input: RunPostMatchingInput): MatchingResult | null {
   const side = input.boardSide ?? 'demand';
@@ -59,10 +58,9 @@ export function runPostMatching(input: RunPostMatchingInput): MatchingResult | n
   const searchRadiusKm = resolveSearchRadiusKm(input.searchRadius);
   const authorKey = input.authorHandle.replace(/^@/, '').toLowerCase();
 
-  const boardSupply = supplyPostsToProviders(useFeedStore.getState().items).filter(
+  const providers = supplyPostsToProviders(useFeedStore.getState().items).filter(
     (p) => p.handle.replace(/^@/, '').toLowerCase() !== authorKey,
   );
-  const providers = mergeProviders(MOCK_PROVIDERS, boardSupply);
   const matched = matchProviders(postGps, extracted, providers, searchRadiusKm);
   const minDistanceKm =
     matched.length > 0 ? Math.min(...matched.map((m) => m.distanceKm)) : null;
@@ -77,7 +75,6 @@ export function runPostMatching(input: RunPostMatchingInput): MatchingResult | n
 
   const feed = useFeedStore.getState();
   const chat = useChatStore.getState();
-  const notify = useMatchingNotifyStore.getState();
 
   if (matched.length === 0) {
     feed.addComment(input.feedId, MISS_COMMENT, BOT_NAME, BOT_INITIAL);
@@ -111,14 +108,15 @@ export function runPostMatching(input: RunPostMatchingInput): MatchingResult | n
 
     chat.sendJobMatchCard(conversationId, jobMatch);
 
-    notify.push(
-      {
+    if (provider.userId) {
+      void notifyMatchedProviders({
+        userIds: [provider.userId],
         title: `⚡ มีงานใหม่ใกล้คุณ! (${formatKm(distanceKm)} กม.)`,
         body: NOTIFY_BODY,
+        feedId: input.feedId,
         conversationId,
-      },
-      { showBanner: item === matched[0] },
-    );
+      }).catch(() => undefined);
+    }
   }
 
   return result;

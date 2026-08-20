@@ -25,6 +25,7 @@ import { useOrdersStore } from '@/modules/store/state/orders-store';
 import { countAwaitingShipment } from '@/modules/store/domain/seller-ops';
 import { confirmDeleteAccount } from '@/modules/account/services/deleteAccountFlow';
 import { openLegalDocument } from '@/shared/legal/openLegal';
+import { profileType } from './profileTypography';
 
 function openOwnerFeed(handle: string, item: FeedItem) {
   router.push({
@@ -262,10 +263,12 @@ export function ProfileScreen() {
       </View>
 
       <View style={styles.infoBlock}>
-        <View style={styles.nameRow}>
-          <Text style={styles.displayName} numberOfLines={1}>
-            {profile.displayName}
-          </Text>
+        <View style={styles.nameWrap}>
+          <View style={styles.nameAnchor}>
+            <Text style={styles.displayName} numberOfLines={1}>
+              {profile.displayName}
+            </Text>
+          </View>
           <Pressable
             style={styles.pencilBtn}
             onPress={openEditProfile}
@@ -333,6 +336,7 @@ export function ProfileScreen() {
       {tab === 'videos' ? (
         <ContentGrid
           mode="content"
+          tone="bright"
           items={myContent}
           pinnedCount={0}
           emptyIcon="videocam-outline"
@@ -348,6 +352,7 @@ export function ProfileScreen() {
       {tab === 'saved' ? (
         <ContentGrid
           mode="content"
+          tone="bright"
           items={savedItems}
           emptyIcon="bookmark-outline"
           emptyText="แตะปุ่มบันทึกในคลิปที่อยากดูทีหลัง แล้วคอนเทนต์จะมาโชว์ตรงนี้"
@@ -360,6 +365,7 @@ export function ProfileScreen() {
       {tab === 'liked' ? (
         <ContentGrid
           mode="content"
+          tone="bright"
           items={likedItems}
           emptyIcon="heart-outline"
           emptyText="กดหัวใจคลิปที่ชอบแล้วจะมาโชว์ตรงนี้"
@@ -394,7 +400,7 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 12,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    backgroundColor: 'rgba(0,0,0,0.22)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -440,31 +446,29 @@ const styles = StyleSheet.create({
     gap: 1,
   },
   statValue: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: colors.text.primary,
-    letterSpacing: -0.3,
+    ...profileType.statValue,
   },
   statLabel: {
-    fontSize: 10,
-    color: colors.text.muted,
-    fontWeight: '400',
+    ...profileType.statLabel,
   },
   infoBlock: {
     paddingHorizontal: 16,
     paddingTop: 12,
   },
-  nameRow: {
+  nameWrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    alignSelf: 'flex-start',
+    gap: 6,
+  },
+  nameAnchor: {
+    width: 108,
+    alignItems: 'center',
   },
   displayName: {
-    flexShrink: 1,
-    fontSize: 22,
-    fontWeight: '800',
-    color: colors.text.primary,
-    letterSpacing: -0.2,
+    width: '100%',
+    textAlign: 'center',
+    ...profileType.displayName,
   },
   pencilBtn: {
     width: 28,
@@ -482,30 +486,21 @@ const styles = StyleSheet.create({
   },
   idText: {
     flexShrink: 1,
-    fontSize: 12,
-    fontWeight: '400',
-    color: colors.text.muted,
+    ...profileType.handle,
   },
   bioText: {
     marginTop: 8,
-    color: colors.text.primary,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: '400',
+    ...profileType.bio,
   },
   addBioBtn: {
     alignSelf: 'flex-start',
     marginTop: 8,
   },
   addBioText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.text.secondary,
+    ...profileType.addBio,
   },
   categoryText: {
-    fontSize: 11,
-    color: colors.text.muted,
-    fontWeight: '400',
+    ...profileType.category,
     marginTop: 6,
   },
   tabBar: {

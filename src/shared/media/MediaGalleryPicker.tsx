@@ -20,6 +20,16 @@ import * as MediaLibrary from 'expo-media-library/legacy';
 import { DragDownDismiss } from '@/shared/components/DragDownDismiss';
 import { colors } from '@/shared/theme/colors';
 import { GalleryPhotoEditor, type GalleryEditTool } from '@/shared/media/GalleryPhotoEditor';
+import {
+  cacheResolvedUri,
+  isDirectMediaUri,
+  isVideoAsset,
+  isVideoThumbnailsNativeAvailable,
+  resolveDisplayUri,
+  resolveSendUri,
+  resolveVideoThumbnailUri,
+  warmMediaUriCache,
+} from '@/shared/media/resolveMediaLibraryUri';
 
 export type GalleryMediaKind = 'photo' | 'video';
 
@@ -46,6 +56,8 @@ type Props = {
   allowModeSwitch?: boolean;
   title?: string;
   sendLabel?: string;
+  /** Full-screen route (`/media-gallery`) — skip RN Modal wrapper */
+  embedded?: boolean;
 };
 
 const COLS = 4;
@@ -55,110 +67,6 @@ const SCREEN_H = Dimensions.get('window').height;
 const TILE = (SCREEN_W - GAP * (COLS - 1)) / COLS;
 const PAGE = 80;
 const BAR_H = 56;
-const RESOLVE_TIMEOUT_MS = 4500;
-
-/** RN Image cannot render iOS `ph://` — cache file:// localUris for thumbs. */
-const displayUriCache = new Map<string, string>();
-
-function isDirectImageUri(uri?: string | null) {
-  if (!uri) return false;
-  return (
-    uri.startsWith('file://') ||
-    uri.startsWith('http://') ||
-    uri.startsWith('https://') ||
-    uri.startsWith('content://') ||
-    uri.startsWith('data:')
-  );
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        resolve(null);
-      }
-    }, ms);
-    promise
-      .then((value) => {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          resolve(value);
-        }
-      })
-      .catch(() => {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          resolve(null);
-        }
-      });
-  });
-}
-
-async function resolveDisplayUri(asset: MediaLibrary.Asset): Promise<string | null> {
-  const cached = displayUriCache.get(asset.id);
-  if (cached) return cached;
-  if (isDirectImageUri(asset.uri)) {
-    displayUriCache.set(asset.id, asset.uri);
-    return asset.uri;
-  }
-  try {
-    const info = await withTimeout(
-      MediaLibrary.getAssetInfoAsync(asset, {
-        shouldDownloadFromNetwork: false,
-      }),
-      3000,
-    );
-    if (info) {
-      const next = info.localUri ?? (isDirectImageUri(info.uri) ? info.uri : null);
-      if (next) {
-        displayUriCache.set(asset.id, next);
-        return next;
-      }
-    }
-  } catch {
-    /* fall through */
-  }
-  return null;
-}
-
-/** Resolve a sendable URI without hanging on iCloud / ph:// forever. */
-async function resolveSendUri(asset: MediaLibrary.Asset): Promise<string> {
-  const cached = displayUriCache.get(asset.id);
-  if (cached && isDirectImageUri(cached)) return cached;
-  if (isDirectImageUri(asset.uri)) return asset.uri;
-
-  const localInfo = await withTimeout(
-    MediaLibrary.getAssetInfoAsync(asset, { shouldDownloadFromNetwork: false }),
-    2500,
-  );
-  if (localInfo) {
-    const local = localInfo.localUri ?? localInfo.uri;
-    if (local && isDirectImageUri(local)) {
-      displayUriCache.set(asset.id, local);
-      return local;
-    }
-    if (local && !local.startsWith('ph://')) return local;
-  }
-
-  const remoteInfo = await withTimeout(
-    MediaLibrary.getAssetInfoAsync(asset, { shouldDownloadFromNetwork: true }),
-    RESOLVE_TIMEOUT_MS,
-  );
-  if (remoteInfo) {
-    const next = remoteInfo.localUri ?? remoteInfo.uri;
-    if (next && isDirectImageUri(next)) {
-      displayUriCache.set(asset.id, next);
-      return next;
-    }
-    if (next) return next;
-  }
-
-  return cached ?? asset.uri;
-}
 
 function formatDuration(sec?: number) {
   if (!sec || !Number.isFinite(sec)) return '';
@@ -166,6 +74,119 @@ function formatDuration(sec?: number) {
   const m = Math.floor(s / 60);
   const r = s % 60;
   return `${m}:${r.toString().padStart(2, '0')}`;
+}
+
+function GalleryPhotoThumb({
+  asset,
+  style,
+  resizeMode = 'cover',
+  uriOverride,
+}: {
+  asset: MediaLibrary.Asset;
+  style?: object | object[];
+  resizeMode?: 'cover' | 'contain';
+  uriOverride?: string;
+}) {
+  const [uri, setUri] = useState<string | null>(() =>
+    uriOverride ?? (isDirectMediaUri(asset.uri) ? asset.uri : null),
+  );
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (uriOverride) {
+      setUri(uriOverride);
+      setFailed(false);
+      return;
+    }
+    setUri(isDirectMediaUri(asset.uri) ? asset.uri : null);
+    setFailed(false);
+  }, [asset.id, asset.uri, uriOverride]);
+
+  useEffect(() => {
+    if (uriOverride || uri) return;
+    let alive = true;
+    void resolveDisplayUri(asset).then((next) => {
+      if (alive && next) setUri(next);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [asset, uri, uriOverride]);
+
+  if (!uri || failed) {
+    return (
+      <View style={[style, styles.thumbPlaceholder]}>
+        <ActivityIndicator color="rgba(255,255,255,0.35)" />
+      </View>
+    );
+  }
+
+  return (
+    <Image
+      source={{ uri }}
+      style={style}
+      resizeMode={resizeMode}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+function GalleryVideoThumb({
+  asset,
+  style,
+  resizeMode = 'cover',
+}: {
+  asset: MediaLibrary.Asset;
+  style?: object | object[];
+  resizeMode?: 'cover' | 'contain';
+}) {
+  const nativeThumbs = isVideoThumbnailsNativeAvailable();
+  const [uri, setUri] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!nativeThumbs) {
+      const direct = isDirectMediaUri(asset.uri) ? asset.uri : null;
+      if (direct) {
+        setUri(direct);
+        setLoading(false);
+        return;
+      }
+      void resolveDisplayUri(asset).then((next) => {
+        if (cancelled) return;
+        setUri(next);
+        setLoading(false);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void resolveVideoThumbnailUri(asset).then((next) => {
+      if (cancelled) return;
+      setUri(next);
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [asset, nativeThumbs]);
+
+  if (!uri) {
+    return (
+      <View style={[style, styles.thumbPlaceholder, styles.videoThumbPlaceholder]}>
+        {loading ? (
+          <ActivityIndicator color="rgba(255,255,255,0.85)" size="small" />
+        ) : (
+          <Ionicons name="videocam" size={22} color="rgba(255,255,255,0.55)" />
+        )}
+      </View>
+    );
+  }
+
+  return <Image source={{ uri }} style={style} resizeMode={resizeMode} />;
 }
 
 function GalleryThumb({
@@ -179,41 +200,17 @@ function GalleryThumb({
   resizeMode?: 'cover' | 'contain';
   uriOverride?: string;
 }) {
-  const [uri, setUri] = useState<string | null>(
-    () =>
-      uriOverride ??
-      displayUriCache.get(asset.id) ??
-      (isDirectImageUri(asset.uri) ? asset.uri : null),
-  );
-
-  useEffect(() => {
-    if (uriOverride) {
-      setUri(uriOverride);
-      return;
-    }
-    setUri(displayUriCache.get(asset.id) ?? (isDirectImageUri(asset.uri) ? asset.uri : null));
-  }, [asset.id, asset.uri, uriOverride]);
-
-  useEffect(() => {
-    let alive = true;
-    if (uriOverride || uri) return;
-    void resolveDisplayUri(asset).then((next) => {
-      if (alive && next) setUri(next);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [asset, uri, uriOverride]);
-
-  if (!uri) {
-    return (
-      <View style={[style, styles.thumbPlaceholder]}>
-        <ActivityIndicator color="rgba(255,255,255,0.35)" />
-      </View>
-    );
+  if (isVideoAsset(asset)) {
+    return <GalleryVideoThumb asset={asset} style={style} resizeMode={resizeMode} />;
   }
-
-  return <Image source={{ uri }} style={style} resizeMode={resizeMode} />;
+  return (
+    <GalleryPhotoThumb
+      asset={asset}
+      style={style}
+      resizeMode={resizeMode}
+      uriOverride={uriOverride}
+    />
+  );
 }
 
 /**
@@ -232,6 +229,7 @@ export function MediaGalleryPicker({
   allowModeSwitch = true,
   title = 'ล่าสุด',
   sendLabel = 'ส่ง',
+  embedded = false,
 }: Props) {
   const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<GalleryMode>(initialMode);
@@ -283,8 +281,21 @@ export function MediaGalleryPicker({
     setEditor(null);
   }, [initialMode, title]);
 
-  const mediaTypeFilter =
-    mode === 'photo' ? MediaLibrary.MediaType.photo : MediaLibrary.MediaType.video;
+  const mediaTypeFilter = allowModeSwitch
+    ? [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video]
+    : mode === 'photo'
+      ? MediaLibrary.MediaType.photo
+      : MediaLibrary.MediaType.video;
+
+  const visibleAssets = useMemo(() => {
+    if (!allowModeSwitch) return assets;
+    const wantVideo = mode === 'video';
+    return assets.filter((asset) =>
+      wantVideo
+        ? asset.mediaType === MediaLibrary.MediaType.video
+        : asset.mediaType === MediaLibrary.MediaType.photo,
+    );
+  }, [allowModeSwitch, assets, mode]);
 
   const fetchPage = useCallback(
     async (reset: boolean, cursor?: string) => {
@@ -370,8 +381,7 @@ export function MediaGalleryPicker({
         setAssets(page.assets);
         setEndCursor(page.endCursor);
         setHasNext(page.hasNextPage);
-        // Warm thumbnails for the first page (iOS ph:// → file://)
-        void Promise.all(page.assets.slice(0, 40).map((a) => resolveDisplayUri(a)));
+        warmMediaUriCache(page.assets);
       } catch {
         if (alive) Alert.alert('โหลดคลังไม่ได้', 'ลองใหม่อีกครั้ง');
       } finally {
@@ -381,8 +391,8 @@ export function MediaGalleryPicker({
     return () => {
       alive = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when opened / mode / album changes
-  }, [visible, mode, albumId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when opened / album / filter changes
+  }, [visible, albumId, allowModeSwitch, initialMode]);
 
   const toggleSelect = (asset: MediaLibrary.Asset) => {
     void Haptics.selectionAsync();
@@ -398,10 +408,17 @@ export function MediaGalleryPicker({
   };
 
   const openBrowsePreview = (asset: MediaLibrary.Asset) => {
-    const index = assets.findIndex((a) => a.id === asset.id);
+    const list = allowModeSwitch
+      ? assets.filter((a) =>
+          mode === 'video'
+            ? a.mediaType === MediaLibrary.MediaType.video
+            : a.mediaType === MediaLibrary.MediaType.photo,
+        )
+      : assets;
+    const index = list.findIndex((a) => a.id === asset.id);
     if (index < 0) return;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setPreview({ list: assets, index });
+    setPreview({ list, index });
   };
 
   const openPreviewSelected = () => {
@@ -567,20 +584,16 @@ export function MediaGalleryPicker({
     );
   };
 
-  return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="overFullScreen"
-      transparent
-      onRequestClose={onClose}
-    >
+  if (!visible) return null;
+
+  const content = (
+    <>
       <DragDownDismiss
         onDismiss={onClose}
         enabled={!preview && !sending}
         scrollY={galleryScrollY}
-        showDim
-        rootInModal
+        showDim={!embedded}
+        rootInModal={!embedded}
         style={styles.root}
       >
         <View style={[styles.rootInner, { paddingTop: insets.top }]}>
@@ -631,6 +644,12 @@ export function MediaGalleryPicker({
               <Text style={[styles.modeText, mode === 'video' && styles.modeTextOn]}>วิดีโอ</Text>
             </Pressable>
           </View>
+        ) : null}
+
+        {selectionLimit > 1 ? (
+          <Text style={styles.selectionHint}>
+            เลือกได้มากถึง {selectionLimit} รายการ
+          </Text>
         ) : null}
 
         {albumMenuOpen ? (
@@ -686,13 +705,13 @@ export function MediaGalleryPicker({
           ) : (
             <FlatList
               style={styles.list}
-              data={assets}
+              data={visibleAssets}
               keyExtractor={(item) => item.id}
               numColumns={COLS}
               columnWrapperStyle={styles.row}
               contentContainerStyle={{
                 paddingBottom: 12,
-                flexGrow: assets.length ? undefined : 1,
+                flexGrow: visibleAssets.length ? undefined : 1,
               }}
               renderItem={renderTile}
               onEndReached={() => void loadPage(false)}
@@ -833,7 +852,7 @@ export function MediaGalleryPicker({
                 onDone={(uri) => {
                   const assetId = editor.assetId;
                   setEditedUris((prev) => ({ ...prev, [assetId]: uri }));
-                  displayUriCache.set(assetId, uri);
+                  cacheResolvedUri(assetId, uri);
                   setSelectedIds((prev) => {
                     if (prev.includes(assetId)) return prev;
                     if (selectionLimit === 1) return [assetId];
@@ -966,6 +985,21 @@ export function MediaGalleryPicker({
             )}
           </DragDownDismiss>
         </Modal>
+    </>
+  );
+
+  if (embedded) {
+    return <View style={styles.root}>{content}</View>;
+  }
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="fullScreen"
+      onRequestClose={onClose}
+    >
+      {content}
     </Modal>
   );
 }
@@ -1027,6 +1061,14 @@ const styles = StyleSheet.create({
   modeChipOn: { backgroundColor: colors.brand.primary },
   modeText: { fontSize: 13, fontWeight: '800', color: 'rgba(255,255,255,0.7)' },
   modeTextOn: { color: colors.brand.ink },
+  selectionHint: {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
   row: { gap: GAP, marginBottom: GAP },
   tile: { backgroundColor: '#222', overflow: 'hidden' },
   tileImage: { width: '100%', height: '100%' },
@@ -1035,6 +1077,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  videoThumbPlaceholder: { backgroundColor: '#1E1E1E' },
   selectedWash: {
     ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.28)',
@@ -1225,7 +1268,7 @@ const styles = StyleSheet.create({
   },
   filmBadgeText: { color: '#fff', fontSize: 9, fontWeight: '900' },
   editorLoading: {
-    ...{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 },
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.25)',

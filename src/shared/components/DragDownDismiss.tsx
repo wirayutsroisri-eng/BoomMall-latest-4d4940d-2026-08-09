@@ -154,11 +154,11 @@ export const dismissibleModalOptions = {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   dimHit: {
-    ...{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 },
+    ...StyleSheet.absoluteFill,
     zIndex: 0,
   },
   dim: {
-    ...{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 },
+    ...StyleSheet.absoluteFill,
     backgroundColor: '#000',
   },
   sheet: {

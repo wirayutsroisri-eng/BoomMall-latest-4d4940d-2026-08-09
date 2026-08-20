@@ -576,7 +576,6 @@ export function SellerFinanceScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.bankMiniTitle}>
                   โอนเข้า · {bank?.bankName} · {maskAccountNo(bank?.bankAccountNo ?? undefined)}
-
                 </Text>
                 <Text style={styles.bankMiniSub}>ชื่อบัญชี: {bank?.bankAccountName}</Text>
               </View>

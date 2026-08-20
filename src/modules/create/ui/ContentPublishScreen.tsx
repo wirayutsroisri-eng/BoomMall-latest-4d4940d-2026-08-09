@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   Image,
@@ -8,6 +8,7 @@ import {
   Text,
   TextInput,
   View,
+  type TextInputProps,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -32,6 +33,61 @@ const LOCATION_CHIPS = [
   'จันทบุรี',
   'เขาคิชฌกูฏ',
 ];
+
+const TITLE_INPUT_MIN = 44;
+const TITLE_INPUT_MAX = 120;
+const DESC_INPUT_MIN = 72;
+const DESC_INPUT_MAX = 220;
+
+function estimateInputHeight(
+  text: string,
+  lineHeight: number,
+  minHeight: number,
+  maxHeight: number,
+) {
+  if (!text.trim()) return minHeight;
+  let lines = 0;
+  for (const row of text.split('\n')) {
+    lines += Math.max(1, Math.ceil(row.length / 34));
+  }
+  return Math.min(maxHeight, Math.max(minHeight, lines * lineHeight + 8));
+}
+
+function GrowingTextInput({
+  minHeight,
+  maxHeight,
+  lineHeight = 20,
+  style,
+  value,
+  ...rest
+}: TextInputProps & { minHeight: number; maxHeight: number; lineHeight?: number }) {
+  const [height, setHeight] = useState(() =>
+    estimateInputHeight(String(value ?? ''), lineHeight, minHeight, maxHeight),
+  );
+
+  useEffect(() => {
+    setHeight(estimateInputHeight(String(value ?? ''), lineHeight, minHeight, maxHeight));
+  }, [lineHeight, maxHeight, minHeight, value]);
+
+  const onContentSizeChange = useCallback(
+    (event: { nativeEvent: { contentSize: { height: number } } }) => {
+      const next = Math.ceil(event.nativeEvent.contentSize.height);
+      setHeight(Math.min(maxHeight, Math.max(minHeight, next)));
+    },
+    [maxHeight, minHeight],
+  );
+
+  return (
+    <TextInput
+      {...rest}
+      value={value}
+      multiline
+      scrollEnabled={height >= maxHeight}
+      onContentSizeChange={onContentSizeChange}
+      style={[style, { height }]}
+    />
+  );
+}
 
 type RowProps = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -65,8 +121,12 @@ export function ContentPublishScreen() {
     type?: string;
   }>();
   const addPost = useFeedStore((s) => s.addPost);
+  const updatePost = useFeedStore((s) => s.updatePost);
   const draft = useCreateDraftStore();
   const clearDraft = useCreateDraftStore((s) => s.clear);
+  const setDraft = useCreateDraftStore((s) => s.setDraft);
+  const editFeedId = useCreateDraftStore((s) => s.editFeedId);
+  const isEditing = Boolean(editFeedId);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const authUser = useAuthStore((s) => s.user);
   const hideContent = useModerationStore((s) => s.hideContent);
@@ -79,14 +139,15 @@ export function ContentPublishScreen() {
   /** bake แล้ว = รูปมีข้อความในพิกเซลแล้ว — ไม่ซ้อน overlay อีก */
   const showLiveOverlay = !draft.baked && !!overlayText.trim();
 
-  const [mediaUris, setMediaUris] = useState<string[]>(
-    initialUri ? [initialUri] : [],
-  );
-  const [title, setTitle] = useState(overlayText || '');
-  const [description, setDescription] = useState('');
-  const [location, setLocation] = useState<string | null>(null);
+  const [mediaUris, setMediaUris] = useState<string[]>(() => {
+    if (draft.mediaUris.length) return draft.mediaUris;
+    return initialUri ? [initialUri] : [];
+  });
+  const [title, setTitle] = useState(draft.publishTitle || overlayText || '');
+  const [description, setDescription] = useState(draft.publishDescription || '');
+  const [location, setLocation] = useState<string | null>(draft.publishLocation);
   const [privacy] = useState('ทุกคนสามารถดูโพสต์นี้ได้');
-  const [linkLabel, setLinkLabel] = useState<string | null>(null);
+  const [linkLabel, setLinkLabel] = useState<string | null>(draft.publishLinkLabel);
 
   const coverUri = mediaUris[0] ?? null;
   const mediaType =
@@ -100,13 +161,16 @@ export function ContentPublishScreen() {
   };
 
   const addFromLibrary = async () => {
-    if (remainingSlots <= 0) return;
+    if (remainingSlots <= 0) {
+      Alert.alert('ครบแล้ว', 'เพิ่มได้สูงสุด 6 รูป');
+      return;
+    }
     try {
       const items = await pickDevicePhotos({
         selectionLimit: remainingSlots,
         videos: mediaType === 'video',
         videosOnly: mediaType === 'video',
-        title: 'เพิ่มสื่อ',
+        title: mediaType === 'video' ? 'เลือกวิดีโอ' : 'เพิ่มจากคลังภาพ',
         sendLabel: 'เพิ่ม',
       });
       if (!items.length) return;
@@ -119,7 +183,11 @@ export function ContentPublishScreen() {
           ),
         );
       }
-      setMediaUris((prev) => [...prev, ...next].slice(0, 6));
+      setMediaUris((prev) => {
+        const merged = [...prev, ...next].slice(0, 6);
+        setDraft({ mediaUris: merged, uri: merged[0] ?? null });
+        return merged;
+      });
       void Haptics.selectionAsync();
     } catch (e) {
       Alert.alert('เปิดแกลเลอรีไม่ได้', e instanceof Error ? e.message : 'ลองอีกครั้ง');
@@ -151,6 +219,52 @@ export function ContentPublishScreen() {
       musicTitle ? `🎵 ${musicTitle}` : null,
     ].filter(Boolean);
     const caption = captionParts.join('\n') || 'โพสต์ใหม่จาก BoomMall';
+
+    const postPayload = {
+      caption,
+      price: 0,
+      channel: 'C2C' as const,
+      imageUri: mediaType === 'image' ? coverUri : undefined,
+      imageUris: mediaType === 'image' ? mediaUris : undefined,
+      videoUri: mediaType === 'video' ? coverUri : undefined,
+      musicTitle: musicTitle || undefined,
+      intent: 'content' as const,
+      locationLabel: location ?? undefined,
+      ...(showLiveOverlay
+        ? {
+            overlayText,
+            overlayTextColor: overlayColor,
+            overlayTransform,
+          }
+        : {}),
+    };
+
+    if (isEditing && editFeedId) {
+      const ok = updatePost(editFeedId, postPayload);
+      if (!ok) {
+        Alert.alert('แก้ไขไม่ได้', 'ไม่พบโพสต์ของคุณ');
+        return;
+      }
+      void (async () => {
+        const result = await scanKeywordsOnServer({
+          contentId: editFeedId,
+          text: caption,
+          authorUserId: authUser?.id,
+          authorHandle: authUser?.handle,
+        });
+        if (result?.quarantined) {
+          hideContent(editFeedId);
+          Alert.alert(
+            'รอตรวจสอบ',
+            'โพสต์มีคำที่เสี่ยง — เข้าคิว Pending Review ก่อนขึ้นฟีดหลัก',
+          );
+        }
+      })();
+      clearDraft();
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      closeAll();
+      return;
+    }
 
     const postId = addPost({
       caption,
@@ -198,7 +312,7 @@ export function ContentPublishScreen() {
         <Pressable hitSlop={10} onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={28} color={colors.text.primary} />
         </Pressable>
-        <Text style={styles.headerTitle}>พรีวิว</Text>
+        <Text style={styles.headerTitle}>{isEditing ? 'แก้ไขโพสต์' : 'พรีวิว'}</Text>
         <View style={{ width: 28 }} />
       </View>
 
@@ -241,25 +355,46 @@ export function ContentPublishScreen() {
           ))}
           {mediaUris.length < 6 ? (
             <Pressable style={styles.addTile} onPress={() => void addFromLibrary()}>
-              <Ionicons name="add" size={32} color={colors.text.primary} />
+              <Ionicons name="images-outline" size={28} color={colors.text.primary} />
+              <Text style={styles.addTileText}>คลังภาพ</Text>
             </Pressable>
           ) : null}
         </ScrollView>
 
-        <TextInput
+        {remainingSlots > 0 ? (
+          <>
+            <OptionRow
+              icon="images-outline"
+              title={mediaType === 'video' ? 'เปลี่ยนวิดีโอจากคลัง' : 'เพิ่มจากคลังภาพ'}
+              subtitle={
+                mediaType === 'video'
+                  ? 'เลือกคลิปใหม่จากเครื่อง'
+                  : `เพิ่มได้อีก ${remainingSlots} รูป (สูงสุด 6)`
+              }
+              onPress={() => void addFromLibrary()}
+            />
+            <View style={styles.divider} />
+          </>
+        ) : null}
+
+        <GrowingTextInput
+          minHeight={TITLE_INPUT_MIN}
+          maxHeight={TITLE_INPUT_MAX}
           style={styles.titleInput}
           placeholder="เพิ่มชื่อที่โดนใจ"
           placeholderTextColor={colors.text.muted}
           value={title}
           onChangeText={setTitle}
         />
-        <TextInput
+        <GrowingTextInput
+          minHeight={DESC_INPUT_MIN}
+          maxHeight={DESC_INPUT_MAX}
+          lineHeight={20}
           style={styles.descInput}
           placeholder="การเขียนคำอธิบายแบบยาวสามารถช่วยเพิ่มยอดดูได้โดยเฉลี่ยถึง 3 เท่า"
           placeholderTextColor={colors.text.muted}
           value={description}
           onChangeText={setDescription}
-          multiline
         />
 
         <View style={styles.utilRow}>
@@ -292,6 +427,23 @@ export function ContentPublishScreen() {
         </View>
 
         <View style={styles.divider} />
+
+        {isEditing ? (
+          <>
+            <OptionRow
+              icon="color-wand-outline"
+              title="แต่งรูป / ข้อความ / ฟิลเตอร์"
+              subtitle="เปิดหน้าแต่งสื่อแบบ TikTok"
+              onPress={() =>
+                router.push({
+                  pathname: '/create-preview',
+                  params: { type: mediaType, edit: '1' },
+                })
+              }
+            />
+            <View style={styles.divider} />
+          </>
+        ) : null}
 
         <View style={styles.locationBlock}>
           <View style={styles.locationHeader}>
@@ -358,15 +510,19 @@ export function ContentPublishScreen() {
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-        <Pressable style={styles.draftBtn} onPress={() => publish(true)}>
-          <Ionicons name="folder-open-outline" size={18} color={colors.text.primary} />
-          <Text style={styles.draftText}>ร่าง</Text>
-        </Pressable>
+        {!isEditing ? (
+          <Pressable style={styles.draftBtn} onPress={() => publish(true)}>
+            <Ionicons name="folder-open-outline" size={18} color={colors.text.primary} />
+            <Text style={styles.draftText}>ร่าง</Text>
+          </Pressable>
+        ) : (
+          <View style={styles.draftBtn} />
+        )}
         <Pressable style={styles.postBtn} onPress={() => publish(false)}>
           <View style={styles.postIcon}>
             <Ionicons name="arrow-up" size={14} color="#fff" />
           </View>
-          <Text style={styles.postText}>โพสต์</Text>
+          <Text style={styles.postText}>{isEditing ? 'บันทึก' : 'โพสต์'}</Text>
         </Pressable>
       </View>
     </View>
@@ -426,6 +582,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#E8EAE9',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
+  },
+  addTileText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.text.secondary,
   },
   titleInput: {
     marginHorizontal: 16,
@@ -436,7 +598,6 @@ const styles = StyleSheet.create({
   },
   descInput: {
     marginHorizontal: 16,
-    minHeight: 72,
     fontSize: 14,
     fontWeight: '600',
     color: colors.text.primary,

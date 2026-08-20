@@ -119,6 +119,91 @@ export async function createSocialPost(input: {
   return dto;
 }
 
+export async function updateSocialPost(
+  postId: string,
+  authorId: string,
+  input: {
+    body?: string;
+    media?: unknown;
+    lat?: number;
+    lng?: number;
+    locationLabel?: string;
+    tags?: string[];
+    linkUrl?: string | null;
+    lane?: string;
+  },
+): Promise<SocialPostDto | null> {
+  const id = postId.trim();
+  if (!id || !authorId) throw new AppError('VALIDATION', 'postId and authorId required', 400);
+  const body = input.body?.trim();
+  if (body != null && !body) throw new AppError('VALIDATION', 'body required', 400);
+  if (body != null && body.length > 4000) throw new AppError('VALIDATION', 'body too long', 400);
+  const lane =
+    input.lane != null && ['nearby', 'following', 'foryou', 'board'].includes(String(input.lane))
+      ? String(input.lane)
+      : undefined;
+  const tags = input.tags != null ? input.tags.map(String).slice(0, 12) : undefined;
+
+  if (await prismaReady()) {
+    const existing = await prisma.socialPost.findUnique({ where: { id } });
+    if (!existing || existing.authorId !== authorId) return null;
+    const row = await prisma.socialPost.update({
+      where: { id },
+      data: {
+        ...(body != null ? { body } : {}),
+        ...(input.media != null ? { mediaJson: input.media as object } : {}),
+        ...(input.lat != null ? { lat: input.lat } : {}),
+        ...(input.lng != null ? { lng: input.lng } : {}),
+        ...(input.locationLabel != null ? { locationLabel: input.locationLabel } : {}),
+        ...(tags != null ? { tagsJson: tags } : {}),
+        ...(input.linkUrl !== undefined ? { linkUrl: input.linkUrl } : {}),
+        ...(lane != null ? { lane } : {}),
+      },
+    });
+    return mapPost(row);
+  }
+
+  const store = readStore();
+  const idx = store.posts.findIndex((p) => p.id === id && p.authorId === authorId);
+  if (idx < 0) return null;
+  const prev = store.posts[idx];
+  store.posts[idx] = {
+    ...prev,
+    ...(body != null ? { body } : {}),
+    ...(input.media != null ? { media: input.media } : {}),
+    ...(input.lat != null ? { lat: input.lat } : {}),
+    ...(input.lng != null ? { lng: input.lng } : {}),
+    ...(input.locationLabel != null ? { locationLabel: input.locationLabel } : {}),
+    ...(tags != null ? { tags } : {}),
+    ...(input.linkUrl !== undefined ? { linkUrl: input.linkUrl } : {}),
+    ...(lane != null ? { lane } : {}),
+  };
+  writeStore(store);
+  return store.posts[idx];
+}
+
+export async function deleteSocialPost(postId: string, authorId: string): Promise<boolean> {
+  const id = postId.trim();
+  if (!id || !authorId) throw new AppError('VALIDATION', 'postId and authorId required', 400);
+
+  if (await prismaReady()) {
+    const existing = await prisma.socialPost.findUnique({ where: { id } });
+    if (!existing || existing.authorId !== authorId) return false;
+    await prisma.socialPost.update({
+      where: { id },
+      data: { status: 'REMOVED' },
+    });
+    return true;
+  }
+
+  const store = readStore();
+  const idx = store.posts.findIndex((p) => p.id === id && p.authorId === authorId);
+  if (idx < 0) return false;
+  store.posts[idx] = { ...store.posts[idx], status: 'REMOVED' };
+  writeStore(store);
+  return true;
+}
+
 function asTags(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];
 }

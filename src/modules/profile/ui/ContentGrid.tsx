@@ -44,6 +44,8 @@ type Props = {
   items: FeedItem[];
   /** `content` = clips/posts · `showroom` = full product tiles with name + price */
   mode?: ContentGridMode;
+  /** `bright` = lighter overlays for profile (Kwai-like clarity) */
+  tone?: 'default' | 'bright';
   /** ปักหมุดคลิปแถวบน (โหมด content) — ค่าเริ่มต้น 0 */
   pinnedCount?: number;
   emptyIcon?: keyof typeof Ionicons.glyphMap;
@@ -59,6 +61,7 @@ type Props = {
 export function ContentGrid({
   items,
   mode = 'content',
+  tone = 'default',
   pinnedCount = 0,
   emptyIcon = 'videocam-outline',
   emptyText,
@@ -71,6 +74,11 @@ export function ContentGrid({
     (windowWidth - GRID_GAP * (COLUMNS - 1)) / COLUMNS,
   );
   const cellHeight = cellWidth / THUMB_ASPECT;
+  const fadeColors =
+    tone === 'bright'
+      ? (['transparent', 'rgba(0,0,0,0.38)'] as const)
+      : (['transparent', 'rgba(0,0,0,0.72)'] as const);
+  const fadeHeight = tone === 'bright' ? '38%' : '55%';
 
   if (items.length === 0) {
     return (
@@ -112,8 +120,8 @@ export function ContentGrid({
             )}
 
             <LinearGradient
-              colors={['transparent', 'rgba(0,0,0,0.72)']}
-              style={styles.fade}
+              colors={fadeColors}
+              style={[styles.fade, { height: fadeHeight }]}
               pointerEvents="none"
             />
 
@@ -170,7 +178,11 @@ export function ContentGrid({
           </>
         );
 
-        const cellStyle = [styles.cell, { width: cellWidth, height: cellHeight }];
+        const cellStyle = [
+          styles.cell,
+          tone === 'bright' && styles.cellBright,
+          { width: cellWidth, height: cellHeight },
+        ];
 
         if (onPressItem) {
           return (
@@ -210,6 +222,9 @@ const styles = StyleSheet.create({
     borderRadius: 0,
     overflow: 'hidden',
     backgroundColor: colors.brand.ink,
+  },
+  cellBright: {
+    backgroundColor: '#F4F4F5',
   },
   fade: {
     position: 'absolute',

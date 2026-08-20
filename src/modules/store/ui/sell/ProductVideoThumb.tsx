@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { useEvent } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
+import { normalizeMediaUri } from '@/shared/media/resolveMediaLibraryUri';
 
 type Props = {
   uri: string;
@@ -23,14 +24,27 @@ export function ProductVideoThumb({
   contentFit = 'cover',
   interactive = true,
 }: Props) {
-  const player = useVideoPlayer(uri, (instance) => {
+  const source = normalizeMediaUri(uri);
+  const player = useVideoPlayer(source, (instance) => {
     instance.loop = true;
     instance.muted = muted;
-    instance.currentTime = 0.08;
-    if (autoPlay) instance.play();
-    else instance.pause();
+    if (!autoPlay && !nativeControls) {
+      instance.currentTime = 0.08;
+    }
   });
   const { isPlaying } = useEvent(player, 'playingChange', { isPlaying: player.playing });
+
+  useEffect(() => {
+    if (autoPlay) {
+      player.currentTime = 0;
+      player.play();
+      return;
+    }
+    if (!nativeControls) {
+      player.currentTime = 0.08;
+    }
+    player.pause();
+  }, [autoPlay, nativeControls, player, source]);
 
   return (
     <Pressable
@@ -44,7 +58,7 @@ export function ProductVideoThumb({
     >
       <VideoView
         player={player}
-        style={StyleSheet.absoluteFill}
+        style={styles.video}
         contentFit={contentFit}
         nativeControls={nativeControls}
       />
@@ -58,9 +72,10 @@ export function ProductVideoThumb({
 }
 
 const styles = StyleSheet.create({
-  fill: { overflow: 'hidden' },
+  fill: { overflow: 'hidden', flex: 1 },
+  video: { ...StyleSheet.absoluteFill, width: '100%', height: '100%' },
   playWrap: {
-    ...{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 },
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.28)',

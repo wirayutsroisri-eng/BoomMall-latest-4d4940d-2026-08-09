@@ -34,8 +34,12 @@ export type FeedProduct = {
 
 export type FeedItem = {
   id: string;
+  /** Client id before server publish (feed-user-*) — used to load orphaned comments. */
+  legacyLocalId?: string;
   author: string;
   authorHandle: string;
+  /** Backend user id — used for matching push + chat targeting. */
+  authorId?: string;
   /** แท็บหลักที่คลิปนี้โผล่ (โปรไฟล์ยังรวมทุกเลนของ handle เดียวกัน) */
   lane?: FeedLane;
   caption: string;
@@ -89,9 +93,12 @@ export type FeedComment = {
   feedId: string;
   author: string;
   authorInitial: string;
+  /** Backend user id — used to detect own comments + report/block. */
+  authorId?: string;
   text: string;
   likes: number;
   createdAt: string;
   liked?: boolean;
   parentId?: string;
+  editedAt?: string;
 };
