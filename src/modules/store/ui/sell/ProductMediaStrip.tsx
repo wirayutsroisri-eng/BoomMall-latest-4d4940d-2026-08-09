@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Dimensions,
   Image,
@@ -10,12 +11,19 @@ import {
   Text,
   View,
 } from 'react-native';
+
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { ProductMediaItem } from '@/modules/commerce/domain/types';
-import { MAX_PRODUCT_MEDIA, MAX_VIDEO_MB } from '@/modules/commerce/domain/product-media';
+import {
+  isVideoMedia,
+  MAX_PRODUCT_MEDIA,
+  MAX_VIDEO_MB,
+} from '@/modules/commerce/domain/product-media';
+
 import { displayMediaUri } from '@/modules/commerce/data/product-media';
 import { ProductVideoThumb } from '@/modules/store/ui/sell/ProductVideoThumb';
+import { generateVideoThumbnail } from '@/shared/media/videoThumbnails';
 import { DragDownDismiss } from '@/shared/components/DragDownDismiss';
 import { colors } from '@/shared/theme/colors';
 
@@ -29,6 +37,11 @@ type Props = {
   onRemove: (index: number) => void;
   onMove?: (index: number, direction: -1 | 1) => void;
   onReplace?: (index: number) => void;
+  /**
+   * Patch an item in place — used to write back a runtime-generated video
+   * thumbnail so the tile (and the saved listing) keeps the poster after reload.
+   */
+  onUpdateItem?: (index: number, patch: Partial<ProductMediaItem>) => void;
   editable?: boolean;
   title?: string;
   hint?: string;
@@ -54,6 +67,71 @@ function MediaTileImage({ uri }: { uri: string }) {
       onError={() => setFailed(true)}
     />
   );
+}
+
+/**
+ * Video tile that prefers an existing poster (thumbnailUri, falling back to the
+ * video uri itself). When no poster exists yet, generates one on the fly from
+ * the local file:// and shows a loading indicator instead of a gray void until
+ * it's ready.
+ */
+function VideoTile({
+  uri,
+  item,
+  index,
+  onThumbnailGenerated,
+}: {
+  uri: string;
+  item: ProductMediaItem;
+  index: number;
+  onThumbnailGenerated?: (index: number, thumbUri: string) => void;
+}) {
+  const [thumbUri, setThumbUri] = useState<string | null>(() => item.thumbnailUri ?? null);
+  const [loading, setLoading] = useState(!item.thumbnailUri);
+  const attemptedRef = useRef(Boolean(item.thumbnailUri));
+  // Keep the callback in a ref so parent re-renders (which recreate inline
+  // arrows) never cancel the in-flight thumbnail generation via effect cleanup.
+  const onThumbRef = useRef(onThumbnailGenerated);
+  onThumbRef.current = onThumbnailGenerated;
+
+  useEffect(() => {
+    if (item.thumbnailUri) {
+      setThumbUri(item.thumbnailUri);
+      setLoading(false);
+      return;
+    }
+    if (attemptedRef.current) return;
+    attemptedRef.current = true;
+
+    let cancelled = false;
+    setLoading(true);
+    generateVideoThumbnail(uri)
+      .then((t) => {
+        if (cancelled) return;
+        if (t) {
+          setThumbUri(t);
+          onThumbRef.current?.(index, t);
+        }
+        setLoading(false);
+      })
+      .catch((e) => {
+        console.error('[ProductMediaStrip] runtime video thumbnail failed', e);
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [item.thumbnailUri, uri, index]);
+
+  if (loading) {
+    return (
+      <View style={styles.mediaLoading}>
+        <ActivityIndicator color={colors.brand.primaryDark} size="small" />
+      </View>
+    );
+  }
+
+  return <MediaTileImage uri={displayMediaUri(thumbUri ?? uri)} />;
 }
 
 function MediaPreviewModal({
@@ -82,7 +160,7 @@ function MediaPreviewModal({
           </Text>
           <View style={{ width: 36 }} />
         </View>
-        {item.type === 'video' ? (
+        {isVideoMedia(item) ? (
           <ProductVideoThumb
             uri={uri}
             style={styles.previewMedia}
@@ -95,6 +173,7 @@ function MediaPreviewModal({
           <Image source={{ uri }} style={styles.previewMedia} resizeMode="contain" />
         )}
       </DragDownDismiss>
+
     </Modal>
   );
 }
@@ -105,6 +184,7 @@ export function ProductMediaStrip({
   onRemove,
   onMove,
   onReplace,
+  onUpdateItem,
   editable = true,
   title,
   hint,
@@ -127,15 +207,27 @@ export function ProductMediaStrip({
       >
         {items.map((item, index) => {
           const uri = displayMediaUri(item.uri);
+          const isVideo = isVideoMedia(item);
           return (
             <View key={`${item.uri}-${index}`} style={styles.slot}>
               <View style={styles.tile}>
                 <Pressable
                   onPress={() => setPreviewIndex(index)}
-                  accessibilityLabel={item.type === 'video' ? 'ดูวิดีโอ' : 'ดูรูป'}
+                  accessibilityLabel={isVideo ? 'ดูวิดีโอ' : 'ดูรูป'}
                 >
-                  {item.type === 'video' ? (
-                    <ProductVideoThumb uri={uri} style={styles.media} interactive={false} />
+                  {isVideo ? (
+                    <>
+                      {/* Fast poster — renders instantly without mounting a player */}
+                      <VideoTile
+                        uri={uri}
+                        item={item}
+                        index={index}
+                        onThumbnailGenerated={(i, t) => onUpdateItem?.(i, { thumbnailUri: t })}
+                      />
+                      <View style={styles.playBadge} pointerEvents="none">
+                        <Ionicons name="play" size={18} color="#fff" />
+                      </View>
+                    </>
                   ) : (
                     <MediaTileImage uri={uri} />
                   )}
@@ -144,11 +236,12 @@ export function ProductMediaStrip({
                   <Text style={styles.badgeText}>
                     {showCoverBadge && index === 0
                       ? 'ปก'
-                      : item.type === 'video'
+                      : isVideo
                         ? 'วิดีโอ'
                         : `${index + 1}`}
                   </Text>
                 </View>
+
                 {editable ? (
                   <Pressable
                     style={styles.remove}
@@ -247,6 +340,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#E8EBE9',
   },
   media: { width: TILE, height: TILE, backgroundColor: '#E8EBE9' },
+  mediaLoading: {
+    width: TILE,
+    height: TILE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#E8EBE9',
+  },
   broken: {
     width: TILE,
     height: TILE,
@@ -264,6 +364,17 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   badgeText: { color: '#fff', fontSize: 10, fontWeight: '800' },
+  playBadge: {
+    position: 'absolute',
+    top: TILE / 2 - 13,
+    left: TILE / 2 - 13,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   remove: {
     position: 'absolute',
     top: 5,

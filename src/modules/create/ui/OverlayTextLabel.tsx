@@ -20,6 +20,15 @@ type Props = {
   italic?: boolean;
   fontSize?: number;
   maxWidth?: number;
+  fontWeight?: TextStyle['fontWeight'];
+  backgroundColor?: string;
+  backgroundOpacity?: number;
+  strokeColor?: string;
+  strokeWidth?: number;
+  alignment?: TextStyle['textAlign'];
+  fontFamily?: string;
+  fontStyle?: TextStyle['fontStyle'];
+  letterSpacing?: number;
 };
 
 function fontWeight(fontKey: OverlayFontKey | undefined): TextStyle['fontWeight'] {
@@ -35,15 +44,28 @@ export function OverlayTextLabel({
   italic,
   fontSize = 36,
   maxWidth = 280,
+  fontWeight: requestedWeight,
+  backgroundColor = 'rgba(0,0,0,0.22)',
+  backgroundOpacity = 1,
+  strokeColor = '#000000',
+  strokeWidth = 2,
+  alignment = 'center',
+  fontFamily,
+  fontStyle: requestedFontStyle,
+  letterSpacing = 0,
 }: Props) {
   if (!text.trim()) return null;
 
-  const weight = fontWeight(fontKey);
-  const isItalic = italic ?? fontKey === 'halloween';
+  const weight = requestedWeight ?? fontWeight(fontKey);
+  const isItalic = requestedFontStyle
+    ? requestedFontStyle === 'italic'
+    : italic ?? fontKey === 'halloween';
+  const hasBackground = backgroundOpacity > 0 && backgroundColor !== 'transparent';
+  const hasStroke = strokeWidth > 0 && strokeColor !== 'transparent';
 
   return (
     <View style={[styles.wrap, { maxWidth }]}>
-      {STROKE.map(([dx, dy]) => (
+      {hasStroke ? STROKE.map(([dx, dy]) => (
         <Text
           key={`${dx}-${dy}`}
           pointerEvents="none"
@@ -53,31 +75,47 @@ export function OverlayTextLabel({
             {
               fontSize,
               fontWeight: weight,
+              fontFamily,
+              letterSpacing,
               fontStyle: isItalic ? 'italic' : 'normal',
-              transform: [{ translateX: dx }, { translateY: dy }],
+              color: strokeColor,
+              textAlign: alignment,
+              transform: [
+                { translateX: (dx / 2) * strokeWidth },
+                { translateY: (dy / 2) * strokeWidth },
+              ],
             },
           ]}
         >
           {text}
         </Text>
-      ))}
+      )) : null}
       <Text
         style={[
           styles.layer,
+          styles.fill,
           {
             color,
             fontSize,
             fontWeight: weight,
+            fontFamily,
+            letterSpacing,
             fontStyle: isItalic ? 'italic' : 'normal',
-            textShadowColor: 'rgba(0,0,0,0.65)',
-            textShadowRadius: 10,
-            textShadowOffset: { width: 0, height: 2 },
+            textAlign: alignment,
+            textShadowColor: hasBackground ? 'rgba(0,0,0,0.65)' : 'transparent',
+            textShadowRadius: hasBackground ? 10 : 0,
+            textShadowOffset: hasBackground ? { width: 0, height: 2 } : { width: 0, height: 0 },
           },
         ]}
       >
         {text}
       </Text>
-      <View pointerEvents="none" style={styles.highlight} />
+      {hasBackground ? (
+        <View
+          pointerEvents="none"
+          style={[styles.highlight, { backgroundColor, opacity: backgroundOpacity }]}
+        />
+      ) : null}
     </View>
   );
 }
@@ -91,16 +129,18 @@ const styles = StyleSheet.create({
   },
   layer: {
     textAlign: 'center',
-    width: '100%',
+    alignSelf: 'center',
   },
+
   stroke: {
     position: 'absolute',
     color: '#000',
     opacity: 0.88,
+    zIndex: 0,
   },
+  fill: { zIndex: 1 },
   highlight: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0,0,0,0.22)',
     borderRadius: 8,
     zIndex: -1,
   },

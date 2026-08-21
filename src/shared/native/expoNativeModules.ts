@@ -41,7 +41,11 @@ export function isExpoCameraNativeAvailable(): boolean {
 }
 
 export function isVideoThumbnailsNativeAvailable(): boolean {
-  return isExpoNativeModuleAvailable('ExpoVideoThumbnails');
+  // Module name differs across SDK versions / runtimes — probe both.
+  return (
+    isExpoNativeModuleAvailable('ExpoVideoThumbnails') ||
+    isExpoNativeModuleAvailable('VideoThumbnails')
+  );
 }
 
 /** Running inside Expo Go (no custom dev-client native modules). */

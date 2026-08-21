@@ -96,20 +96,27 @@ function authHeaders() {
   return headers;
 }
 
+const REQ_TIMEOUT_MS = 12_000;
+
 async function req(method: string, path: string, body?: unknown) {
   const base = getApiBase();
   if (!base) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQ_TIMEOUT_MS);
   try {
     const res = await fetch(`${base}${path}`, {
       method,
       headers: authHeaders(),
       body: body == null ? undefined : JSON.stringify(body),
+      signal: controller.signal,
     });
     const json = await res.json().catch(() => null);
     if (!res.ok) return null;
     return json;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

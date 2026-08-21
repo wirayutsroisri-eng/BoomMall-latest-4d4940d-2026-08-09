@@ -5,6 +5,10 @@ import {
 } from '@/modules/create/domain/overlay';
 import { useCreateDraftStore } from '@/modules/create/state/create-draft-store';
 import type { FeedItem } from '@/modules/feed/domain/types';
+import {
+  legacyTextOverlaysForMedia,
+  makeEditorMedia,
+} from '@/modules/create/domain/editorComposition';
 
 function parseCaptionMeta(item: FeedItem) {
   const lines = item.caption.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -30,7 +34,7 @@ function parseCaptionMeta(item: FeedItem) {
     bodyLines.push(line);
   }
 
-  const title = bodyLines[0] || item.overlayText?.trim() || '';
+  const title = bodyLines[0] || '';
   const description = bodyLines.slice(1).join('\n');
   return { title, description, location, linkLabel, music };
 }
@@ -52,7 +56,20 @@ export function beginEditPostFromFeedItem(item: FeedItem) {
     return;
   }
 
-  const hasLiveOverlay = Boolean(item.overlayText?.trim());
+  const editorMedia = item.editorMedia?.length
+    ? item.editorMedia
+    : mediaUris.map((mediaUri) => makeEditorMedia(mediaUri, isVideo ? 'video' : 'image'));
+  const firstMediaId = editorMedia[0].id;
+  const overlays = item.overlays?.length
+    ? item.overlays
+    : legacyTextOverlaysForMedia({
+        mediaId: firstMediaId,
+        stickers: item.overlayStickers,
+        text: item.overlayText,
+        color: item.overlayTextColor,
+        transform: item.overlayTransform,
+      });
+  const hasLiveOverlay = overlays.length > 0;
   const { title, description, location, linkLabel, music } = parseCaptionMeta(item);
 
   useCreateDraftStore.getState().setDraft({
@@ -67,6 +84,9 @@ export function beginEditPostFromFeedItem(item: FeedItem) {
     sticker: '',
     music,
     mediaUris,
+    media: editorMedia,
+    overlays,
+    activeMediaId: firstMediaId,
     publishTitle: title,
     publishDescription: description,
     publishLocation: location,

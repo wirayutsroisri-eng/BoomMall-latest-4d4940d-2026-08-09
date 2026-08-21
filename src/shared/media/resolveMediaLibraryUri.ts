@@ -1,9 +1,7 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library/legacy';
-import {
-  isVideoThumbnailsNativeAvailable,
-} from '@/shared/native/expoNativeModules';
+import { generateVideoThumbnail } from '@/shared/media/videoThumbnails';
 
 export { isVideoThumbnailsNativeAvailable } from '@/shared/native/expoNativeModules';
 
@@ -90,7 +88,7 @@ async function readAssetUri(
   return normalizeMediaUri(raw);
 }
 
-async function cacheVideoForPlayback(uri: string): Promise<string> {
+export async function cacheVideoForPlayback(uri: string): Promise<string> {
   const normalized = normalizeMediaUri(uri);
   if (!normalized.startsWith('file://')) return normalized;
 
@@ -157,35 +155,6 @@ export async function resolvePlayableUri(asset: MediaLibrary.Asset): Promise<str
   return resolved;
 }
 
-async function generateVideoThumbnail(videoUri: string): Promise<string | null> {
-  if (!isVideoThumbnailsNativeAvailable()) return null;
-
-  let getThumbnailAsync:
-    | ((
-        source: string,
-        options?: { time?: number; quality?: number },
-      ) => Promise<{ uri: string }>)
-    | null = null;
-
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    getThumbnailAsync = require('expo-video-thumbnails').getThumbnailAsync;
-  } catch {
-    return null;
-  }
-
-  for (const time of [0, 500, 1500]) {
-    try {
-      const result = await getThumbnailAsync!(videoUri, { time, quality: 0.72 });
-      if (result.uri) return result.uri;
-    } catch {
-      /* try next keyframe offset */
-    }
-  }
-
-  return null;
-}
-
 /** Gallery grid — never throws; returns image URI, direct display URI, or null (placeholder UI). */
 export async function resolveVideoThumbnailUri(asset: MediaLibrary.Asset): Promise<string | null> {
   const cached = videoThumbCache.get(asset.id);
@@ -193,31 +162,29 @@ export async function resolveVideoThumbnailUri(asset: MediaLibrary.Asset): Promi
     return cached === VIDEO_THUMB_PLACEHOLDER ? null : cached;
   }
 
-  if (!isVideoThumbnailsNativeAvailable()) {
-    videoThumbCache.set(asset.id, VIDEO_THUMB_PLACEHOLDER);
-    if (isDirectMediaUri(asset.uri)) return asset.uri;
-    const display = await resolveDisplayUri(asset);
-    if (display && isDirectMediaUri(display)) {
-      videoThumbCache.set(asset.id, display);
-      return display;
-    }
-    return null;
-  }
-
   try {
     const videoUri = await resolveVideoSourceUri(asset);
-    if (!videoUri) {
-      videoThumbCache.set(asset.id, VIDEO_THUMB_PLACEHOLDER);
-      return null;
-    }
-
-    const thumbUri = await generateVideoThumbnail(videoUri);
-    if (thumbUri) {
-      videoThumbCache.set(asset.id, thumbUri);
-      return thumbUri;
+    if (videoUri) {
+      const thumbUri = await generateVideoThumbnail(videoUri);
+      if (thumbUri) {
+        videoThumbCache.set(asset.id, thumbUri);
+        return thumbUri;
+      }
     }
   } catch {
-    /* fall through to placeholder */
+    /* fall through to display fallback */
+  }
+
+  // No poster extracted — fall back to a displayable image/URI so the tile is
+  // never a gray void (the player can still render the actual video).
+  if (isDirectMediaUri(asset.uri)) {
+    videoThumbCache.set(asset.id, asset.uri);
+    return asset.uri;
+  }
+  const display = await resolveDisplayUri(asset);
+  if (display && isDirectMediaUri(display)) {
+    videoThumbCache.set(asset.id, display);
+    return display;
   }
 
   videoThumbCache.set(asset.id, VIDEO_THUMB_PLACEHOLDER);

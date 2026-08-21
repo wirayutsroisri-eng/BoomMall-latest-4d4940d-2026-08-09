@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { masterContentImage } from '@/modules/commerce/data/catalog';
+import { fromLegacyImages } from '@/modules/commerce/domain/product-media';
 import { useInventoryStore } from '@/modules/commerce/state/inventory-store';
 import { useCartStore } from '@/modules/commerce/state/cart-store';
 import type { MasterSku } from '@/modules/commerce/domain/types';
@@ -24,6 +25,7 @@ import {
   ENABLE_COMING_SOON_SHOP_CHROME,
   ENABLE_PAYLATER_AND_CREDIT_UI,
 } from '@/shared/compliance/appStoreGates';
+import { ProductCardMediaCarousel } from '@/modules/shop/ui/product/ProductCardMediaCarousel';
 
 const SCREEN_W = Dimensions.get('window').width;
 const H_PAD = 12;
@@ -406,7 +408,9 @@ export function ShopScreen() {
             const off = discountOf(master);
             const isVideoStyle = index % 3 === 0;
             const stock = vs.reduce((s, v) => s + totalAvailable(v.id), 0);
-            const imageUri = master.imageUri ?? masterContentImage(master.id);
+            const media = master.media?.length
+              ? master.media
+              : fromLegacyImages(master.imageUris, master.imageUri ?? masterContentImage(master.id));
 
             return (
               <Pressable
@@ -425,16 +429,16 @@ export function ShopScreen() {
                 }
               >
                 <View style={styles.productVisual}>
-                  <Image source={{ uri: imageUri }} style={styles.productImage} />
+                  <ProductCardMediaCarousel
+                    media={media}
+                    size={COL_W}
+                    aspect="square"
+                    onPress={() => openProduct(master.id)}
+                  />
                   {isVideoStyle ? (
-                    <>
-                      <View style={styles.adBadge}>
-                        <Text style={styles.adBadgeText}>Ad</Text>
-                      </View>
-                      <View style={styles.playHint}>
-                        <Ionicons name="play" size={14} color="#fff" />
-                      </View>
-                    </>
+                    <View style={styles.adBadge}>
+                      <Text style={styles.adBadgeText}>Ad</Text>
+                    </View>
                   ) : (
                     <View style={styles.discountCorner}>
                       <Text style={styles.discountCornerText}>-{off}%</Text>

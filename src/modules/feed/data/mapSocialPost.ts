@@ -2,6 +2,12 @@ import type { FeedComment, FeedItem } from '../domain/types';
 import type { SocialCommentDto } from './feedEngageApi';
 import { inferBoardSide } from '@/modules/matching/domain/board-side';
 import { isDemoCatalogFeedItem, isLiveUgcFeedItem, mediaUriLooksLive } from '../domain/isLiveUgcFeedItem';
+import {
+  DEFAULT_TEXT_OVERLAY_STYLE,
+  type EditorMedia,
+  type OverlayObject,
+  type TextOverlayObject,
+} from '@/modules/create/domain/editorComposition';
 
 export type SocialPostDto = {
   id: string;
@@ -30,6 +36,8 @@ type MediaBlob = {
   overlayText?: string;
   overlayTextColor?: string;
   overlayTransform?: FeedItem['overlayTransform'];
+  editorMedia?: EditorMedia[];
+  overlays?: OverlayObject[];
   authorName?: string;
   authorHandle?: string;
 };
@@ -37,6 +45,109 @@ type MediaBlob = {
 function asStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((v): v is string => typeof v === 'string' && v.length > 0);
+}
+
+/**
+ * A server feed response must never point at an app sandbox on one device.
+ * Those URLs become unreadable after reinstall and are invalid on every other
+ * device. Keep local-file support in the persisted device feed, but do not
+ * treat it as portable media coming back from the backend.
+ */
+export function isPortableServerMediaUri(uri: string | undefined | null): uri is string {
+  const value = uri?.trim() ?? '';
+  return /^(https?:|data:image\/)/i.test(value);
+}
+
+function asEditorMedia(value: unknown): EditorMedia[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const media = value.filter((item): item is EditorMedia => {
+    if (!item || typeof item !== 'object') return false;
+    const row = item as Record<string, unknown>;
+    return typeof row.id === 'string' && typeof row.uri === 'string' && (row.type === 'image' || row.type === 'video');
+  });
+  return media.length ? media : undefined;
+}
+
+function asOverlays(value: unknown): OverlayObject[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const overlays = value.flatMap((item): OverlayObject[] => {
+    if (!item || typeof item !== 'object') return [];
+    const row = item as Record<string, unknown>;
+    if (typeof row.id !== 'string' || typeof row.mediaId !== 'string') return [];
+    if (row.type === 'text' && typeof row.text === 'string') {
+      const rawStyle = row.style && typeof row.style === 'object'
+        ? row.style as Record<string, unknown>
+        : {};
+      const legacyStyle = row as Record<string, unknown>;
+      return [{
+        ...row,
+        type: 'text',
+        id: row.id,
+        mediaId: row.mediaId,
+        text: row.text,
+        locked: typeof row.locked === 'boolean' ? row.locked : false,
+        style: {
+          ...DEFAULT_TEXT_OVERLAY_STYLE,
+          ...rawStyle,
+          color:
+            typeof rawStyle.color === 'string'
+              ? rawStyle.color
+              : typeof legacyStyle.color === 'string'
+                ? legacyStyle.color
+                : DEFAULT_TEXT_OVERLAY_STYLE.color,
+          backgroundColor:
+            typeof rawStyle.backgroundColor === 'string'
+              ? rawStyle.backgroundColor
+              : typeof legacyStyle.backgroundColor === 'string'
+                ? legacyStyle.backgroundColor
+                : DEFAULT_TEXT_OVERLAY_STYLE.backgroundColor,
+          backgroundOpacity:
+            typeof rawStyle.backgroundOpacity === 'number'
+              ? rawStyle.backgroundOpacity
+              : typeof legacyStyle.backgroundOpacity === 'number'
+                ? legacyStyle.backgroundOpacity
+                : DEFAULT_TEXT_OVERLAY_STYLE.backgroundOpacity,
+          fontFamily:
+            typeof rawStyle.fontFamily === 'string'
+              ? rawStyle.fontFamily
+              : typeof legacyStyle.fontFamily === 'string'
+                ? legacyStyle.fontFamily
+                : undefined,
+          fontWeight:
+            typeof rawStyle.fontWeight === 'string'
+              ? rawStyle.fontWeight
+              : typeof legacyStyle.fontWeight === 'string'
+                ? legacyStyle.fontWeight
+                : DEFAULT_TEXT_OVERLAY_STYLE.fontWeight,
+          fontSize:
+            typeof rawStyle.fontSize === 'number'
+              ? rawStyle.fontSize
+              : typeof legacyStyle.fontSize === 'number'
+                ? legacyStyle.fontSize
+                : DEFAULT_TEXT_OVERLAY_STYLE.fontSize,
+          strokeColor:
+            typeof rawStyle.strokeColor === 'string'
+              ? rawStyle.strokeColor
+              : typeof legacyStyle.strokeColor === 'string'
+                ? legacyStyle.strokeColor
+                : DEFAULT_TEXT_OVERLAY_STYLE.strokeColor,
+          strokeWidth:
+            typeof rawStyle.strokeWidth === 'number'
+              ? rawStyle.strokeWidth
+              : typeof legacyStyle.strokeWidth === 'number'
+                ? legacyStyle.strokeWidth
+                : DEFAULT_TEXT_OVERLAY_STYLE.strokeWidth,
+          fontKey:
+            rawStyle.fontKey === 'kanit' || rawStyle.fontKey === 'mitr' || rawStyle.fontKey === 'halloween'
+              ? rawStyle.fontKey
+              : 'classic',
+        },
+      } as TextOverlayObject];
+    }
+    if (row.type === 'sticker' && typeof row.sticker === 'string') return [row as OverlayObject];
+    return [];
+  });
+  return overlays.length ? overlays : undefined;
 }
 
 export function normalizePostMedia(media: unknown): MediaBlob {
@@ -59,6 +170,8 @@ export function normalizePostMedia(media: unknown): MediaBlob {
       o.overlayTransform && typeof o.overlayTransform === 'object'
         ? (o.overlayTransform as FeedItem['overlayTransform'])
         : undefined,
+    editorMedia: asEditorMedia(o.editorMedia),
+    overlays: asOverlays(o.overlays),
     authorName: typeof o.authorName === 'string' ? o.authorName : undefined,
     authorHandle: typeof o.authorHandle === 'string' ? o.authorHandle : undefined,
   };
@@ -74,7 +187,16 @@ export function socialPostToFeedItem(
   const mine =
     Boolean(opts?.myUserId && post.authorId === opts.myUserId) ||
     Boolean(opts?.myHandle && handle.toLowerCase() === opts.myHandle.replace(/^@/, '').toLowerCase());
-  const imageUris = media.images.length ? media.images : undefined;
+  const editorImages = media.editorMedia
+    ?.filter((item) => item.type === 'image' && isPortableServerMediaUri(item.uri))
+    .map((item) => item.uri) ?? [];
+  const portableImages = media.images.filter(isPortableServerMediaUri);
+  const resolvedImages = portableImages.length ? portableImages : editorImages;
+  const imageUris = resolvedImages.length ? resolvedImages : undefined;
+  const editorVideo = media.editorMedia
+    ?.find((item) => item.type === 'video' && isPortableServerMediaUri(item.uri))
+    ?.uri;
+  const videoUri = isPortableServerMediaUri(media.video) ? media.video : editorVideo;
   const lane = (['nearby', 'following', 'foryou', 'board'].includes(String(post.lane ?? ''))
     ? post.lane
     : 'foryou') as FeedItem['lane'];
@@ -105,7 +227,9 @@ export function socialPostToFeedItem(
     liked: post.liked,
     imageUri: imageUris?.[0],
     imageUris,
-    videoUri: media.video,
+    videoUri,
+    editorMedia: media.editorMedia,
+    overlays: media.overlays,
     overlayText: media.overlayText,
     overlayTextColor: media.overlayTextColor,
     overlayTransform: media.overlayTransform,
@@ -132,11 +256,22 @@ export function mergeFeedItems(remote: FeedItem[], local: FeedItem[]): FeedItem[
     if (isDemoCatalogFeedItem(item)) continue;
     const existing = byId.get(item.id);
     if (existing) {
+      const existingWithComposition: FeedItem = {
+        ...existing,
+        editorMedia: existing.editorMedia?.length ? existing.editorMedia : item.editorMedia,
+        overlays: existing.overlays?.length ? existing.overlays : item.overlays,
+      };
+      if (
+        existingWithComposition.editorMedia !== existing.editorMedia ||
+        existingWithComposition.overlays !== existing.overlays
+      ) {
+        byId.set(item.id, existingWithComposition);
+      }
       const remoteHasMedia = mediaUriLooksLive(existing.imageUri) || mediaUriLooksLive(existing.videoUri);
       const localHasMedia = mediaUriLooksLive(item.imageUri) || mediaUriLooksLive(item.videoUri);
       if (!remoteHasMedia && localHasMedia) {
         byId.set(item.id, {
-          ...existing,
+          ...existingWithComposition,
           ...item,
           isUserPost: Boolean(existing.isUserPost || item.isUserPost),
         });

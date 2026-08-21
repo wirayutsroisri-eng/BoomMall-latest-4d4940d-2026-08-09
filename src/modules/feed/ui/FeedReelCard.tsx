@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -20,21 +20,24 @@ import { colors } from '@/shared/theme/colors';
 import type { FeedItem } from '@/modules/feed/domain/types';
 import { DEFAULT_OVERLAY_TRANSFORM } from '@/modules/create/domain/overlay';
 import { LockedOverlayText } from '@/modules/create/ui/LockedOverlayText';
+import { LockedTextStickerLayer } from '@/modules/create/ui/LockedTextStickerLayer';
+import { LockedStickerOverlay } from '@/modules/create/ui/LockedStickerOverlay';
+import { type StickerOverlayObject } from '@/modules/create/domain/editorComposition';
+
 import { useMusicPlayerStore } from '@/modules/music/state/music-player-store';
 import { openListenScreenNow } from '@/shared/navigation/safeNavigate';
 import { useFeedChromeStore } from '@/modules/feed/state/feed-chrome-store';
 import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
 import { Avatar } from '@/shared/components/Avatar';
 import { RightActionBar } from './RightActionBar';
-import { FeedVideoLayer } from './FeedVideoLayer';
 import { FeedSeekBar } from './FeedSeekBar';
 import { FeedPinchZoomLayer } from './FeedPinchZoomLayer';
+import { FeedMediaRenderer } from './FeedMediaRenderer';
+import { ExpandableCaption } from './ExpandableCaption';
 import { IOS_SPRING, clampPagerX, snapPagerIndex } from './feedMotion';
 import { hasFeedMusic } from '@/modules/feed/domain/feedMusic';
+import { openFeedMediaViewer } from '@/modules/feed/state/feed-media-viewer-store';
 
-
-/** แคปชันยาวเกินนี้ → แสดงปุ่มย่อ/ขยาย */
-const CAPTION_COLLAPSE_CHARS = 42;
 
 function galleryOf(item: FeedItem): string[] {
   if (item.imageUris?.length) return item.imageUris;
@@ -96,16 +99,27 @@ export function FeedReelCard({
 }: Props) {
   const gallery = useMemo(() => galleryOf(item), [item]);
   const multi = gallery.length > 1;
-  const [page, setPage] = useState(0);
   const [captionExpanded, setCaptionExpanded] = useState(false);
-  const activeUri = gallery[Math.min(page, Math.max(gallery.length - 1, 0))];
+  const activeUri = gallery[0];
+  const primaryMediaId = item.editorMedia?.[0]?.id;
+  const canonicalSticker = useMemo(
+    () => item.overlays?.find(
+      (overlay): overlay is StickerOverlayObject =>
+        overlay.type === 'sticker' && overlay.mediaId === primaryMediaId,
+    ),
+    [item.overlays, primaryMediaId],
+  );
   // Real photo aspect ratio (from upload pixels) so image posts are never cropped.
   const imageAspectRatio = useMemo(() => {
+    const editorCover = item.editorMedia?.[0];
+    if (editorCover?.width && editorCover.height && editorCover.height > 0) {
+      return editorCover.width / editorCover.height;
+    }
     if (item.imageWidth && item.imageHeight && item.imageHeight > 0) {
       return item.imageWidth / item.imageHeight;
     }
     return undefined;
-  }, [item.imageWidth, item.imageHeight]);
+  }, [item.editorMedia, item.imageWidth, item.imageHeight]);
   // รูปแสดงตามสัดส่วนพิกเซลจริงของไฟล์ (contain ในจอ ไม่ crop/ขยายซูม)
   // วิดีโอไม่ใช้ mediaLayout — FeedVideoLayer ขยายเต็มการ์ด (contain เหมือนรูปภาพ ไม่ crop/ซูม)
   const mediaLayout = useMemo(() => {
@@ -149,7 +163,6 @@ export function FeedReelCard({
     void playFromFeedMusic(title, authorName);
   };
   const caption = item.caption?.trim() ?? '';
-  const captionCollapsible = caption.length > CAPTION_COLLAPSE_CHARS;
 
   const playbackProgress = useSharedValue(0);
   const centerIconScale = useSharedValue(0);
@@ -185,7 +198,7 @@ export function FeedReelCard({
   useEffect(() => {
     zoomed.value = 0;
     setMediaZoomed(false);
-  }, [item.id, page, setMediaZoomed, zoomed]);
+  }, [item.id, setMediaZoomed, zoomed]);
 
   useEffect(() => () => setMediaZoomed(false), [setMediaZoomed]);
 
@@ -198,7 +211,6 @@ export function FeedReelCard({
   }, [tabCount, tabCountSV]);
 
   useEffect(() => {
-    setPage(0);
     setCaptionExpanded(false);
   }, [item.id]);
 
@@ -227,7 +239,7 @@ export function FeedReelCard({
     setIsPaused(false);
     isScrubbingRef.current = false;
     playbackProgress.value = 0;
-  }, [item.id, page, playbackProgress]);
+  }, [item.id, playbackProgress]);
 
   // Drive the seek bar from the player's real time updates.
   useEffect(() => {
@@ -250,12 +262,6 @@ export function FeedReelCard({
       playingSub.remove();
     };
   }, [player, playbackProgress]);
-
-  const toggleCaption = () => {
-    if (!captionCollapsible) return;
-    void Haptics.selectionAsync();
-    setCaptionExpanded((v) => !v);
-  };
 
   const burstCenterIcon = (name: 'play' | 'pause') => {
     setCenterIconName(name);
@@ -424,15 +430,6 @@ export function FeedReelCard({
   const mediaGesture = Gesture.Exclusive(longPress, singleTap);
 
 
-  const goNextPhoto = () => {
-    setPage((p) => Math.min(gallery.length - 1, p + 1));
-    void Haptics.selectionAsync();
-  };
-  const goPrevPhoto = () => {
-    setPage((p) => Math.max(0, p - 1));
-    void Haptics.selectionAsync();
-  };
-
   const openProfile = () => {
     onOpenProfile?.();
   };
@@ -479,20 +476,6 @@ export function FeedReelCard({
       const pages = tabCountSV.value;
       const dx = e.translationX;
 
-      if (multi) {
-        if (page === 0 && dx > 0) {
-          draggingTabs.value = 1;
-          pagerX.value = clampPagerX(panStartPagerX.value + dx, w, pages);
-        } else if (page === gallery.length - 1 && dx < 0 && enableTabSwipeLeft) {
-          draggingTabs.value = 1;
-          pagerX.value = clampPagerX(panStartPagerX.value + dx, w, pages);
-        } else {
-          draggingTabs.value = 0;
-          pagerX.value = panStartPagerX.value;
-        }
-        return;
-      }
-
       // โปรไฟล์ไม่ขยับ pager ระหว่างลาก — กันจอค้าง/หัวหาย
       if (dx < -10 && enableProfileSwipe) {
         draggingTabs.value = 0;
@@ -516,32 +499,6 @@ export function FeedReelCard({
       const w = widthSV.value;
       const dx = e.translationX;
       const vx = e.velocityX;
-
-      if (multi) {
-        if (draggingTabs.value === 1) {
-          settlePager(vx);
-          return;
-        }
-        if (page < gallery.length - 1 && (dx < -56 || vx < -420)) {
-          runOnJS(goNextPhoto)();
-          return;
-        }
-        if (page > 0 && (dx > 56 || vx > 420)) {
-          runOnJS(goPrevPhoto)();
-          return;
-        }
-        if (
-          enableProfileSwipe &&
-          page === gallery.length - 1 &&
-          (dx < -w * 0.28 || vx < -750)
-        ) {
-          pagerX.value = panStartPagerX.value;
-          runOnJS(openProfile)();
-          return;
-        }
-        pagerX.value = withSpring(panStartPagerX.value, IOS_SPRING);
-        return;
-      }
 
       if (draggingTabs.value === 1) {
         settlePager(vx);
@@ -567,33 +524,28 @@ export function FeedReelCard({
       <GestureDetector gesture={horizontalSwipe}>
         <View style={[styles.card, { height: '100%' }]}>
         <FeedPinchZoomLayer
-          resetKey={`${item.id}:${page}`}
-          enabled={Boolean(activeUri && !item.videoUri)}
+          resetKey={`${item.id}:${isActive ? 'active' : 'inactive'}`}
+          enabled={Boolean(item.videoUri || activeUri)}
           onZoomChange={onMediaZoomChange}
           contentGesture={mediaGesture}
         >
-          {item.videoUri ? (
-            <View style={styles.videoStage}>
-              <FeedVideoLayer
-                uri={item.videoUri}
-                isActive={isActive}
-                isManuallyPaused={isManuallyPaused}
-                contentFit="contain"
-                onPlayerReady={setPlayer}
-                style={StyleSheet.absoluteFill}
-              />
-            </View>
-          ) : activeUri ? (
-            <View style={styles.imageStage}>
-              <Image
-                source={{ uri: activeUri }}
-                style={[styles.imageContain, { width: mediaLayout.width, height: mediaLayout.height }]}
-                resizeMode="contain"
-              />
-            </View>
-          ) : (
-            <LinearGradient colors={item.gradient} style={StyleSheet.absoluteFill} />
-          )}
+          <FeedMediaRenderer
+            item={item}
+            gallery={gallery}
+            width={screenWidth}
+            height={Math.min(height, Math.round(screenWidth * 1.18))}
+            imageLayout={mediaLayout}
+            isActive={isActive}
+            isManuallyPaused={isManuallyPaused}
+            onPlayerReady={setPlayer}
+            onOpenImage={(index) => openFeedMediaViewer(
+              gallery,
+              index,
+              item.editorMedia?.map((media) => media.id),
+              item.overlays,
+              item.editorMedia,
+            )}
+          />
         </FeedPinchZoomLayer>
 
         {!chromeHidden ? (
@@ -605,15 +557,7 @@ export function FeedReelCard({
           />
         ) : null}
 
-        {multi && !chromeHidden ? (
-          <View style={styles.pageDots} pointerEvents="none">
-            {gallery.map((_, i) => (
-              <View key={i} style={[styles.pageDot, i === page && styles.pageDotActive]} />
-            ))}
-          </View>
-        ) : null}
-
-        {item.overlayText?.trim() && page === 0 && captionsEnabled ? (
+        {item.overlayText?.trim() && captionsEnabled ? (
           <LockedOverlayText
             text={item.overlayText}
             color={item.overlayTextColor ?? '#fff'}
@@ -622,7 +566,19 @@ export function FeedReelCard({
           />
         ) : null}
 
+        {item.overlayStickers?.length ? (
+          <LockedTextStickerLayer stickers={item.overlayStickers} />
+        ) : null}
+
+        {!multi && canonicalSticker ? (
+          <LockedStickerOverlay
+            sticker={canonicalSticker.sticker}
+            transform={canonicalSticker.transform}
+          />
+        ) : null}
+
         <Animated.View style={[styles.heartBurst, heartStyle]} pointerEvents="none">
+
           <Ionicons name="heart" size={96} color={colors.brand.pink} />
         </Animated.View>
 
@@ -680,26 +636,12 @@ export function FeedReelCard({
               </Text>
             </Pressable>
 
-            {caption ? (
-              <Pressable
-                onPress={toggleCaption}
-                disabled={!captionCollapsible}
-              >
-                {captionExpanded || !captionCollapsible ? (
-                  <Text style={styles.caption}>
-                    {caption}
-                    {captionCollapsible ? (
-                      <Text style={styles.captionMore}>  ย่อ</Text>
-                    ) : null}
-                  </Text>
-                ) : (
-                  <Text style={styles.caption}>
-                    {`${caption.slice(0, CAPTION_COLLAPSE_CHARS).trimEnd()}… `}
-                    <Text style={styles.captionMore}>เพิ่มเติม</Text>
-                  </Text>
-                )}
-              </Pressable>
-            ) : null}
+            <ExpandableCaption
+              key={item.id}
+              text={caption}
+              maxExpandedHeight={Math.max(160, height * 0.5)}
+              onExpandedChange={setCaptionExpanded}
+            />
 
             {hasMusic && !captionExpanded ? (
               <Pressable onPress={openListenMode} hitSlop={6}>
@@ -714,7 +656,7 @@ export function FeedReelCard({
             ) : null}
             {multi ? (
               <Text style={styles.photoCount}>
-                รูป {page + 1}/{gallery.length} · ปัดซ้าย/ขวาดูรูปในโพสต์
+                {gallery.length} รูป · แตะรูปเพื่อดูเต็มจอ
               </Text>
             ) : null}
           </View>

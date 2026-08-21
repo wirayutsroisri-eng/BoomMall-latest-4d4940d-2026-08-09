@@ -2,11 +2,11 @@ import type { MasterSku, ProductMediaItem, ProductMediaType } from './types';
 
 export const MAX_PRODUCT_MEDIA = 6;
 export const MAX_ARTICLE_IMAGES = 8;
-/** Between the 50–100MB product-video cap */
-export const MAX_VIDEO_BYTES = 80 * 1024 * 1024;
-export const MAX_VIDEO_MB = 80;
+/** Product video cap — 200 MB to support high-quality uploads */
+export const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
+export const MAX_VIDEO_MB = 200;
 
-const VIDEO_EXT = new Set(['mp4', 'mov', 'm4v']);
+const VIDEO_EXT = new Set(['mp4', 'mov', 'm4v', 'webm', 'mkv']);
 const IMAGE_EXT = new Set(['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif', 'gif']);
 
 export function mediaExtension(uri: string, filename?: string) {
@@ -32,13 +32,27 @@ export function isAllowedVideo(uri: string, filename?: string) {
   return !ext || VIDEO_EXT.has(ext);
 }
 
+/**
+ * True when an item is a video — either explicitly typed `video` OR the file
+ * extension says so (.mp4 / .mov / .m4v / .webm / .mkv).
+ * Use this for rendering decisions so a picked file is never shown as <Image>.
+ */
+export function isVideoMedia(
+  item: Pick<ProductMediaItem, 'type' | 'uri'>,
+): boolean {
+  if (item.type === 'video') return true;
+  const ext = mediaExtension(item.uri);
+  return VIDEO_EXT.has(ext);
+}
+
 export function validateProductVideo(input: {
+
   uri: string;
   filename?: string;
   sizeBytes?: number;
 }): { ok: true } | { ok: false; reason: string } {
   if (!isAllowedVideo(input.uri, input.filename)) {
-    return { ok: false, reason: 'รองรับวิดีโอ .mp4 / .mov เท่านั้น' };
+    return { ok: false, reason: 'รองรับวิดีโอ .mp4 / .mov / .webm เท่านั้น' };
   }
   if (input.sizeBytes != null && input.sizeBytes > MAX_VIDEO_BYTES) {
     return {
@@ -80,6 +94,10 @@ export function hasVideo(media: ProductMediaItem[]): boolean {
   return media.some((m) => m.type === 'video');
 }
 
+/**
+ * Append picked media to the gallery. Any slot can be an image or a video —
+ * there is no limit on how many videos a listing can hold (max total 6 files).
+ */
 export function mergePickedMedia(
   current: ProductMediaItem[],
   incoming: ProductMediaItem[],
@@ -89,14 +107,10 @@ export function mergePickedMedia(
     if (item.type === 'video') {
       const check = validateProductVideo({ uri: item.uri, sizeBytes: item.sizeBytes });
       if (!check.ok) return check;
-      if (hasVideo(next)) {
-        const idx = next.findIndex((m) => m.type === 'video');
-        next[idx] = item;
-      } else if (next.length >= MAX_PRODUCT_MEDIA) {
+      if (next.length >= MAX_PRODUCT_MEDIA) {
         return { ok: false, reason: `สื่อได้สูงสุด ${MAX_PRODUCT_MEDIA} ไฟล์` };
-      } else {
-        next.unshift(item);
       }
+      next.push(item);
       continue;
     }
     if (next.length >= MAX_PRODUCT_MEDIA) {
@@ -126,7 +140,10 @@ export function mergeArticleImages(
   return { ok: true, media: next.slice(0, MAX_ARTICLE_IMAGES) };
 }
 
-/** Replace one gallery slot, then append any extra picks. Still max one video. */
+/**
+ * Replace one gallery slot, then append any extra picks.
+ * Any slot can become an image or a video — videos are not restricted to slot 0.
+ */
 export function replaceMediaAt(
   current: ProductMediaItem[],
   index: number,
@@ -143,12 +160,15 @@ export function replaceMediaAt(
   }
   const next = [...current];
   next[index] = first;
-  if (first.type === 'video') {
-    for (let i = next.length - 1; i >= 0; i -= 1) {
-      if (i !== index && next[i]?.type === 'video') next.splice(i, 1);
-    }
-  }
   return mergePickedMedia(next, incoming.slice(1));
+}
+
+/** First-frame thumbnail for a video item (falls back to the video URI). */
+export function thumbnailUriOf(
+  item: Pick<ProductMediaItem, 'type' | 'uri' | 'thumbnailUri'>,
+): string | undefined {
+  if (isVideoMedia(item)) return item.thumbnailUri || item.uri;
+  return item.uri;
 }
 
 export function listingThumbUri(

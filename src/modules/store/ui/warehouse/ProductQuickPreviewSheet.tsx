@@ -18,6 +18,7 @@ import {
   stockStatusOf,
 } from '@/modules/commerce/domain/stock-core';
 import { coverMedia, resolveProductMedia } from '@/modules/commerce/domain/product-media';
+import { displayMediaUri } from '@/modules/commerce/data/product-media';
 import type { MasterSku, SkuVariant, StockStatus } from '@/modules/commerce/domain/types';
 import { ProductVideoThumb } from '@/modules/store/ui/sell/ProductVideoThumb';
 import { DragDownDismiss } from '@/shared/components/DragDownDismiss';
@@ -110,7 +111,12 @@ export function ProductQuickPreviewSheet({
             <View style={styles.hero}>
               <LinearGradient colors={['#0B3D2E', '#1A7A55']} style={StyleSheet.absoluteFill} />
               {cover?.type === 'video' ? (
-                <ProductVideoThumb uri={cover.uri} style={styles.heroImage} autoPlay />
+                <ProductVideoThumb
+                  uri={cover.uri}
+                  poster={cover.thumbnailUri ? displayMediaUri(cover.thumbnailUri) : undefined}
+                  style={styles.heroImage}
+                  autoPlay
+                />
               ) : (
                 <Image source={{ uri: imageUri }} style={styles.heroImage} resizeMode="cover" />
               )}

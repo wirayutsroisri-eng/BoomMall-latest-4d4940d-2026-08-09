@@ -67,10 +67,22 @@ export function persistProductMedia(
       const target = new File(dir, `${masterId}-${index}.${extensionOf(item.uri)}`);
       if (!copyLocalFile(item.uri, target)) return { ...item, uri: displayMediaUri(item.uri) };
       const sizeBytes = typeof target.size === 'number' ? target.size : item.sizeBytes;
+
+      // Persist the video poster next to the media so tiles render instantly
+      // even after the OS purges the thumbnail cache.
+      let thumbnailUri: string | undefined;
+      if (item.thumbnailUri) {
+        const thumbTarget = new File(dir, `${masterId}-${index}.thumb.jpg`);
+        if (copyLocalFile(item.thumbnailUri, thumbTarget)) {
+          thumbnailUri = displayMediaUri(thumbTarget.uri);
+        }
+      }
+
       return {
         uri: displayMediaUri(target.uri),
         type: item.type,
         sizeBytes,
+        ...(thumbnailUri ? { thumbnailUri } : {}),
       };
     } catch {
       return item;
@@ -110,6 +122,7 @@ export async function pickProductMediaFromLibrary(input: {
       uri: item.uri,
       type: item.type,
       sizeBytes: item.sizeBytes,
+      ...(item.thumbnailUri ? { thumbnailUri: item.thumbnailUri } : {}),
     })),
     `pick-${Date.now()}`,
   );

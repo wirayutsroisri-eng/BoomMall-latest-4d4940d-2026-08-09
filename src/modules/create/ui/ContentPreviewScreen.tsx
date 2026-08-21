@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Image,
+  Keyboard,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,22 +15,46 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { captureRef } from 'react-native-view-shot';
 import { colors } from '@/shared/theme/colors';
 import {
   DEFAULT_OVERLAY_TRANSFORM,
   type OverlayTransform,
 } from '@/modules/create/domain/overlay';
 import { computeContainMediaSizeFill } from '@/modules/create/domain/cameraPreviewLayout';
-import { persistCreateMedia } from '@/modules/create/data/persistCreateMedia';
 import { useCreateDraftStore } from '@/modules/create/state/create-draft-store';
 import { openListenScreenNow } from '@/shared/navigation/safeNavigate';
 import { useMusicPlayerStore } from '@/modules/music/state/music-player-store';
 import { ProductVideoThumb } from '@/modules/store/ui/sell/ProductVideoThumb';
+import {
+  canOpenNativeMediaEditor,
+  openNativeMediaEditor,
+} from '@/modules/create/native/nativeMediaEditor';
 import { LockedStickerOverlay } from './LockedStickerOverlay';
 import { MovableStickerLayer } from './MovableStickerLayer';
-import { InteractiveTextOverlay } from './InteractiveTextOverlay';
-import type { OverlayFontKey } from '@/modules/create/domain/overlayText';
+
+import { TextStickerLayer } from './TextStickerLayer';
+import { TextStickerEditorOverlay } from './TextStickerEditorOverlay';
+import { TextOverlayStyleToolbar } from './TextOverlayStyleToolbar';
+
+import {
+  createTextStickerId,
+} from '@/modules/create/domain/overlayTextSticker';
+import {
+  textOverlayToSticker,
+  textOverlaysForMedia,
+  DEFAULT_TEXT_OVERLAY_STYLE,
+  NEW_TEXT_OVERLAY_STYLE,
+  currentTextBackgroundOpacity,
+  nextTextBackgroundOpacity,
+  nextTextBackgroundColor,
+  nextTextOverlayColor,
+  nextTextStroke,
+  nextTextStylePreset,
+  TEXT_STYLE_PRESETS,
+  type StickerOverlayObject,
+  type TextOverlayObject,
+} from '@/modules/create/domain/editorComposition';
+
 
 type FilterKey = 'none' | 'vivid' | 'warm' | 'cool' | 'mono' | 'fade';
 
@@ -81,36 +106,88 @@ export function ContentPreviewScreen() {
   const draftSnapshot = useCreateDraftStore.getState();
   const isEditing = params.edit === '1' || Boolean(draftSnapshot.editFeedId);
 
-  const draftUri = useCreateDraftStore((s) => s.uri);
+  const media = useCreateDraftStore((s) => s.media);
+  const activeMediaId = useCreateDraftStore((s) => s.activeMediaId);
+  const overlays = useCreateDraftStore((s) => s.overlays);
+  const setMedia = useCreateDraftStore((s) => s.setMedia);
+  const setActiveMediaId = useCreateDraftStore((s) => s.setActiveMediaId);
+  const setOverlays = useCreateDraftStore((s) => s.setOverlays);
   const draftType = useCreateDraftStore((s) => s.type);
-  const uri =
-    draftUri || (typeof params.uri === 'string' ? params.uri : null);
+  const activeMedia = media.find((item) => item.id === activeMediaId) ?? media[0];
+  const routeUri = typeof params.uri === 'string' ? params.uri : null;
+  const uri = activeMedia?.uri || routeUri || draftSnapshot.uri;
   const mediaType =
-    params.type === 'video' || draftType === 'video' ? 'video' : 'image';
+    params.type === 'video' || activeMedia?.type === 'video' || draftType === 'video' ? 'video' : 'image';
   const textMode = params.textMode === '1';
 
   const [tool, setTool] = useState<string | null>(
     params.textMode === '1' ? 'text' : null,
   );
-  const [filter, setFilter] = useState<FilterKey>(() => {
-    const raw = params.filter ?? draftSnapshot.filter;
+  const filter = useMemo<FilterKey>(() => {
+    const raw = params.filter ?? activeMedia?.edits?.filter ?? draftSnapshot.filter;
     if (raw === 'vivid' || raw === 'warm' || raw === 'cool' || raw === 'mono' || raw === 'fade') {
       return raw;
     }
     return 'none';
-  });
-  const [overlayText, setOverlayText] = useState(
-    () => draftSnapshot.overlayText || (params.textMode === '1' ? '' : ''),
-  );
-  const [overlayTransform, setOverlayTransform] = useState<OverlayTransform>(() => ({
-    ...(draftSnapshot.overlayTransform ?? DEFAULT_OVERLAY_TRANSFORM),
-  }));
-  const [font, setFont] = useState<OverlayFontKey>('classic');
+  }, [activeMedia?.edits?.filter, draftSnapshot.filter, params.filter]);
+  const setFilter = (next: FilterKey | ((current: FilterKey) => FilterKey)) => {
+    if (!activeMedia) return;
+    const value = typeof next === 'function' ? next(filter) : next;
+    setMedia(media.map((item) => item.id === activeMedia.id
+      ? { ...item, edits: { ...item.edits, filter: value } }
+      : item));
+  };
   const [textColor, setTextColor] = useState(() => draftSnapshot.overlayColor || '#FFFFFF');
-  const [sticker, setSticker] = useState<string | null>(draftSnapshot.sticker || null);
-  const [stickerTransform, setStickerTransform] = useState<OverlayTransform>({
-    ...DEFAULT_STICKER_TRANSFORM,
-  });
+  const [newTextStyle, setNewTextStyle] = useState<TextOverlayObject['style']>(() => ({
+    ...NEW_TEXT_OVERLAY_STYLE,
+    color: draftSnapshot.overlayColor || DEFAULT_TEXT_OVERLAY_STYLE.color,
+  }));
+  const textOverlays = useMemo(
+    () => overlays.filter(
+      (overlay): overlay is TextOverlayObject =>
+        overlay.type === 'text' && overlay.mediaId === activeMedia?.id,
+    ),
+    [activeMedia?.id, overlays],
+  );
+  const setTextOverlays = (
+    next: TextOverlayObject[] | ((current: TextOverlayObject[]) => TextOverlayObject[]),
+  ) => {
+    if (!activeMedia) return;
+    const value = typeof next === 'function' ? next(textOverlays) : next;
+    setOverlays([
+      ...overlays.filter(
+        (overlay) => !(overlay.type === 'text' && overlay.mediaId === activeMedia.id),
+      ),
+      ...value,
+    ]);
+  };
+  /** id ของชิ้นที่กำลังพิมพ์/แก้ไข (เปิด TextStickerEditorOverlay) */
+  const [editingOverlayId, setEditingOverlayId] = useState<string | null>(() =>
+    params.textMode === '1' ? textOverlays[0]?.id ?? null : null,
+  );
+
+  /** id ของชิ้นที่ถูกเลือก (แสดงปุ่มแก้ไข/ลบ) */
+  const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
+  const stickerOverlay = overlays.find(
+    (overlay): overlay is StickerOverlayObject => overlay.type === 'sticker' && overlay.mediaId === activeMedia?.id,
+  );
+  const sticker = stickerOverlay?.sticker ?? null;
+  const stickerTransform = stickerOverlay?.transform ?? DEFAULT_STICKER_TRANSFORM;
+  const setSticker = (value: string | null) => {
+    if (!activeMedia) return;
+    const without = overlays.filter((overlay) => !(overlay.type === 'sticker' && overlay.mediaId === activeMedia.id));
+    setOverlays(value ? [...without, {
+      id: stickerOverlay?.id ?? `sticker-${activeMedia.id}`,
+      mediaId: activeMedia.id,
+      type: 'sticker',
+      sticker: value,
+      transform: stickerOverlay?.transform ?? { ...DEFAULT_STICKER_TRANSFORM },
+    } satisfies StickerOverlayObject] : without);
+  };
+  const setStickerTransform = (transform: OverlayTransform) => {
+    if (!stickerOverlay) return;
+    setOverlays(overlays.map((overlay) => overlay.id === stickerOverlay.id ? { ...overlay, transform } : overlay));
+  };
   /** รีมาวน์ต์เลเยอร์หลังวางกลาง / เปลี่ยนไอคอน — ให้ gesture state ตรงกับ transform */
   const [stickerEpoch, setStickerEpoch] = useState(0);
   /** แตะพื้นว่างแล้ว → บีบขยายได้ทั้งจอ */
@@ -118,9 +195,114 @@ export function ContentPreviewScreen() {
   const draftMusic = useCreateDraftStore((s) => s.music);
   const draftMusicArtist = useCreateDraftStore((s) => s.musicArtist);
   const [musicTitle, setMusicTitle] = useState(() => draftSnapshot.music || draftMusic || '');
-  const [textEditing, setTextEditing] = useState(params.textMode === '1');
-  const [baking, setBaking] = useState(false);
-  const canvasRef = useRef<View>(null);
+  /** กำลังพิมพ์/แก้ไขข้อความอยู่หรือไม่ — ควบคุมการซ่อน UI chrome */
+  const textEditing = editingOverlayId !== null;
+  /** ชิ้นข้อความที่กำลังพิมพ์/แก้ไข (ถ้ามี) */
+  const editingOverlay = editingOverlayId
+    ? textOverlays.find((overlay) => overlay.id === editingOverlayId) ?? null
+    : null;
+  const selectedTextOverlay = selectedOverlayId
+    ? textOverlays.find((overlay) => overlay.id === selectedOverlayId) ?? null
+    : null;
+
+  const openNativeEditorForActiveMedia = async () => {
+    if (!activeMedia || !canOpenNativeMediaEditor()) return;
+    try {
+      const result = await openNativeMediaEditor({
+        mediaId: activeMedia.id,
+        uri: activeMedia.uri,
+        mediaType: activeMedia.type,
+        overlays: overlays.filter((overlay) => overlay.mediaId === activeMedia.id),
+      });
+      if (result.status !== 'done') return;
+
+      // Read once on completion so media/overlays added while native UI was
+      // open are not overwritten by a stale React render closure.
+      const state = useCreateDraftStore.getState();
+      state.setMedia(state.media.map((item) => item.id === result.mediaId
+        ? { ...item, uri: result.editedMediaURI }
+        : item));
+      state.setOverlays([
+        ...state.overlays.filter((overlay) => overlay.mediaId !== result.mediaId),
+        ...result.overlays,
+      ]);
+      setSelectedOverlayId(null);
+      setEditingOverlayId(null);
+      setTool(null);
+    } catch {
+      Alert.alert('เปิดตัวแต่ง Native ไม่สำเร็จ', 'ระบบแต่งแบบเดิมยังใช้งานได้ตามปกติ');
+    }
+  };
+
+  const updateOverlayStyle = (
+    overlayId: string,
+    update: (style: TextOverlayObject['style']) => TextOverlayObject['style'],
+  ) => {
+    setTextOverlays((current) => current.map((overlay) =>
+      overlay.id === overlayId ? { ...overlay, style: update(overlay.style) } : overlay,
+    ));
+  };
+
+  const cycleColor = (overlay: TextOverlayObject) => {
+    const color = nextTextOverlayColor(overlay.style.color);
+    setTextColor(color);
+    setNewTextStyle((style) => ({ ...style, color }));
+    updateOverlayStyle(overlay.id, (style) => ({ ...style, color }));
+  };
+
+  const cycleBackground = (overlay: TextOverlayObject) => {
+    const backgroundOpacity = nextTextBackgroundOpacity(overlay.style);
+    setNewTextStyle((style) => ({ ...style, backgroundOpacity }));
+    updateOverlayStyle(overlay.id, (style) => ({
+      ...style,
+      backgroundOpacity,
+    }));
+  };
+
+  const cycleBackgroundColor = (overlay: TextOverlayObject) => {
+    const backgroundColor = nextTextBackgroundColor(overlay.style.backgroundColor);
+    setNewTextStyle((style) => ({ ...style, backgroundColor }));
+    updateOverlayStyle(overlay.id, (style) => ({ ...style, backgroundColor }));
+  };
+
+  const cycleStroke = (overlay: TextOverlayObject) => {
+    const stroke = nextTextStroke(overlay.style);
+    setNewTextStyle((style) => ({
+      ...style,
+      strokeColor: stroke.color,
+      strokeWidth: stroke.width,
+    }));
+    updateOverlayStyle(overlay.id, (style) => ({
+      ...style,
+      strokeColor: stroke.color,
+      strokeWidth: stroke.width,
+    }));
+  };
+
+  const cycleFont = (overlay: TextOverlayObject) => {
+    const preset = nextTextStylePreset(overlay.style);
+    setNewTextStyle((style) => ({
+      ...style,
+      preset: preset.key,
+      fontKey: preset.key === 'italic' ? 'halloween' : 'classic',
+      fontFamily: undefined,
+      fontWeight: preset.fontWeight,
+      fontStyle: preset.fontStyle,
+      letterSpacing: preset.letterSpacing,
+    }));
+    updateOverlayStyle(overlay.id, (style) => ({
+      ...style,
+      preset: preset.key,
+      fontKey: preset.key === 'italic' ? 'halloween' : 'classic',
+      fontFamily: undefined,
+      fontWeight: preset.fontWeight,
+      fontStyle: preset.fontStyle,
+      letterSpacing: preset.letterSpacing,
+    }));
+  };
+  const baking = false;
+
+
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const [mediaPixelSize, setMediaPixelSize] = useState<{ width: number; height: number } | null>(
     null,
@@ -135,7 +317,15 @@ export function ContentPreviewScreen() {
     Image.getSize(
       uri,
       (width, height) => {
-        if (alive) setMediaPixelSize({ width, height });
+        if (alive) {
+          setMediaPixelSize({ width, height });
+          const state = useCreateDraftStore.getState();
+          if (activeMedia && (activeMedia.width !== width || activeMedia.height !== height)) {
+            state.setMedia(state.media.map((item) =>
+              item.id === activeMedia.id ? { ...item, width, height } : item,
+            ));
+          }
+        }
       },
       () => {
         if (alive) setMediaPixelSize(null);
@@ -144,7 +334,7 @@ export function ContentPreviewScreen() {
     return () => {
       alive = false;
     };
-  }, [mediaType, uri]);
+  }, [activeMedia, mediaType, uri]);
 
   // Video: no dynamic dimension calculation — let the native player handle
   // aspect ratio + EXIF rotation. The canvas fills the full viewport via
@@ -188,60 +378,41 @@ export function ContentPreviewScreen() {
     if (!uri && mediaType === 'video') return;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-    const hasDecor =
-      !!overlayText.trim() || !!sticker || filter !== 'none' || (textMode && !uri);
-    // ภาพนิ่ง: bake ข้อความ/ฟิลเตอร์/สติกเกอร์ลงไฟล์ — ตำแหน่งตรงทุกหน้าอย่างเสถียรที่สุด
-    let finalUri = uri;
-    let baked = false;
-
-    if (mediaType === 'image' && hasDecor) {
-      // สลับเป็น static overlay ก่อนจับภาพ (Reanimated มักไม่ติดใน snapshot)
-      setBaking(true);
-      try {
-        await new Promise<void>((resolve) => {
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-        });
-        finalUri = await persistCreateMedia(
-          await captureRef(canvasRef, {
-            format: 'jpg',
-            quality: 0.92,
-            result: 'tmpfile',
-          }),
-          'image',
-        );
-        baked = true;
-      } catch {
-        setBaking(false);
-        Alert.alert('บันทึกไม่สำเร็จ', 'ลองกดถัดไปอีกครั้ง');
-        return;
-      }
-      setBaking(false);
-    }
+    // Next only persists the live composition. Export/flatten belongs to Post.
+    const finalUri = uri;
 
     if (!finalUri) {
       Alert.alert('ยังไม่มีสื่อ', 'ถ่ายหรือเลือกจากแกลเลอรีก่อนโพสต์');
       return;
     }
 
-    const prevMediaUris = useCreateDraftStore.getState().mediaUris;
-    const nextMediaUris =
-      prevMediaUris.length > 0
-        ? prevMediaUris.map((u, index) => (index === 0 ? finalUri : u))
-        : [finalUri];
-
+    const nextMedia = media.map((item) => item.id === activeMedia?.id ? { ...item, uri: finalUri } : item);
+    const nextMediaUris = nextMedia.map((item) => item.uri);
+    const coverMediaId = nextMedia[0]?.id;
+    const coverStickers = overlays
+      .filter((overlay): overlay is TextOverlayObject =>
+        overlay.type === 'text' && overlay.mediaId === coverMediaId && Boolean(overlay.text.trim()),
+      )
+      .map(textOverlayToSticker);
+    const primary = coverStickers[0];
     setDraft({
-      uri: finalUri,
-      type: mediaType,
-      baked,
-      // เก็บข้อความไว้เติมชื่อโพสต์ — ถ้า bake แล้วจะไม่เรนเดอร์ทับอีก
-      overlayText,
-      overlayColor: textColor,
-      overlayTransform: baked ? { ...DEFAULT_OVERLAY_TRANSFORM } : overlayTransform,
-      filter: baked ? 'none' : filter,
-      sticker: baked ? '' : sticker ?? '',
+      uri: nextMedia[0]?.uri ?? finalUri,
+      type: nextMedia[0]?.type ?? mediaType,
+      baked: false,
+      // Legacy adapter only; post metadata never reads this as title/description.
+      overlayText: primary?.text ?? '',
+      overlayColor: primary?.color ?? textColor,
+      overlayTransform: primary?.transform ?? { ...DEFAULT_OVERLAY_TRANSFORM },
+      overlayStickers: coverStickers,
+      filter: nextMedia[0]?.edits?.filter ?? 'none',
+      sticker: '',
       music: musicTitle.trim(),
       mediaUris: nextMediaUris,
+      media: nextMedia,
+      overlays,
     });
+
+
     router.push({
       pathname: '/create-publish',
       params: { type: mediaType },
@@ -264,7 +435,6 @@ export function ContentPreviewScreen() {
       <View style={styles.mediaStage}>
         {/* เฉพาะเลเยอร์สื่อ — จับภาพส่วนนี้ตอนกดถัดไป (ไม่รวม UI chrome) */}
         <View
-          ref={canvasRef}
           style={[
             styles.canvas,
             mediaType === 'video' && styles.videoCanvas,
@@ -293,25 +463,53 @@ export function ContentPreviewScreen() {
           />
         ) : null}
 
-        {overlayText.trim() || textEditing ? (
-          <InteractiveTextOverlay
-            editing={textEditing}
-            locked={baking}
-            text={overlayText}
-            color={textColor}
-            fontKey={font}
-            transform={overlayTransform}
-            onTextChange={setOverlayText}
-            onColorChange={setTextColor}
-            onFontChange={setFont}
-            onTransformChange={setOverlayTransform}
-            onEditingChange={(next) => {
-              setTextEditing(next);
-              if (!next) setTool(null);
+        {baking ? null : (
+          <TextStickerLayer
+            overlays={textOverlays}
+            selectedId={selectedOverlayId}
+            onSelect={(id) => {
+              setSelectedOverlayId(id);
+              setTool(null);
+            }}
+            onEdit={(id) => {
+              setSelectedOverlayId(null);
+              setEditingOverlayId(id);
+            }}
+            onDelete={(id) => {
+              const target = textOverlays.find((overlay) => overlay.id === id);
+              Alert.alert(
+                'ลบข้อความนี้?',
+                target?.text ? `“${target.text.slice(0, 30)}” จะถูกลบออก` : 'ข้อความนี้จะถูกลบออก',
+                [
+                  { text: 'ยกเลิก', style: 'cancel' },
+                  {
+                    text: 'ลบ',
+                    style: 'destructive',
+                    onPress: () => {
+                      void Haptics.selectionAsync();
+                      setTextOverlays((prev) => prev.filter((overlay) => overlay.id !== id));
+                      setSelectedOverlayId(null);
+                    },
+                  },
+                ],
+              );
+            }}
+            onTransformChange={(id, transform) => {
+              setTextOverlays((prev) =>
+                prev.map((overlay) => (overlay.id === id ? { ...overlay, transform } : overlay)),
+              );
+            }}
+            onBlankTap={() => {
+              Keyboard.dismiss();
+              setEditingOverlayId(null);
+              setSelectedOverlayId(null);
+              setTool(null);
             }}
           />
-        ) : null}
+        )}
+
         {sticker ? (
+
           baking ? (
             <LockedStickerOverlay sticker={sticker} transform={stickerTransform} />
           ) : (
@@ -332,8 +530,48 @@ export function ContentPreviewScreen() {
         </View>
       </View>
 
+      {editingOverlayId && editingOverlay ? (
+        <TextStickerEditorOverlay
+          visible
+          text={editingOverlay.text}
+          color={editingOverlay.style.color}
+          backgroundOpacity={currentTextBackgroundOpacity(editingOverlay.style)}
+          backgroundColor={editingOverlay.style.backgroundColor ?? 'transparent'}
+          strokeColor={editingOverlay.style.strokeColor ?? 'transparent'}
+          strokeWidth={editingOverlay.style.strokeWidth ?? 0}
+          fontLabel={TEXT_STYLE_PRESETS.find(
+            (preset) => preset.key === (editingOverlay.style.preset ?? 'default'),
+          )?.label ?? 'Default'}
+          locked={editingOverlay.locked === true}
+
+          onTextChange={(value) => {
+            setTextOverlays((prev) =>
+              prev.map((overlay) =>
+                overlay.id === editingOverlayId ? { ...overlay, text: value } : overlay,
+              ),
+            );
+          }}
+          onCycleColor={() => cycleColor(editingOverlay)}
+          onCycleBackgroundColor={() => cycleBackgroundColor(editingOverlay)}
+          onCycleBackgroundOpacity={() => cycleBackground(editingOverlay)}
+          onCycleStroke={() => cycleStroke(editingOverlay)}
+          onCycleFont={() => cycleFont(editingOverlay)}
+          onToggleLock={() => {
+            setTextOverlays((current) => current.map((overlay) =>
+              overlay.id === editingOverlay.id ? { ...overlay, locked: !overlay.locked } : overlay,
+            ));
+          }}
+          onDone={() => {
+            // แตะพื้นหลัง/เสร็จสิ้น → ปิดคีย์บอร์ด + ล็อกเป็นโหมด Sticker
+            setEditingOverlayId(null);
+            setTool(null);
+          }}
+        />
+      ) : null}
+
       {!textEditing ? (
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
+
         <Pressable hitSlop={10} onPress={() => router.back()} style={styles.iconBtn}>
           <Ionicons name="chevron-back" size={28} color="#fff" />
         </Pressable>
@@ -368,11 +606,38 @@ export function ContentPreviewScreen() {
             onPress={() => {
               void Haptics.selectionAsync();
               setTool(t.key);
-              if (t.key === 'text') setTextEditing(true);
+              // กด "Aa" อีกครั้ง → เพิ่มข้อความชิ้นใหม่ (ข้อความเดิมยังอยู่บนจอ)
+              if (t.key === 'text') {
+                if (!activeMedia) return;
+                if (canOpenNativeMediaEditor()) {
+                  void openNativeEditorForActiveMedia();
+                  return;
+                }
+                const fresh: TextOverlayObject = {
+                  id: createTextStickerId(),
+                  mediaId: activeMedia.id,
+                  type: 'text',
+                  text: '',
+                  locked: false,
+                  style: { ...newTextStyle },
+                  transform: {
+                    x: 0.5,
+                    y: 0.38 + Math.min(0.3, textOverlays.length * 0.06),
+                    scale: 1,
+                    rotation: 0,
+                  },
+                };
+
+                setTextOverlays((prev) => [...prev, fresh]);
+                setSelectedOverlayId(null);
+                setEditingOverlayId(fresh.id);
+                return;
+              }
               if (t.key === 'music') {
                 if (!openListenScreenNow()) return;
                 return;
               }
+
               if (t.key === 'effects') setFilter((f) => (f === 'none' ? 'vivid' : 'none'));
               // ตัดครอบแบบ TikTok
               if (mediaType === 'image' && t.key === 'crop') {
@@ -501,6 +766,62 @@ export function ContentPreviewScreen() {
         </ScrollView>
       ) : null}
 
+      {!textEditing && selectedTextOverlay ? (
+        <View style={[styles.textStyleCycleBar, { top: insets.top + 56 }]}>
+          <TextOverlayStyleToolbar
+            color={selectedTextOverlay.style.color}
+            backgroundOpacity={currentTextBackgroundOpacity(selectedTextOverlay.style)}
+            backgroundColor={selectedTextOverlay.style.backgroundColor ?? 'transparent'}
+            strokeColor={selectedTextOverlay.style.strokeColor ?? 'transparent'}
+            strokeWidth={selectedTextOverlay.style.strokeWidth ?? 0}
+            fontLabel={TEXT_STYLE_PRESETS.find(
+              (preset) => preset.key === (selectedTextOverlay.style.preset ?? 'default'),
+            )?.label ?? 'Default'}
+            locked={selectedTextOverlay.locked === true}
+            onCycleColor={() => cycleColor(selectedTextOverlay)}
+            onCycleBackgroundColor={() => cycleBackgroundColor(selectedTextOverlay)}
+            onCycleBackgroundOpacity={() => cycleBackground(selectedTextOverlay)}
+            onCycleStroke={() => cycleStroke(selectedTextOverlay)}
+            onCycleFont={() => cycleFont(selectedTextOverlay)}
+            onToggleLock={() => {
+              setTextOverlays((current) => current.map((overlay) =>
+                overlay.id === selectedTextOverlay.id ? { ...overlay, locked: !overlay.locked } : overlay,
+              ));
+            }}
+          />
+        </View>
+      ) : null}
+
+      {!textEditing && !tool && !selectedTextOverlay && media.length > 1 ? (
+        <ScrollView
+          horizontal
+          style={styles.mediaSwitcher}
+          contentContainerStyle={styles.mediaSwitcherContent}
+          showsHorizontalScrollIndicator={false}
+        >
+          {media.map((item, index) => (
+            <Pressable
+              key={item.id}
+              style={[styles.mediaThumb, item.id === activeMedia?.id && styles.mediaThumbActive]}
+              onPress={() => {
+                setActiveMediaId(item.id);
+                setSelectedOverlayId(null);
+                setEditingOverlayId(null);
+                void Haptics.selectionAsync();
+              }}
+              accessibilityLabel={`แก้ไขสื่อชิ้นที่ ${index + 1}`}
+            >
+              <Image source={{ uri: item.uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+              {textOverlaysForMedia(overlays, item.id).length ? (
+                <View style={styles.mediaOverlayBadge}>
+                  <Text style={styles.mediaOverlayBadgeText}>Aa</Text>
+                </View>
+              ) : null}
+            </Pressable>
+          ))}
+        </ScrollView>
+      ) : null}
+
       {!textEditing ? (
       <View style={[styles.bottomActions, { paddingBottom: Math.max(insets.bottom, 14) }]}>
         <Pressable
@@ -560,6 +881,40 @@ const styles = StyleSheet.create({
   },
   textCanvas: {
     backgroundColor: '#0B1F17',
+  },
+  mediaSwitcher: {
+    position: 'absolute',
+    left: 12,
+    right: 92,
+    bottom: 82,
+    zIndex: 7,
+  },
+  mediaSwitcherContent: { gap: 8, paddingVertical: 3 },
+  mediaThumb: {
+    width: 48,
+    height: 64,
+    borderRadius: 8,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
+  mediaThumbActive: { borderWidth: 2, borderColor: '#fff' },
+  mediaOverlayBadge: {
+    position: 'absolute',
+    right: 2,
+    bottom: 2,
+    borderRadius: 5,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+  },
+  mediaOverlayBadgeText: { color: '#fff', fontSize: 9, fontWeight: '900' },
+  textStyleCycleBar: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    zIndex: 9,
+    alignItems: 'center',
   },
   missing: { color: '#fff', textAlign: 'center', fontWeight: '700' },
   dim: {

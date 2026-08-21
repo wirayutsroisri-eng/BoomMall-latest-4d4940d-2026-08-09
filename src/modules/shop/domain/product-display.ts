@@ -9,7 +9,11 @@ export type GallerySlide = {
   uri: string;
   type: 'image' | 'video';
   variantId?: string;
+  /** First-frame poster for videos (extracted at pick time) — lets the PDP
+   *  thumbnail strip render instantly without mounting a video player. */
+  thumbnailUri?: string;
 };
+
 
 export function formatTHB(n: number) {
   return `฿${n.toLocaleString('th-TH')}`;
@@ -59,16 +63,18 @@ export function buildGallery(master: MasterSku, variants: SkuVariant[]): Gallery
     key: string,
     type: GallerySlide['type'] = 'image',
     variantId?: string,
+    thumbnailUri?: string,
   ) => {
     const value = uri?.trim();
     if (!value || seen.has(value)) return;
     seen.add(value);
-    slides.push({ key, uri: value, type, variantId });
+    slides.push({ key, uri: value, type, variantId, thumbnailUri });
   };
 
   for (const item of resolveProductMedia(master)) {
-    push(item.uri, `master-${slides.length}`, item.type);
+    push(item.uri, `master-${slides.length}`, item.type, undefined, item.thumbnailUri);
   }
+
 
   for (const v of variants) {
     push(v.imageUri, `var-${v.id}`, 'image', v.id);

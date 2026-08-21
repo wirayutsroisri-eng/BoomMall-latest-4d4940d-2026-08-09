@@ -763,6 +763,11 @@ export function ProductEditScreen() {
             items={media}
             onAdd={openAddGallery}
             onRemove={removeMediaAt}
+            onUpdateItem={(index, patch) =>
+              setMedia((prev) =>
+                prev.map((item, i) => (i === index ? { ...item, ...patch } : item)),
+              )
+            }
             onMove={moveMedia}
             onReplace={openReplaceGallery}
             editable={isMine}

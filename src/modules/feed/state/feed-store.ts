@@ -28,6 +28,8 @@ type NewPostInput = {
   imageHeight?: number;
   imageUris?: string[];
   videoUri?: string;
+  editorMedia?: FeedItem['editorMedia'];
+  overlays?: FeedItem['overlays'];
   overlayText?: string;
   overlayTextColor?: string;
   overlayTransform?: {
@@ -36,8 +38,11 @@ type NewPostInput = {
     scale: number;
     rotation: number;
   };
+  /** ข้อความหลายชิ้น (Text Stickers) — ส่งต่อไปยัง export/composite ครบทุกชิ้น */
+  overlayStickers?: FeedItem['overlayStickers'];
   /** ชื่อสินค้าบนการ์ดซื้อ (ถ้าไม่ใส่ใช้แคปชัน) */
   productName?: string;
+
   /** ผูก Master จากคลังเมื่อโพสต์พร้อมขาย */
   masterProductId?: string;
   stock?: number;
@@ -56,6 +61,21 @@ type NewPostInput = {
   musicTitle?: string;
   locationLabel?: string;
 };
+
+function replaceEditorMediaUris(
+  media: FeedItem['editorMedia'],
+  imageUris: string[] | undefined,
+  videoUri: string | undefined,
+): FeedItem['editorMedia'] {
+  if (!media?.length) return media;
+  let imageIndex = 0;
+  return media.map((item) => {
+    const uri = item.type === 'video'
+      ? videoUri ?? item.uri
+      : imageUris?.[imageIndex++] ?? item.uri;
+    return uri === item.uri ? item : { ...item, uri };
+  });
+}
 
 type FeedState = {
   tab: FeedTab;
@@ -206,12 +226,16 @@ export const useFeedStore = create<FeedState>()(
       imageHeight: input.imageHeight,
       imageUris,
       videoUri: input.videoUri,
+      editorMedia: input.editorMedia,
+      overlays: input.overlays,
       overlayText: input.overlayText?.trim() || undefined,
       overlayTextColor: input.overlayTextColor,
       overlayTransform: input.overlayTransform,
+      overlayStickers: input.overlayStickers,
       isUserPost: true,
       product: {
         id: input.masterProductId ?? `p-user-${Date.now()}`,
+
         name: input.productName?.trim() || input.caption || 'สินค้าใหม่',
         shopName: profile.displayName,
         tier: input.channel,
@@ -255,6 +279,7 @@ export const useFeedStore = create<FeedState>()(
                   imageUri: stableImages?.[0] ?? item.imageUri,
                   imageUris: stableImages ?? item.imageUris,
                   videoUri: stableVideo ?? item.videoUri,
+                  editorMedia: replaceEditorMediaUris(item.editorMedia, stableImages, stableVideo),
                 },
           ),
         }));
@@ -266,6 +291,11 @@ export const useFeedStore = create<FeedState>()(
         imageUris: stableImages,
         videoUri: stableVideo,
       });
+      const uploadedEditorMedia = replaceEditorMediaUris(
+        newItem.editorMedia,
+        uploaded.imageUris,
+        uploaded.videoUri,
+      );
       const saved = await publishSocialPost({
         body: caption,
         media: {
@@ -275,6 +305,8 @@ export const useFeedStore = create<FeedState>()(
           overlayText: newItem.overlayText,
           overlayTextColor: newItem.overlayTextColor,
           overlayTransform: newItem.overlayTransform,
+          editorMedia: uploadedEditorMedia,
+          overlays: newItem.overlays,
           authorName: author,
           authorHandle,
         },
@@ -316,6 +348,8 @@ export const useFeedStore = create<FeedState>()(
               imageUri: uploaded.imageUris[0] ?? next.imageUri,
               imageUris: uploaded.imageUris.length ? uploaded.imageUris : next.imageUris,
               videoUri: uploaded.videoUri ?? next.videoUri,
+              editorMedia: uploadedEditorMedia ?? next.editorMedia,
+              overlays: next.overlays?.length ? next.overlays : newItem.overlays,
             };
           }),
         };
@@ -342,7 +376,6 @@ export const useFeedStore = create<FeedState>()(
     if (!existing?.isUserPost) return false;
 
     const profile = useLoyaltyStore.getState().profile;
-    const auth = useAuthStore.getState().user;
     const authorHandle = profile.handle.replace(/^@/, '');
     const imageUris =
       input.imageUris?.filter(Boolean) ??
@@ -360,12 +393,16 @@ export const useFeedStore = create<FeedState>()(
           imageUri: imageUris?.[0] ?? input.imageUri ?? item.imageUri,
           imageUris: imageUris ?? item.imageUris,
           videoUri: input.videoUri ?? item.videoUri,
+          editorMedia: input.editorMedia ?? item.editorMedia,
+          overlays: input.overlays ?? item.overlays,
           overlayText: input.overlayText?.trim() || undefined,
           overlayTextColor: input.overlayTextColor,
           overlayTransform: input.overlayTransform,
+          overlayStickers: input.overlayStickers,
           location: input.locationLabel ?? item.location,
           imageWidth: input.imageWidth ?? item.imageWidth,
           imageHeight: input.imageHeight ?? item.imageHeight,
+
         };
       }),
     }));
@@ -391,6 +428,7 @@ export const useFeedStore = create<FeedState>()(
                   imageUri: stableImages?.[0] ?? item.imageUri,
                   imageUris: stableImages ?? item.imageUris,
                   videoUri: stableVideo ?? item.videoUri,
+                  editorMedia: replaceEditorMediaUris(item.editorMedia, stableImages, stableVideo),
                 },
           ),
         }));
@@ -402,6 +440,11 @@ export const useFeedStore = create<FeedState>()(
         imageUris: stableImages,
         videoUri: stableVideo,
       });
+      const uploadedEditorMedia = replaceEditorMediaUris(
+        input.editorMedia ?? existing.editorMedia,
+        uploaded.imageUris,
+        uploaded.videoUri,
+      );
       const saved = await syncFeedPostUpdate(feedId, {
         body: caption,
         media: {
@@ -411,6 +454,8 @@ export const useFeedStore = create<FeedState>()(
           overlayText: input.overlayText,
           overlayTextColor: input.overlayTextColor,
           overlayTransform: input.overlayTransform,
+          editorMedia: uploadedEditorMedia,
+          overlays: input.overlays,
           authorName: profile.displayName,
           authorHandle,
         },
@@ -436,6 +481,8 @@ export const useFeedStore = create<FeedState>()(
             imageUri: uploaded.imageUris[0] ?? mapped.imageUri ?? item.imageUri,
             imageUris: uploaded.imageUris.length ? uploaded.imageUris : mapped.imageUris ?? item.imageUris,
             videoUri: uploaded.videoUri ?? mapped.videoUri ?? item.videoUri,
+            editorMedia: uploadedEditorMedia ?? mapped.editorMedia ?? item.editorMedia,
+            overlays: mapped.overlays?.length ? mapped.overlays : input.overlays ?? item.overlays,
             likes: item.likes,
             comments: item.comments,
             shares: item.shares,

@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/immutability -- Reanimated shared values are intentionally mutated by UI-thread worklets. */
 import React, { useEffect } from 'react';
 import { StyleSheet } from 'react-native';
 import {
@@ -47,12 +48,17 @@ export function FeedPinchZoomLayer({
 }: Props) {
   const scale = useSharedValue(1);
   const startScale = useSharedValue(1);
+  const pinchStartFocalX = useSharedValue(0);
+  const pinchStartFocalY = useSharedValue(0);
+  const pinchStartTx = useSharedValue(0);
+  const pinchStartTy = useSharedValue(0);
   const tx = useSharedValue(0);
   const ty = useSharedValue(0);
   const startTx = useSharedValue(0);
   const startTy = useSharedValue(0);
   const spanW = useSharedValue(1);
   const spanH = useSharedValue(1);
+  const zoomNotified = useSharedValue(0);
 
   const notifyZoom = (zoomed: boolean) => {
     onZoomChange?.(zoomed);
@@ -62,6 +68,7 @@ export function FeedPinchZoomLayer({
     scale.value = 1;
     tx.value = 0;
     ty.value = 0;
+    zoomNotified.value = 0;
     notifyZoom(false);
   };
 
@@ -77,21 +84,33 @@ export function FeedPinchZoomLayer({
 
   const pinch = Gesture.Pinch()
     .enabled(enabled)
-    .onStart(() => {
+    .onStart((e) => {
       startScale.value = scale.value;
+      pinchStartTx.value = tx.value;
+      pinchStartTy.value = ty.value;
+      pinchStartFocalX.value = e.focalX - spanW.value / 2;
+      pinchStartFocalY.value = e.focalY - spanH.value / 2;
     })
     .onUpdate((e) => {
       const next = clamp(startScale.value * e.scale, MIN_SCALE, MAX_SCALE);
+      const focalX = e.focalX - spanW.value / 2;
+      const focalY = e.focalY - spanH.value / 2;
+      const contentX = (pinchStartFocalX.value - pinchStartTx.value) / startScale.value;
+      const contentY = (pinchStartFocalY.value - pinchStartTy.value) / startScale.value;
       scale.value = next;
-      tx.value = clampPan(tx.value, spanW.value, next);
-      ty.value = clampPan(ty.value, spanH.value, next);
-      if (next > 1.04) runOnJS(notifyZoom)(true);
+      tx.value = clampPan(focalX - contentX * next, spanW.value, next);
+      ty.value = clampPan(focalY - contentY * next, spanH.value, next);
+      if (next > 1.04 && zoomNotified.value === 0) {
+        zoomNotified.value = 1;
+        runOnJS(notifyZoom)(true);
+      }
     })
     .onEnd(() => {
       if (scale.value <= 1.04) {
         scale.value = withSpring(1, { damping: 18, stiffness: 220 });
         tx.value = withSpring(0, { damping: 18, stiffness: 220 });
         ty.value = withSpring(0, { damping: 18, stiffness: 220 });
+        zoomNotified.value = 0;
         runOnJS(notifyZoom)(false);
       }
     });

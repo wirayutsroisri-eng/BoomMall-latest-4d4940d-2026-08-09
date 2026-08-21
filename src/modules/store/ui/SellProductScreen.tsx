@@ -415,6 +415,11 @@ export function SellProductScreen() {
                 onAdd={pickSellImages}
                 onRemove={(index) => setMedia((prev) => prev.filter((_, i) => i !== index))}
                 onReplace={replaceSellImage}
+                onUpdateItem={(index, patch) =>
+                  setMedia((prev) =>
+                    prev.map((item, i) => (i === index ? { ...item, ...patch } : item)),
+                  )
+                }
                 onMove={(index, direction) => {
                   const target = index + direction;
                   setMedia((prev) => {

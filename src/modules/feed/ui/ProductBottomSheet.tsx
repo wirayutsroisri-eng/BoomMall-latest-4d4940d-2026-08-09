@@ -258,6 +258,7 @@ export const ProductBottomSheet = forwardRef<BottomSheetModal, Props>(
                       {slide.type === 'video' ? (
                         <ProductVideoThumb
                           uri={displayMediaUri(slide.uri)}
+                          poster={slide.thumbnailUri ? displayMediaUri(slide.thumbnailUri) : undefined}
                           style={styles.slideMedia}
                           contentFit="contain"
                           interactive={false}

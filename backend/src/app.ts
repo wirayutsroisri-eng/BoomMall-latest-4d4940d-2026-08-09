@@ -42,7 +42,8 @@ export function createApp() {
       exposedHeaders: ['Idempotency-Key'],
     }),
   );
-  app.use(express.json({ limit: '2mb' }));
+  app.use(express.json({ limit: '200mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '200mb' }));
   app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
   app.use('/media/chat', express.static(chatMediaDir(), { maxAge: '7d', fallthrough: false }));
   app.use('/legal', legalPublicRouter);

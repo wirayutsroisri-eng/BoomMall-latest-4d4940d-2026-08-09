@@ -52,6 +52,7 @@ import { IOS_SPRING } from './feedMotion';
 import { useFeedChromeStore } from '@/modules/feed/state/feed-chrome-store';
 import { syncFeedInterested, syncFeedLike, syncFeedNotInterested, syncFeedShare } from '@/modules/feed/data/feedEngageApi';
 import { recordActivity } from '@/modules/account/state/activity-store';
+import { MediaViewer } from './MediaViewer';
 
 /** ซ้าย → ขวา ตามหัวแท็บ: หางาน | ใกล้คุณ | กำลังติดตาม | สำหรับคุณ */
 const TAB_ORDER: FeedTab[] = ['board', 'nearby', 'following', 'foryou'];
@@ -550,6 +551,7 @@ export function HomeFeedScreen() {
 
       <MatchingNotifyBanner />
       <SellerNotifyBanner />
+      <MediaViewer />
     </View>
   );
 }

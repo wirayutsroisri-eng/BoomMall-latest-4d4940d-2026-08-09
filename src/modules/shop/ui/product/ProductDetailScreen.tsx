@@ -23,7 +23,9 @@ import { displayMediaUri } from '@/modules/commerce/data/product-media';
 import { useInventoryStore } from '@/modules/commerce/state/inventory-store';
 import { useCartStore } from '@/modules/commerce/state/cart-store';
 import type { MasterSku, SkuVariant, WarehouseId } from '@/modules/commerce/domain/types';
+import { thumbnailUriOf } from '@/modules/commerce/domain/product-media';
 import { ProductVideoThumb } from '@/modules/store/ui/sell/ProductVideoThumb';
+
 import { useChatStore } from '@/modules/chat/state/chat-store';
 import { jumpToChatThread } from '@/shared/navigation/safeNavigate';
 import { useFollowStore } from '@/modules/social/state/follow-store';
@@ -501,6 +503,7 @@ export function ProductDetailScreen() {
                   <View style={styles.heroImage}>
                     <ProductVideoThumb
                       uri={displayMediaUri(item.uri)}
+                      poster={item.thumbnailUri ? displayMediaUri(item.thumbnailUri) : undefined}
                       style={styles.heroImage}
                       autoPlay
                       contentFit="contain"
@@ -570,7 +573,50 @@ export function ProductDetailScreen() {
           )}
         </View>
 
+        {gallery.length > 1 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.mediaStrip}
+            contentContainerStyle={styles.mediaStripContent}
+          >
+            {gallery.map((slide, idx) => {
+              const active = idx === heroIndex;
+              const isVideo = slide.type === 'video';
+              const thumb = displayMediaUri(
+                isVideo
+                  ? (thumbnailUriOf({
+                      type: slide.type,
+                      uri: slide.uri,
+                      thumbnailUri: slide.thumbnailUri,
+                    }) ?? slide.uri)
+                  : slide.uri,
+              );
+
+              return (
+                <Pressable
+                  key={slide.key}
+                  onPress={() => {
+                    setHeroIndex(idx);
+                    heroRef.current?.scrollToIndex({ index: idx, animated: true });
+                  }}
+                  style={[styles.mediaThumbWrap, active && styles.mediaThumbOn]}
+                  accessibilityLabel={isVideo ? `ดูวิดีโอ ${idx + 1}` : `ดูรูป ${idx + 1}`}
+                >
+                  <Image source={{ uri: thumb }} style={styles.mediaThumb} resizeMode="cover" />
+                  {isVideo ? (
+                    <View style={styles.mediaThumbPlay} pointerEvents="none">
+                      <Ionicons name="play" size={10} color="#fff" />
+                    </View>
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        ) : null}
+
         <View style={styles.priceCard}>
+
           <View style={styles.priceRow}>
             <Text style={styles.priceNow}>{displayPrice}</Text>
             <View style={styles.conditionPill}>
@@ -953,7 +999,32 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   heroCountText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  mediaStrip: { backgroundColor: '#fff', paddingVertical: 8 },
+  mediaStripContent: { paddingHorizontal: H_PAD, gap: 6 },
+  mediaThumbWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: colors.border.soft,
+    backgroundColor: '#EEE',
+    overflow: 'hidden',
+  },
+  mediaThumbOn: { borderColor: ORANGE, borderWidth: 2 },
+  mediaThumb: { width: 52, height: 52 },
+  mediaThumbPlay: {
+    position: 'absolute',
+    right: 3,
+    bottom: 3,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.62)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   priceCard: {
+
     backgroundColor: '#fff',
     paddingHorizontal: H_PAD,
     paddingTop: 16,

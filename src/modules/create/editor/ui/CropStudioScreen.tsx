@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { FlipType, ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { colors } from '@/shared/theme/colors';
+import { useCreateDraftStore } from '@/modules/create/state/create-draft-store';
 import { CropFrameOverlay } from '@/shared/media/CropFrameOverlay';
 import {
   aspectValue,
@@ -121,6 +122,7 @@ export function CropStudioScreen() {
       });
       const rendered = await ctx.renderAsync();
       const saved = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: 0.92 });
+      useCreateDraftStore.getState().replaceActiveMediaUri(saved.uri);
       router.replace({
         pathname: '/create-preview',
         params: { uri: saved.uri, type: 'image' },

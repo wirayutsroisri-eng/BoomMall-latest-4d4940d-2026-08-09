@@ -175,6 +175,7 @@ export function ZoomGalleryModal({ visible, slides, index, onIndexChange, onClos
               {item.type === 'video' ? (
                 <ProductVideoThumb
                   uri={displayMediaUri(item.uri)}
+                  poster={item.thumbnailUri ? displayMediaUri(item.thumbnailUri) : undefined}
                   style={styles.zoomImage}
                   nativeControls
                   muted={false}

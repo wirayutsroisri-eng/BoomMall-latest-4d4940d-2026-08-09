@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   Pressable,
@@ -67,6 +68,7 @@ export function ChatListScreen() {
   const archiveConversation = useChatStore((s) => s.archiveConversation);
   const deleteConversation = useChatStore((s) => s.deleteConversation);
   const hydrateInbox = useChatStore((s) => s.hydrateInbox);
+  const hydratingInbox = useChatStore((s) => s.hydratingInbox);
   const groups = useOpenChatStore((s) => s.groups);
   const authUser = useAuthStore((s) => s.user);
   const blockedUserIds = useModerationStore((s) => s.blockedUserIds);
@@ -272,10 +274,17 @@ export function ChatListScreen() {
           )
         }
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Ionicons name="chatbubbles-outline" size={36} color={palette.empty} />
-            <Text style={[styles.emptyText, { color: palette.empty }]}>ไม่มีแชตในหมวดนี้</Text>
-          </View>
+          hydratingInbox ? (
+            <View style={styles.empty}>
+              <ActivityIndicator size="large" color={palette.addIcon} />
+              <Text style={[styles.emptyText, { color: palette.empty }]}>กำลังโหลดแชท…</Text>
+            </View>
+          ) : (
+            <View style={styles.empty}>
+              <Ionicons name="chatbubbles-outline" size={36} color={palette.empty} />
+              <Text style={[styles.emptyText, { color: palette.empty }]}>ไม่มีแชตในหมวดนี้</Text>
+            </View>
+          )
         }
       />
 

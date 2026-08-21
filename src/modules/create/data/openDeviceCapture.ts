@@ -10,6 +10,7 @@ import { isRouteMounted, safePush } from '@/shared/navigation/safeNavigate';
 import { normalizeMediaUri } from '@/shared/media/resolveMediaLibraryUri';
 import { SHARED_MEDIA_GALLERY_LIMIT } from '@/shared/media/openSharedMediaGallery';
 import { pickSystemMediaFromLibrary } from '@/shared/media/systemMediaLibraryPicker';
+import { legacyTextOverlaysForMedia, makeEditorMedia } from '../domain/editorComposition';
 
 let busy = false;
 
@@ -31,10 +32,22 @@ export function isIosSimulator(): boolean {
 
 async function goPreview(uri: string, type: 'image' | 'video') {
   const normalized = normalizeMediaUri(uri);
+  const current = useCreateDraftStore.getState();
+  const media = makeEditorMedia(normalized, type);
   useCreateDraftStore.getState().setDraft({
     uri: normalized,
     type,
     baked: false,
+    mediaUris: [normalized],
+    media: [media],
+    activeMediaId: media.id,
+    overlays: legacyTextOverlaysForMedia({
+      mediaId: media.id,
+      stickers: current.overlayStickers,
+      text: current.overlayText,
+      color: current.overlayColor,
+      transform: current.overlayTransform,
+    }),
   });
   router.push({
     pathname: '/create-preview',
@@ -43,7 +56,11 @@ async function goPreview(uri: string, type: 'image' | 'video') {
 
   void persistCreateMedia(normalized, type).then((stable) => {
     if (stable && stable !== normalized) {
-      useCreateDraftStore.getState().setDraft({ uri: stable });
+      useCreateDraftStore.getState().setDraft({
+        uri: stable,
+        mediaUris: [stable],
+        media: [{ ...media, uri: stable }],
+      });
     }
   });
 }
@@ -72,11 +89,22 @@ export async function beginCreateFromGalleryItems(
   }
 
   const firstUri = normalizeMediaUri(items[0]!.uri);
+  const media = items.map((item) => makeEditorMedia(normalizeMediaUri(item.uri), 'image'));
+  const current = useCreateDraftStore.getState();
   useCreateDraftStore.getState().setDraft({
     uri: firstUri,
     type: 'image',
     baked: false,
     mediaUris: items.map((i) => normalizeMediaUri(i.uri)),
+    media,
+    activeMediaId: media[0]!.id,
+    overlays: legacyTextOverlaysForMedia({
+      mediaId: media[0]!.id,
+      stickers: current.overlayStickers,
+      text: current.overlayText,
+      color: current.overlayColor,
+      transform: current.overlayTransform,
+    }),
   });
   router.push({
     pathname: '/create-preview',
@@ -87,6 +115,7 @@ export async function beginCreateFromGalleryItems(
     useCreateDraftStore.getState().setDraft({
       uri: uris[0]!,
       mediaUris: uris,
+      media: media.map((item, index) => ({ ...item, uri: uris[index] ?? item.uri })),
     });
   });
 }

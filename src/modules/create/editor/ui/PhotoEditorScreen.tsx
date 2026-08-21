@@ -35,6 +35,7 @@ import {
 import { colors } from '@/shared/theme/colors';
 import { buildColorMatrix } from '../domain/colorMatrix';
 import { saveSkiaImageToCache } from '../domain/exportSnapshot';
+import { useCreateDraftStore } from '@/modules/create/state/create-draft-store';
 import {
   BRUSH_COLORS,
   DEFAULT_ADJUST,
@@ -228,6 +229,8 @@ export function PhotoEditorScreen() {
         if (!snap) throw new Error('snapshot failed');
         outUri = saveSkiaImageToCache(snap, 'photo-edit');
       }
+
+      useCreateDraftStore.getState().replaceActiveMediaUri(outUri);
 
       router.replace({
         pathname: '/create-preview',

@@ -144,6 +144,7 @@ export function FeedVideoLayer({
       player={player}
       style={[style ?? StyleSheet.absoluteFill, styles.base]}
       contentFit={contentFit}
+      surfaceType="textureView"
       pointerEvents="none"
       nativeControls={false}
     />

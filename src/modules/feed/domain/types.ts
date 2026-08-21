@@ -1,3 +1,5 @@
+import type { EditorMedia, OverlayObject } from '@/modules/create/domain/editorComposition';
+
 export type FeedTab = 'nearby' | 'following' | 'foryou' | 'board';
 
 /** เลนคอนเทนต์หลัก — สำหรับคุณ / กำลังติดตาม / ใกล้คุณ / เว็บบอร์ด */
@@ -74,6 +76,9 @@ export type FeedItem = {
   /** หลายรูปในโพสต์เดียว — ปัดซ้าย/ขวาเลื่อนในโพสต์ (ไม่เปิดโปรไฟล์) */
   imageUris?: string[];
   videoUri?: string;
+  /** Canonical non-destructive editor composition. */
+  editorMedia?: EditorMedia[];
+  overlays?: OverlayObject[];
   /** ข้อความที่พิมพ์ทับบนภาพตอนแต่ง (คงอยู่ถึงฟีด) */
   overlayText?: string;
   overlayTextColor?: string;
@@ -84,9 +89,18 @@ export type FeedItem = {
     scale: number;
     rotation: number;
   };
+  /** ข้อความหลายชิ้น (Text Stickers) — ส่งต่อไปยัง export/composite ครบทุกชิ้น */
+  overlayStickers?: Array<{
+    id: string;
+    text: string;
+    color: string;
+    fontKey: string;
+    transform: { x: number; y: number; scale: number; rotation: number };
+  }>;
   /** true when created via the in-app Camera/Creator Studio during this session */
   isUserPost?: boolean;
 };
+
 
 export type FeedComment = {
   id: string;

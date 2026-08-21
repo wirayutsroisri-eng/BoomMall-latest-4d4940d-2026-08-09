@@ -15,12 +15,18 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
-import { DEFAULT_OVERLAY_TRANSFORM } from '@/modules/create/domain/overlay';
 import { persistCreateMedia } from '@/modules/create/data/persistCreateMedia';
 import { pickDevicePhotos } from '@/shared/media/photoLibraryStore';
 import { useCreateDraftStore } from '@/modules/create/state/create-draft-store';
 import { sanitizeMusicTitle } from '@/modules/feed/domain/feedMusic';
-import { LockedOverlayText } from '@/modules/create/ui/LockedOverlayText';
+import { TextOverlayRenderer } from '@/modules/create/ui/TextOverlayRenderer';
+import { LockedStickerOverlay } from '@/modules/create/ui/LockedStickerOverlay';
+import {
+  makeEditorMedia,
+  type TextOverlayObject,
+  type StickerOverlayObject,
+} from '@/modules/create/domain/editorComposition';
+
 import { ProductVideoThumb } from '@/modules/store/ui/sell/ProductVideoThumb';
 import { colors } from '@/shared/theme/colors';
 import { useAuthStore } from '@/modules/auth/state/auth-store';
@@ -124,7 +130,7 @@ export function ContentPublishScreen() {
   const updatePost = useFeedStore((s) => s.updatePost);
   const draft = useCreateDraftStore();
   const clearDraft = useCreateDraftStore((s) => s.clear);
-  const setDraft = useCreateDraftStore((s) => s.setDraft);
+  const setMedia = useCreateDraftStore((s) => s.setMedia);
   const editFeedId = useCreateDraftStore((s) => s.editFeedId);
   const isEditing = Boolean(editFeedId);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -133,17 +139,15 @@ export function ContentPublishScreen() {
 
   const initialUri =
     draft.uri || (typeof params.uri === 'string' ? params.uri : null);
-  const overlayText = draft.overlayText;
-  const overlayColor = draft.overlayColor;
-  const overlayTransform = draft.overlayTransform ?? DEFAULT_OVERLAY_TRANSFORM;
-  /** bake แล้ว = รูปมีข้อความในพิกเซลแล้ว — ไม่ซ้อน overlay อีก */
-  const showLiveOverlay = !draft.baked && !!overlayText.trim();
+  useEffect(() => {
+    if (!draft.media.length && initialUri) {
+      setMedia([makeEditorMedia(initialUri, draft.type)]);
+    }
+  }, [draft.media.length, draft.type, initialUri, setMedia]);
 
-  const [mediaUris, setMediaUris] = useState<string[]>(() => {
-    if (draft.mediaUris.length) return draft.mediaUris;
-    return initialUri ? [initialUri] : [];
-  });
-  const [title, setTitle] = useState(draft.publishTitle || overlayText || '');
+  const mediaItems = draft.media;
+  const mediaUris = mediaItems.map((item) => item.uri);
+  const [title, setTitle] = useState(draft.publishTitle || '');
   const [description, setDescription] = useState(draft.publishDescription || '');
   const [location, setLocation] = useState<string | null>(draft.publishLocation);
   const [privacy] = useState('ทุกคนสามารถดูโพสต์นี้ได้');
@@ -183,11 +187,8 @@ export function ContentPublishScreen() {
           ),
         );
       }
-      setMediaUris((prev) => {
-        const merged = [...prev, ...next].slice(0, 6);
-        setDraft({ mediaUris: merged, uri: merged[0] ?? null });
-        return merged;
-      });
+      const appended = next.map((uri) => makeEditorMedia(uri, mediaType));
+      setMedia([...mediaItems, ...appended].slice(0, 6));
       void Haptics.selectionAsync();
     } catch (e) {
       Alert.alert('เปิดแกลเลอรีไม่ได้', e instanceof Error ? e.message : 'ลองอีกครั้ง');
@@ -230,16 +231,12 @@ export function ContentPublishScreen() {
       musicTitle: musicTitle || undefined,
       intent: 'content' as const,
       locationLabel: location ?? undefined,
-      ...(showLiveOverlay
-        ? {
-            overlayText,
-            overlayTextColor: overlayColor,
-            overlayTransform,
-          }
-        : {}),
+      editorMedia: mediaItems,
+      overlays: draft.overlays,
     };
 
     if (isEditing && editFeedId) {
+
       const ok = updatePost(editFeedId, postPayload);
       if (!ok) {
         Alert.alert('แก้ไขไม่ได้', 'ไม่พบโพสต์ของคุณ');
@@ -275,19 +272,14 @@ export function ContentPublishScreen() {
       videoUri: mediaType === 'video' ? coverUri : undefined,
       musicTitle: musicTitle || undefined,
       intent: 'content',
-      // ภาพ bake แล้วไม่ส่ง overlay — วิดีโอ/legacy ยังใช้ live overlay
-      ...(showLiveOverlay
-        ? {
-            overlayText,
-            overlayTextColor: overlayColor,
-            overlayTransform,
-          }
-        : {}),
+      editorMedia: mediaItems,
+      overlays: draft.overlays,
     });
 
     void (async () => {
       const result = await scanKeywordsOnServer({
         contentId: postId,
+
         text: caption,
         authorUserId: authUser?.id,
         authorHandle: authUser?.handle,
@@ -325,11 +317,20 @@ export function ContentPublishScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.coverRow}
         >
-          {mediaUris.map((uri, index) => (
-            <View key={`${uri}-${index}`} style={styles.coverTile}>
-              {mediaType === 'video' ? (
+          {mediaItems.map((mediaItem, index) => {
+            const textOverlays = draft.overlays.filter(
+              (overlay): overlay is TextOverlayObject =>
+                overlay.type === 'text' && overlay.mediaId === mediaItem.id,
+            );
+            const sticker = draft.overlays.find(
+              (overlay): overlay is StickerOverlayObject =>
+                overlay.type === 'sticker' && overlay.mediaId === mediaItem.id,
+            );
+            return (
+            <View key={mediaItem.id} style={styles.coverTile}>
+              {mediaItem.type === 'video' ? (
                 <ProductVideoThumb
-                  uri={uri}
+                  uri={mediaItem.uri}
                   autoPlay={index === 0}
                   muted
                   interactive={false}
@@ -337,23 +338,24 @@ export function ContentPublishScreen() {
                   style={StyleSheet.absoluteFill}
                 />
               ) : (
-                <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                <Image source={{ uri: mediaItem.uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
               )}
-              {index === 0 && showLiveOverlay ? (
-                <LockedOverlayText
-                  text={overlayText}
-                  color={overlayColor}
-                  transform={overlayTransform}
-                  fontSize={14}
-                />
-              ) : null}
+              {textOverlays.length ? <TextOverlayRenderer
+                overlays={textOverlays}
+                sourceSize={mediaItem.width && mediaItem.height ? {
+                  width: mediaItem.width,
+                  height: mediaItem.height,
+                } : undefined}
+                contentFit={mediaItem.type === 'image' ? 'cover' : 'contain'}
+              /> : null}
+              {sticker ? <LockedStickerOverlay sticker={sticker.sticker} transform={sticker.transform} /> : null}
               {index === 0 ? (
                 <View style={styles.coverBadge}>
                   <Text style={styles.coverBadgeText}>ปก</Text>
                 </View>
               ) : null}
             </View>
-          ))}
+          );})}
           {mediaUris.length < 6 ? (
             <Pressable style={styles.addTile} onPress={() => void addFromLibrary()}>
               <Ionicons name="images-outline" size={28} color={colors.text.primary} />

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import {
   DEFAULT_OVERLAY_TRANSFORM,
@@ -41,10 +41,6 @@ export function InteractiveTextOverlay({
   onEditingChange,
 }: InteractiveTextOverlayProps) {
   const [draft, setDraft] = useState(text);
-
-  useEffect(() => {
-    if (editing) setDraft(text);
-  }, [editing, text]);
 
   const finishEditing = () => {
     const next = draft.trim();

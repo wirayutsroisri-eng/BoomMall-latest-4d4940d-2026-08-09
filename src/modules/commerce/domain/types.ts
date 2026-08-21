@@ -33,6 +33,11 @@ export type ProductMediaItem = {
   uri: string;
   type: ProductMediaType;
   sizeBytes?: number;
+  /**
+   * Poster / first-frame thumbnail for videos (always extracted for every video
+   * at pick time so tiles & carousels render instantly without mounting a player).
+   */
+  thumbnailUri?: string;
 };
 
 /** Shopify/Amazon-style Master SKU */

@@ -18,6 +18,8 @@ import { formatTHB, ratingOf, shopAvatarUri, shopKeyOf, promoShareShop } from '@
 import { useChatStore } from '@/modules/chat/state/chat-store';
 import { jumpToChatThread } from '@/shared/navigation/safeNavigate';
 import { colors } from '@/shared/theme/colors';
+import { ProductCardMediaCarousel } from '@/modules/shop/ui/product/ProductCardMediaCarousel';
+import { fromLegacyImages } from '@/modules/commerce/domain/product-media';
 
 const SCREEN_W = Dimensions.get('window').width;
 const COLS = 3;
@@ -112,15 +114,19 @@ export function ShopStorefrontScreen() {
         ListEmptyComponent={<Text style={styles.empty}>ร้านนี้ยังไม่มีสินค้า</Text>}
         renderItem={({ item }) => {
           const price = priceOf(item.id, item.basePrice);
+          const media = item.media?.length
+            ? item.media
+            : fromLegacyImages(item.imageUris, item.imageUri ?? masterContentImage(item.id));
           return (
             <Pressable
               style={[styles.card, { width: COL_W }]}
               onPress={() => router.push({ pathname: '/shop/product/[id]', params: { id: item.id } })}
             >
-              <Image
-                source={{ uri: item.imageUri ?? masterContentImage(item.id) }}
-                style={[styles.thumb, { width: COL_W, height: COL_W }]}
-                resizeMode="cover"
+              <ProductCardMediaCarousel
+                media={media}
+                size={COL_W}
+                aspect="square"
+                onPress={() => router.push({ pathname: '/shop/product/[id]', params: { id: item.id } })}
               />
               <Text style={styles.cardTitle} numberOfLines={2}>
                 {item.title}

@@ -162,6 +162,8 @@ type ChatState = {
   attachOrderReference: (conversationId: string, snapshot: OrderSnapshotCard) => boolean;
   /** Pull shop + DM + group threads into this device's Chat tab. */
   hydrateInbox: () => Promise<void>;
+  /** True while hydrateInbox is running (prevents duplicate calls). */
+  hydratingInbox: boolean;
   /** Merge server-backed text / product cards into an open thread. */
   hydrateThread: (conversationId: string, opts?: { after?: string }) => Promise<void>;
   loadOlderMessages: (conversationId: string) => Promise<void>;
@@ -530,6 +532,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   activeConversationId: null,
   hasMoreOlderById: {},
   loadingOlderById: {},
+  hydratingInbox: false,
   myStatus: null,
   myNote: null,
   setMyNote: (text, emoji = '📷', imageUri) => {
@@ -807,6 +810,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   hydrateInbox: async () => {
+    if (get().hydratingInbox) return;
+    set({ hydratingInbox: true });
+    try {
     const cachedInbox = await loadCachedInbox();
     const cachedThreads = await loadAllCachedThreads();
     if (cachedInbox.length || Object.keys(cachedThreads).length) {
@@ -829,7 +835,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       listRemoteConversations(),
       listRemoteShopInbox(MY_SHOP_ID),
     ]);
-    if (mine == null) return;
+    if (mine == null) { set({ hydratingInbox: false }); return; }
 
     const seen = new Set<string>();
     const rows: RemoteChatConversation[] = [];
@@ -884,6 +890,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return { conversations: ordered };
     });
     void saveCachedInbox(get().conversations);
+    } finally {
+      set({ hydratingInbox: false });
+    }
   },
 
   hydrateThread: async (conversationId, opts) => {
