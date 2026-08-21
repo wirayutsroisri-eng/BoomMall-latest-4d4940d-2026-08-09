@@ -8,6 +8,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { prisma } from '../../lib/prisma';
 import { AppError } from '../../lib/errors';
+import { attachMediaAssetsToPost, readyMediaAssetsForPublish } from '../media/MediaAssetService';
+import { assertPublishMediaContract, buildCanonicalPostMedia } from '../media/mediaAssetContract';
 
 export type SocialPostDto = {
   id: string;
@@ -76,6 +78,9 @@ export async function createSocialPost(input: {
     ? String(input.lane)
     : 'foryou';
   const tags = Array.isArray(input.tags) ? input.tags.map(String).slice(0, 12) : [];
+  const mediaAssetIds = assertPublishMediaContract(input.media, { requireAssets: true });
+  const readyAssets = await readyMediaAssetsForPublish(input.authorId, mediaAssetIds);
+  const publishMedia = readyAssets.length ? buildCanonicalPostMedia(input.media, readyAssets) : input.media;
 
   if (await prismaReady()) {
     const row = await prisma.socialPost.create({
@@ -83,7 +88,7 @@ export async function createSocialPost(input: {
         id: randomUUID(),
         authorId: input.authorId,
         body,
-        mediaJson: (input.media as object) ?? [],
+        mediaJson: (publishMedia as object) ?? [],
         lat: input.lat,
         lng: input.lng,
         locationLabel: input.locationLabel,
@@ -92,6 +97,7 @@ export async function createSocialPost(input: {
         lane,
       },
     });
+    await attachMediaAssetsToPost(input.authorId, mediaAssetIds, row.id);
     return mapPost(row);
   }
 
@@ -99,7 +105,7 @@ export async function createSocialPost(input: {
     id: randomUUID(),
     authorId: input.authorId,
     body,
-    media: input.media ?? [],
+    media: publishMedia ?? [],
     status: 'ACTIVE',
     likeCount: 0,
     reportCount: 0,
@@ -143,6 +149,11 @@ export async function updateSocialPost(
       ? String(input.lane)
       : undefined;
   const tags = input.tags != null ? input.tags.map(String).slice(0, 12) : undefined;
+  const mediaAssetIds = input.media != null
+    ? assertPublishMediaContract(input.media, { requireAssets: false })
+    : [];
+  const readyAssets = await readyMediaAssetsForPublish(authorId, mediaAssetIds);
+  const publishMedia = readyAssets.length ? buildCanonicalPostMedia(input.media, readyAssets) : input.media;
 
   if (await prismaReady()) {
     const existing = await prisma.socialPost.findUnique({ where: { id } });
@@ -151,7 +162,7 @@ export async function updateSocialPost(
       where: { id },
       data: {
         ...(body != null ? { body } : {}),
-        ...(input.media != null ? { mediaJson: input.media as object } : {}),
+        ...(publishMedia != null ? { mediaJson: publishMedia as object } : {}),
         ...(input.lat != null ? { lat: input.lat } : {}),
         ...(input.lng != null ? { lng: input.lng } : {}),
         ...(input.locationLabel != null ? { locationLabel: input.locationLabel } : {}),
@@ -160,6 +171,7 @@ export async function updateSocialPost(
         ...(lane != null ? { lane } : {}),
       },
     });
+    await attachMediaAssetsToPost(authorId, mediaAssetIds, row.id);
     return mapPost(row);
   }
 
@@ -170,7 +182,7 @@ export async function updateSocialPost(
   store.posts[idx] = {
     ...prev,
     ...(body != null ? { body } : {}),
-    ...(input.media != null ? { media: input.media } : {}),
+    ...(publishMedia != null ? { media: publishMedia } : {}),
     ...(input.lat != null ? { lat: input.lat } : {}),
     ...(input.lng != null ? { lng: input.lng } : {}),
     ...(input.locationLabel != null ? { locationLabel: input.locationLabel } : {}),

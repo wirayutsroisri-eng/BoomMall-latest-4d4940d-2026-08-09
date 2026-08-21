@@ -1,4 +1,5 @@
 import type { EditorMedia, OverlayObject } from '@/modules/create/domain/editorComposition';
+import type { MediaAsset } from '@/modules/media/domain/mediaAsset';
 
 export type FeedTab = 'nearby' | 'following' | 'foryou' | 'board';
 
@@ -76,6 +77,8 @@ export type FeedItem = {
   /** หลายรูปในโพสต์เดียว — ปัดซ้าย/ขวาเลื่อนในโพสต์ (ไม่เปิดโปรไฟล์) */
   imageUris?: string[];
   videoUri?: string;
+  /** Canonical remote source of truth. Local URIs remain draft/cache only. */
+  mediaAssets?: MediaAsset[];
   /** Canonical non-destructive editor composition. */
   editorMedia?: EditorMedia[];
   overlays?: OverlayObject[];

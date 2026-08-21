@@ -655,10 +655,53 @@ model SocialPost {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  mediaAssets MediaAsset[]
+
   @@index([createdAt])
   @@index([authorId, createdAt])
   @@index([status, createdAt])
   @@index([lane, createdAt])
+}
+
+enum MediaAssetType {
+  IMAGE
+  VIDEO
+}
+
+enum MediaAssetStatus {
+  UPLOADING
+  UPLOADED
+  PROCESSING
+  READY
+  FAILED
+}
+
+/// Canonical, device-independent media referenced by published content.
+/// Local app URIs never belong in this table.
+model MediaAsset {
+  id            String           @id @default(uuid())
+  ownerId       String
+  type          MediaAssetType
+  status        MediaAssetStatus @default(UPLOADING)
+  storageKey    String           @unique
+  canonicalUrl  String
+  thumbnailUrl  String?
+  playbackUrl   String?
+  width         Int?
+  height        Int?
+  durationMs    Int?
+  mimeType      String
+  fileSize      BigInt?
+  postId        String?
+  metadataJson  Json             @default("{}")
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  post SocialPost? @relation(fields: [postId], references: [id], onDelete: SetNull)
+
+  @@index([ownerId, status, createdAt])
+  @@index([postId])
+  @@index([status, updatedAt])
 }
 
 // ─── Unified commerce (Product / SKU / Shared Warehouse / Order) ─────────────

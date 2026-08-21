@@ -7,6 +7,8 @@ export type EditorMediaType = 'image' | 'video';
 /** Immutable source media. Visual decorations live in `OverlayObject[]`. */
 export type EditorMedia = {
   id: string;
+  /** Present after upload; drafts continue to use the stable local `id`. */
+  mediaAssetId?: string;
   uri: string;
   type: EditorMediaType;
   width?: number;

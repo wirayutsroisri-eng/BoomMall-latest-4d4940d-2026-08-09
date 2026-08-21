@@ -152,6 +152,7 @@ export function ContentPublishScreen() {
   const [location, setLocation] = useState<string | null>(draft.publishLocation);
   const [privacy] = useState('ทุกคนสามารถดูโพสต์นี้ได้');
   const [linkLabel, setLinkLabel] = useState<string | null>(draft.publishLinkLabel);
+  const [publishing, setPublishing] = useState(false);
 
   const coverUri = mediaUris[0] ?? null;
   const mediaType =
@@ -195,7 +196,7 @@ export function ContentPublishScreen() {
     }
   };
 
-  const publish = (asDraft: boolean) => {
+  const publish = async (asDraft: boolean) => {
     if (!isAuthenticated()) {
       Alert.alert('ต้องเข้าสู่ระบบ', 'โพสต์คอนเทนต์ได้เฉพาะบัญชีโซเชียลเท่านั้น');
       return;
@@ -210,6 +211,8 @@ export function ContentPublishScreen() {
       closeAll();
       return;
     }
+    if (publishing) return;
+    setPublishing(true);
 
     const musicTitle = sanitizeMusicTitle(draft.music);
     const captionParts = [
@@ -235,9 +238,9 @@ export function ContentPublishScreen() {
       overlays: draft.overlays,
     };
 
+    try {
     if (isEditing && editFeedId) {
-
-      const ok = updatePost(editFeedId, postPayload);
+      const ok = await updatePost(editFeedId, postPayload);
       if (!ok) {
         Alert.alert('แก้ไขไม่ได้', 'ไม่พบโพสต์ของคุณ');
         return;
@@ -263,7 +266,7 @@ export function ContentPublishScreen() {
       return;
     }
 
-    const postId = addPost({
+    const postId = await addPost({
       caption,
       price: 0,
       channel: 'C2C',
@@ -296,6 +299,14 @@ export function ContentPublishScreen() {
     clearDraft();
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     closeAll();
+    } catch (error) {
+      Alert.alert(
+        'ยังโพสต์ไม่ได้',
+        `อัปโหลดสื่อไม่สำเร็จ ร่างและไฟล์ในหน้าแต่งยังอยู่ กรุณาลองใหม่\n${error instanceof Error ? error.message : ''}`.trim(),
+      );
+    } finally {
+      setPublishing(false);
+    }
   };
 
   return (
@@ -514,18 +525,18 @@ export function ContentPublishScreen() {
 
       <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         {!isEditing ? (
-          <Pressable style={styles.draftBtn} onPress={() => publish(true)}>
+          <Pressable style={styles.draftBtn} onPress={() => void publish(true)} disabled={publishing}>
             <Ionicons name="folder-open-outline" size={18} color={colors.text.primary} />
             <Text style={styles.draftText}>ร่าง</Text>
           </Pressable>
         ) : (
           <View style={styles.draftBtn} />
         )}
-        <Pressable style={styles.postBtn} onPress={() => publish(false)}>
+        <Pressable style={styles.postBtn} onPress={() => void publish(false)} disabled={publishing}>
           <View style={styles.postIcon}>
             <Ionicons name="arrow-up" size={14} color="#fff" />
           </View>
-          <Text style={styles.postText}>{isEditing ? 'บันทึก' : 'โพสต์'}</Text>
+          <Text style={styles.postText}>{publishing ? 'กำลังอัปโหลด…' : isEditing ? 'บันทึก' : 'โพสต์'}</Text>
         </Pressable>
       </View>
     </View>

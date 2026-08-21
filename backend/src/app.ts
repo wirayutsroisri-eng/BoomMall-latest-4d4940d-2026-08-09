@@ -27,6 +27,7 @@ import { getPlatformDomainStatus } from './modules';
 import { errorHandler } from './middleware/errorHandler';
 import { chatMediaDir } from './modules/chat/http/media.controller';
 import { legalPublicRouter } from './modules/legal/routes';
+import { mediaAssetRouter } from './modules/media/http/routes';
 
 export function createApp() {
   const env = loadEnv();
@@ -98,6 +99,7 @@ export function createApp() {
   app.use('/api/v1/admin/chat-domain', chatDomainRouter);
   app.use('/api/v1/chat-domain', chatAppRouter);
   app.use('/api/v1/feed', feedAppRouter);
+  app.use('/api/v1/media-assets', mediaAssetRouter);
   app.use('/api/v1/admin/feed-domain', feedDomainRouter);
   app.use('/api/v1/board', boardAppRouter);
   app.use('/api/v1/admin/board', boardAdminRouter);

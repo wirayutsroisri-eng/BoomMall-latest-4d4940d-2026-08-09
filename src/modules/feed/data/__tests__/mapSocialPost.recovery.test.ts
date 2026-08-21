@@ -19,6 +19,19 @@ function post(media: unknown): SocialPostDto {
 }
 
 describe('feed media recovery adapter', () => {
+  it('prefers ready MediaAsset sources when device cache is gone', () => {
+    expect(socialPostToFeedItem(post({
+      images: ['file:///old-device/image.jpg'],
+      video: 'file:///old-device/video.mov',
+      mediaAssets: [
+        { id: 'image-asset', type: 'image', status: 'ready', canonicalUrl: 'https://cdn.example.com/new.jpg' },
+        { id: 'video-asset', type: 'video', status: 'ready', canonicalUrl: 'https://cdn.example.com/original.mp4', playbackUrl: 'https://cdn.example.com/play.mp4' },
+      ],
+    }))).toMatchObject({
+      imageUri: 'https://cdn.example.com/new.jpg',
+      videoUri: 'https://cdn.example.com/play.mp4',
+    });
+  });
   it('keeps portable legacy image and video URLs', () => {
     expect(socialPostToFeedItem(post({
       images: ['https://cdn.example.com/photo.jpg'],
@@ -27,6 +40,17 @@ describe('feed media recovery adapter', () => {
       imageUri: 'https://cdn.example.com/photo.jpg',
       videoUri: 'https://cdn.example.com/video.mp4',
     });
+  });
+
+  it('resolves feed media independently of the native editor feature flag', () => {
+    const before = process.env.EXPO_PUBLIC_NATIVE_MEDIA_EDITOR_ENABLED;
+    const input = post({ images: ['https://cdn.example.com/photo.jpg'] });
+    process.env.EXPO_PUBLIC_NATIVE_MEDIA_EDITOR_ENABLED = 'true';
+    const enabled = socialPostToFeedItem(input).imageUri;
+    process.env.EXPO_PUBLIC_NATIVE_MEDIA_EDITOR_ENABLED = 'false';
+    const disabled = socialPostToFeedItem(input).imageUri;
+    process.env.EXPO_PUBLIC_NATIVE_MEDIA_EDITOR_ENABLED = before;
+    expect(enabled).toBe(disabled);
   });
 
   it('reads portable media from the new editorMedia contract when legacy fields are absent', () => {

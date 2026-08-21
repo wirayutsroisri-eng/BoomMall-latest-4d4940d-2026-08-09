@@ -18,6 +18,7 @@ import {
   type SearchRadiusOption,
 } from '@/modules/matching/domain/search-radius';
 import type { BoardSide, CommerceTier, FeedComment, FeedItem, FeedTab } from '../domain/types';
+import type { MediaAsset } from '@/modules/media/domain/mediaAsset';
 
 type NewPostInput = {
   caption: string;
@@ -77,6 +78,39 @@ function replaceEditorMediaUris(
   });
 }
 
+function bindCompositionToMediaAssets(
+  media: FeedItem['editorMedia'],
+  overlays: FeedItem['overlays'],
+  bindings: { sourceUri: string; asset: MediaAsset }[],
+  imageUris: string[],
+  videoUri: string | undefined,
+) {
+  if (!media?.length || !bindings.length) {
+    return { editorMedia: replaceEditorMediaUris(media, imageUris, videoUri), overlays };
+  }
+  const idMap = new Map<string, string>();
+  const editorMedia = media.map((item) => {
+    const asset = bindings.find((binding) => binding.sourceUri === item.uri)?.asset;
+    if (!asset) return item;
+    idMap.set(item.id, asset.id);
+    return {
+      ...item,
+      id: asset.id,
+      mediaAssetId: asset.id,
+      uri: asset.type === 'video' ? asset.playbackUrl || asset.canonicalUrl : asset.canonicalUrl,
+      width: asset.width ?? item.width,
+      height: asset.height ?? item.height,
+    };
+  });
+  return {
+    editorMedia,
+    overlays: overlays?.map((overlay) => {
+      const mediaId = idMap.get(overlay.mediaId);
+      return mediaId ? { ...overlay, mediaId } : overlay;
+    }),
+  };
+}
+
 type FeedState = {
   tab: FeedTab;
   items: FeedItem[];
@@ -96,8 +130,8 @@ type FeedState = {
   bumpShare: (id: string) => void;
   toggleSave: (id: string) => void;
   tipClip: (id: string, amount: number) => void;
-  addPost: (input: NewPostInput) => string;
-  updatePost: (feedId: string, input: NewPostInput) => boolean;
+  addPost: (input: NewPostInput) => Promise<string>;
+  updatePost: (feedId: string, input: NewPostInput) => Promise<boolean>;
   deletePost: (feedId: string) => boolean;
   renameOwnPosts: (displayName: string) => void;
   openProductSheet: (productId: string) => void;
@@ -181,7 +215,7 @@ export const useFeedStore = create<FeedState>()(
           : item,
       ),
     })),
-  addPost: (input) => {
+  addPost: async (input) => {
     const profile = useLoyaltyStore.getState().profile;
     const auth = useAuthStore.getState().user;
     const id = `feed-user-${Date.now()}`;
@@ -258,7 +292,7 @@ export const useFeedStore = create<FeedState>()(
     };
     set((state) => ({ items: [newItem, ...state.items] }));
 
-    void (async () => {
+    try {
       let stableImages = imageUris;
       let stableVideo = input.videoUri;
       try {
@@ -287,15 +321,21 @@ export const useFeedStore = create<FeedState>()(
         /* keep optimistic URIs */
       }
 
+      const stableEditorMedia = replaceEditorMediaUris(newItem.editorMedia, stableImages, stableVideo);
+
       const uploaded = await uploadFeedMedia({
         imageUris: stableImages,
         videoUri: stableVideo,
+        editorMedia: stableEditorMedia,
       });
-      const uploadedEditorMedia = replaceEditorMediaUris(
-        newItem.editorMedia,
+      const uploadedComposition = bindCompositionToMediaAssets(
+        stableEditorMedia,
+        newItem.overlays,
+        uploaded.bindings,
         uploaded.imageUris,
         uploaded.videoUri,
       );
+      const uploadedEditorMedia = uploadedComposition.editorMedia;
       const saved = await publishSocialPost({
         body: caption,
         media: {
@@ -306,7 +346,9 @@ export const useFeedStore = create<FeedState>()(
           overlayTextColor: newItem.overlayTextColor,
           overlayTransform: newItem.overlayTransform,
           editorMedia: uploadedEditorMedia,
-          overlays: newItem.overlays,
+          overlays: uploadedComposition.overlays,
+          mediaAssetIds: uploaded.mediaAssets.map((asset) => asset.id),
+          mediaAssets: uploaded.mediaAssets,
           authorName: author,
           authorHandle,
         },
@@ -316,6 +358,7 @@ export const useFeedStore = create<FeedState>()(
         tags: newItem.product.tags,
         lane: newItem.lane,
       });
+      if (!saved) throw new Error('FEED_PUBLISH_FAILED');
       const auth = useAuthStore.getState().user;
       set((state) => {
         const migrated = state.commentsByFeedId[id] ?? [];
@@ -332,8 +375,7 @@ export const useFeedStore = create<FeedState>()(
           commentsByFeedId: nextComments,
           items: state.items.map((item) => {
             if (item.id !== id) return item;
-            const next = saved
-              ? {
+            const next = {
                   ...item,
                   ...socialPostToFeedItem(saved, {
                     myUserId: auth?.id,
@@ -341,20 +383,23 @@ export const useFeedStore = create<FeedState>()(
                   }),
                   legacyLocalId: id,
                   isUserPost: true,
-                }
-              : item;
+                };
             return {
               ...next,
               imageUri: uploaded.imageUris[0] ?? next.imageUri,
               imageUris: uploaded.imageUris.length ? uploaded.imageUris : next.imageUris,
               videoUri: uploaded.videoUri ?? next.videoUri,
               editorMedia: uploadedEditorMedia ?? next.editorMedia,
-              overlays: next.overlays?.length ? next.overlays : newItem.overlays,
+              mediaAssets: uploaded.mediaAssets.length ? uploaded.mediaAssets : next.mediaAssets,
+              overlays: next.overlays?.length ? next.overlays : uploadedComposition.overlays,
             };
           }),
         };
       });
-    })();
+    } catch (error) {
+      set((state) => ({ items: state.items.filter((item) => item.id !== id) }));
+      throw error;
+    }
 
     // Matching only for board demand posts
     if (isJobPost && boardSide === 'demand') {
@@ -371,7 +416,7 @@ export const useFeedStore = create<FeedState>()(
 
     return id;
   },
-  updatePost: (feedId, input) => {
+  updatePost: async (feedId, input) => {
     const existing = get().items.find((item) => item.id === feedId);
     if (!existing?.isUserPost) return false;
 
@@ -407,7 +452,7 @@ export const useFeedStore = create<FeedState>()(
       }),
     }));
 
-    void (async () => {
+    try {
       let stableImages = imageUris;
       let stableVideo = input.videoUri ?? existing.videoUri;
       try {
@@ -436,15 +481,25 @@ export const useFeedStore = create<FeedState>()(
         /* keep optimistic URIs */
       }
 
+      const stableEditorMedia = replaceEditorMediaUris(
+        input.editorMedia ?? existing.editorMedia,
+        stableImages,
+        stableVideo,
+      );
+
       const uploaded = await uploadFeedMedia({
         imageUris: stableImages,
         videoUri: stableVideo,
+        editorMedia: stableEditorMedia,
       });
-      const uploadedEditorMedia = replaceEditorMediaUris(
-        input.editorMedia ?? existing.editorMedia,
+      const uploadedComposition = bindCompositionToMediaAssets(
+        stableEditorMedia,
+        input.overlays ?? existing.overlays,
+        uploaded.bindings,
         uploaded.imageUris,
         uploaded.videoUri,
       );
+      const uploadedEditorMedia = uploadedComposition.editorMedia;
       const saved = await syncFeedPostUpdate(feedId, {
         body: caption,
         media: {
@@ -455,7 +510,9 @@ export const useFeedStore = create<FeedState>()(
           overlayTextColor: input.overlayTextColor,
           overlayTransform: input.overlayTransform,
           editorMedia: uploadedEditorMedia,
-          overlays: input.overlays,
+          overlays: uploadedComposition.overlays,
+          mediaAssetIds: uploaded.mediaAssets.map((asset) => asset.id),
+          mediaAssets: uploaded.mediaAssets,
           authorName: profile.displayName,
           authorHandle,
         },
@@ -465,7 +522,7 @@ export const useFeedStore = create<FeedState>()(
         tags: existing.product.tags,
         lane: existing.lane ?? 'foryou',
       });
-      if (!saved) return;
+      if (!saved) throw new Error('FEED_UPDATE_FAILED');
       const authUser = useAuthStore.getState().user;
       set((state) => ({
         items: state.items.map((item) => {
@@ -482,7 +539,8 @@ export const useFeedStore = create<FeedState>()(
             imageUris: uploaded.imageUris.length ? uploaded.imageUris : mapped.imageUris ?? item.imageUris,
             videoUri: uploaded.videoUri ?? mapped.videoUri ?? item.videoUri,
             editorMedia: uploadedEditorMedia ?? mapped.editorMedia ?? item.editorMedia,
-            overlays: mapped.overlays?.length ? mapped.overlays : input.overlays ?? item.overlays,
+            mediaAssets: uploaded.mediaAssets.length ? uploaded.mediaAssets : mapped.mediaAssets ?? item.mediaAssets,
+            overlays: mapped.overlays?.length ? mapped.overlays : uploadedComposition.overlays ?? item.overlays,
             likes: item.likes,
             comments: item.comments,
             shares: item.shares,
@@ -493,7 +551,12 @@ export const useFeedStore = create<FeedState>()(
           };
         }),
       }));
-    })();
+    } catch (error) {
+      set((state) => ({
+        items: state.items.map((item) => item.id === feedId ? existing : item),
+      }));
+      throw error;
+    }
 
     return true;
   },

@@ -4,7 +4,7 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { HeadObjectCommand, S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { AppError } from '../../../lib/errors';
 import { chatMediaExtension, normalizeChatMime } from '../mediaTypes';
@@ -52,7 +52,7 @@ export function isObjectStorageConfigured() {
 
 function s3(): { client: S3Client; config: ObjectStorageConfig } {
   const config = objectStorageConfig();
-  if (!config) throw new AppError('CHAT_MEDIA_LOCAL', 'Object storage is not configured', 501);
+  if (!config) throw new AppError('OBJECT_STORAGE_NOT_CONFIGURED', 'Object storage is not configured', 501);
   if (!cachedClient) {
     cachedClient = new S3Client({
       region: config.region,
@@ -65,7 +65,7 @@ function s3(): { client: S3Client; config: ObjectStorageConfig } {
   return { client: cachedClient, config };
 }
 
-function publicObjectUrl(config: ObjectStorageConfig, key: string) {
+export function publicObjectUrl(config: ObjectStorageConfig, key: string) {
   if (config.cdnBaseUrl) return `${config.cdnBaseUrl}/${key}`;
   if (config.endpoint) {
     const base = config.endpoint.replace(/\/$/, '');
@@ -104,4 +104,56 @@ export class UploadService {
       originalFilename: filename.replace(/[/\\]/g, '').slice(0, 180) || `file.${ext}`,
     };
   }
+
+  static async generateMediaAssetUploadUrl(
+    userId: string,
+    assetId: string,
+    filename: string,
+    mimeType: string,
+  ) {
+    const normalizedMime = mimeType.trim().toLowerCase();
+    const extension = mediaAssetExtension(normalizedMime);
+    if (!extension) throw new AppError('UNSUPPORTED_MEDIA_TYPE', 'unsupported image or video type', 415);
+    const kind = normalizedMime.startsWith('video/') ? 'video' : 'image';
+    const { client, config } = s3();
+    const key = `feed-media/${safeUserSegment(userId)}/${assetId}/original.${extension}`;
+    const uploadUrl = await getSignedUrl(client, new PutObjectCommand({
+      Bucket: config.bucket,
+      Key: key,
+      ContentType: normalizedMime,
+    }), { expiresIn: 900 });
+    return {
+      uploadUrl,
+      publicUrl: publicObjectUrl(config, key),
+      fileKey: key,
+      mediaType: kind as 'image' | 'video',
+      mimeType: normalizedMime,
+      headers: { 'Content-Type': normalizedMime },
+      expiresIn: 900,
+      originalFilename: filename.replace(/[/\\]/g, '').slice(0, 180) || `media.${extension}`,
+    };
+  }
+
+  static async assertObjectUploaded(storageKey: string) {
+    const { client, config } = s3();
+    const object = await client.send(new HeadObjectCommand({ Bucket: config.bucket, Key: storageKey }));
+    return {
+      contentLength: typeof object.ContentLength === 'number' ? object.ContentLength : undefined,
+      contentType: object.ContentType,
+    };
+  }
+}
+
+function mediaAssetExtension(mimeType: string) {
+  const extensions: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/heic': 'heic',
+    'image/heif': 'heif',
+    'video/mp4': 'mp4',
+    'video/quicktime': 'mov',
+    'video/x-m4v': 'm4v',
+  };
+  return extensions[mimeType];
 }

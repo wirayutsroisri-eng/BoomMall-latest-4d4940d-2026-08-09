@@ -244,7 +244,7 @@ export function CreatePostScreen() {
     else router.back();
   };
 
-  const publish = () => {
+  const publish = async () => {
     if (mode === 'post') {
       if (!caption.trim() && !mediaUri) {
         Alert.alert('ยังไม่มีเนื้อหา', 'กรุณาเลือกรูป/วิดีโอ หรือพิมพ์แคปชันก่อนโพสต์');
@@ -290,7 +290,8 @@ export function CreatePostScreen() {
         onNewProductCreated(MY_WAREHOUSE_ID, masterProductId, categoryKey);
       }
 
-      addPost({
+      try {
+      await addPost({
         caption: caption.trim(),
         price: sellWithClip ? sellPrice : Number(postPrice) || 0,
         channel: postChannel,
@@ -309,6 +310,9 @@ export function CreatePostScreen() {
           : 'คลิปขึ้นฟีดแล้ว',
       );
       closeAll();
+      } catch (error) {
+        Alert.alert('ยังโพสต์ไม่ได้', `อัปโหลดสื่อไม่สำเร็จ กรุณาลองใหม่\n${error instanceof Error ? error.message : ''}`.trim());
+      }
       return;
     }
 

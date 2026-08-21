@@ -4,7 +4,11 @@ import path from 'path';
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts', 'backend/src/modules/ecommerce/**/*.test.ts'],
+    include: [
+      'src/**/*.test.ts',
+      'backend/src/modules/ecommerce/**/*.test.ts',
+      'backend/src/modules/media/**/*.test.ts',
+    ],
   },
   resolve: {
     alias: {

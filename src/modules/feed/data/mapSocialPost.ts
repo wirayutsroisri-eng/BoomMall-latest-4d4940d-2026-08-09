@@ -8,6 +8,7 @@ import {
   type OverlayObject,
   type TextOverlayObject,
 } from '@/modules/create/domain/editorComposition';
+import { mediaAssetSource, type MediaAsset } from '@/modules/media/domain/mediaAsset';
 
 export type SocialPostDto = {
   id: string;
@@ -37,6 +38,7 @@ type MediaBlob = {
   overlayTextColor?: string;
   overlayTransform?: FeedItem['overlayTransform'];
   editorMedia?: EditorMedia[];
+  mediaAssets?: MediaAsset[];
   overlays?: OverlayObject[];
   authorName?: string;
   authorHandle?: string;
@@ -66,6 +68,19 @@ function asEditorMedia(value: unknown): EditorMedia[] | undefined {
     return typeof row.id === 'string' && typeof row.uri === 'string' && (row.type === 'image' || row.type === 'video');
   });
   return media.length ? media : undefined;
+}
+
+function asMediaAssets(value: unknown): MediaAsset[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const assets = value.filter((item): item is MediaAsset => {
+    if (!item || typeof item !== 'object') return false;
+    const row = item as Record<string, unknown>;
+    return typeof row.id === 'string'
+      && (row.type === 'image' || row.type === 'video')
+      && typeof row.canonicalUrl === 'string'
+      && typeof row.status === 'string';
+  });
+  return assets.length ? assets : undefined;
 }
 
 function asOverlays(value: unknown): OverlayObject[] | undefined {
@@ -171,6 +186,7 @@ export function normalizePostMedia(media: unknown): MediaBlob {
         ? (o.overlayTransform as FeedItem['overlayTransform'])
         : undefined,
     editorMedia: asEditorMedia(o.editorMedia),
+    mediaAssets: asMediaAssets(o.mediaAssets),
     overlays: asOverlays(o.overlays),
     authorName: typeof o.authorName === 'string' ? o.authorName : undefined,
     authorHandle: typeof o.authorHandle === 'string' ? o.authorHandle : undefined,
@@ -187,16 +203,23 @@ export function socialPostToFeedItem(
   const mine =
     Boolean(opts?.myUserId && post.authorId === opts.myUserId) ||
     Boolean(opts?.myHandle && handle.toLowerCase() === opts.myHandle.replace(/^@/, '').toLowerCase());
+  const readyAssets = media.mediaAssets?.filter(
+    (asset) => asset.status === 'ready' && isPortableServerMediaUri(mediaAssetSource(asset)),
+  ) ?? [];
+  const assetImages = readyAssets.filter((asset) => asset.type === 'image').map(mediaAssetSource);
   const editorImages = media.editorMedia
     ?.filter((item) => item.type === 'image' && isPortableServerMediaUri(item.uri))
     .map((item) => item.uri) ?? [];
   const portableImages = media.images.filter(isPortableServerMediaUri);
-  const resolvedImages = portableImages.length ? portableImages : editorImages;
+  const resolvedImages = assetImages.length ? assetImages : portableImages.length ? portableImages : editorImages;
   const imageUris = resolvedImages.length ? resolvedImages : undefined;
   const editorVideo = media.editorMedia
     ?.find((item) => item.type === 'video' && isPortableServerMediaUri(item.uri))
     ?.uri;
-  const videoUri = isPortableServerMediaUri(media.video) ? media.video : editorVideo;
+  const assetVideo = readyAssets.find((asset) => asset.type === 'video');
+  const videoUri = assetVideo
+    ? mediaAssetSource(assetVideo)
+    : isPortableServerMediaUri(media.video) ? media.video : editorVideo;
   const lane = (['nearby', 'following', 'foryou', 'board'].includes(String(post.lane ?? ''))
     ? post.lane
     : 'foryou') as FeedItem['lane'];
@@ -228,6 +251,7 @@ export function socialPostToFeedItem(
     imageUri: imageUris?.[0],
     imageUris,
     videoUri,
+    mediaAssets: readyAssets.length ? readyAssets : undefined,
     editorMedia: media.editorMedia,
     overlays: media.overlays,
     overlayText: media.overlayText,

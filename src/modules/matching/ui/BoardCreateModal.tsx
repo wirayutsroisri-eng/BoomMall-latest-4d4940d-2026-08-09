@@ -80,7 +80,7 @@ export function BoardCreateModal() {
     void Haptics.selectionAsync();
   };
 
-  const onSubmit = () => {
+  const onSubmit = async () => {
     if (!title.trim() && !details.trim()) {
       Alert.alert('กรอกข้อมูล', 'ใส่หัวข้อหรือรายละเอียดอย่างน้อย 1 อย่าง');
       return;
@@ -90,7 +90,8 @@ export function BoardCreateModal() {
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setStoreSide(side);
     const price = Math.max(0, Math.trunc(Number(budget.replace(/,/g, '')) || 0));
-    addPost({
+    try {
+    await addPost({
       caption,
       price,
       channel: 'C2C',
@@ -113,6 +114,10 @@ export function BoardCreateModal() {
           : 'บัตรของคุณพร้อมให้ระบบจับคู่เมื่อมีโพสต์หาช่างใกล้เคียง',
       );
     }, 350);
+    } catch (error) {
+      setSubmitting(false);
+      Alert.alert('ยังโพสต์ไม่ได้', `อัปโหลดสื่อไม่สำเร็จ กรุณาลองใหม่\n${error instanceof Error ? error.message : ''}`.trim());
+    }
   };
 
   const headerTitle = side === 'demand' ? 'ประกาศหางาน / หาช่าง' : 'รับงาน / เสนอบริการ';
@@ -129,7 +134,7 @@ export function BoardCreateModal() {
         <Text style={styles.headerTitle} numberOfLines={1}>
           {headerTitle}
         </Text>
-        <Pressable onPress={onSubmit} disabled={submitting}>
+        <Pressable onPress={() => void onSubmit()} disabled={submitting}>
           <Text style={styles.publish}>โพสต์</Text>
         </Pressable>
       </View>
