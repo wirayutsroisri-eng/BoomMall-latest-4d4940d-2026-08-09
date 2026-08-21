@@ -58,21 +58,34 @@ export function isRemoteMediaUrl(uri: string) {
   return /^https?:\/\//i.test(uri);
 }
 
-export async function compressChatImage(uri: string) {
-  let width = 1600;
-  let quality = 0.72;
+export async function compressChatImage(uri: string, highQuality = false) {
+  // Feed/upload posts keep the ORIGINAL resolution at near-lossless quality.
+  // Chat messages still compress to save bandwidth/bytes.
+  let width = highQuality ? 0 : 1600;
+  let quality = highQuality ? 0.95 : 0.72;
   let current = uri;
+  const maxBytes = highQuality ? 12 * 1024 * 1024 : CHAT_IMAGE_MAX_BYTES;
   for (let i = 0; i < 6; i += 1) {
-    const ctx = ImageManipulator.manipulate(current);
-    ctx.resize({ width });
-    const rendered = await ctx.renderAsync();
-    const saved = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: quality });
-    current = saved.uri;
+    if (width > 0) {
+      const ctx = ImageManipulator.manipulate(current);
+      ctx.resize({ width });
+      const rendered = await ctx.renderAsync();
+      const saved = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: quality });
+      current = saved.uri;
+    } else {
+      // Preserve original resolution — only re-encode at high quality.
+      const ctx = ImageManipulator.manipulate(current);
+      const rendered = await ctx.renderAsync();
+      const saved = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: quality });
+      current = saved.uri;
+    }
     const size = fileSize(current) ?? Number.POSITIVE_INFINITY;
-    if (size <= CHAT_IMAGE_MAX_BYTES) {
+    if (size <= maxBytes) {
       return { uri: current, mimeType: 'image/jpeg', filename: 'image.jpg', size };
     }
-    const next = nextImageCompressStep(width, quality);
+    const next = highQuality
+      ? nextHighQualityCompressStep(width, quality)
+      : nextImageCompressStep(width, quality);
     if (!next) break;
     width = next.width;
     quality = next.quality;
@@ -85,9 +98,16 @@ export async function compressChatImage(uri: string) {
   };
 }
 
+function nextHighQualityCompressStep(width: number, quality: number) {
+  // Only drop quality slightly; never downscale below original unless >12MB.
+  if (quality > 0.72) return { width, quality: Math.round((quality - 0.06) * 100) / 100 };
+  if (width > 2048) return { width: Math.max(2048, Math.round(width * 0.85)), quality: 0.85 };
+  return null;
+}
+
 export async function prepareChatMedia(
   uri: string,
-  opts?: { mimeType?: string; filename?: string; durationSec?: number },
+  opts?: { mimeType?: string; filename?: string; durationSec?: number; highQuality?: boolean },
 ): Promise<ChatSendAttachment> {
   if (isRemoteMediaUrl(uri)) {
     const mimeType = opts?.mimeType || guessMime(uri, 'application/octet-stream');
@@ -102,7 +122,7 @@ export async function prepareChatMedia(
 
   const mimeHint = opts?.mimeType || guessMime(uri, 'image/jpeg');
   const prepared = mimeHint.startsWith('image/')
-    ? await compressChatImage(uri)
+    ? await compressChatImage(uri, opts?.highQuality)
     : {
         uri,
         mimeType: mimeHint,

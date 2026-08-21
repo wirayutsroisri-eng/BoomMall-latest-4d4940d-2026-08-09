@@ -74,8 +74,9 @@ export function MainTabBar({ state, descriptors, navigation }: BottomTabBarProps
               style={styles.item}
               hitSlop={8}
             >
-              <Ionicons name="camera-outline" size={42} color="#fff" />
+              <Ionicons name="camera-outline" size={30} color="#fff" />
               <Text style={[styles.label, styles.createLabelSpacer]}>.</Text>
+
             </Pressable>
           );
         }
@@ -108,8 +109,8 @@ export function MainTabBar({ state, descriptors, navigation }: BottomTabBarProps
               <Avatar
                 uri={profile.avatarUri}
                 initial={profile.displayName.slice(0, 1)}
-                size={28}
-                radius={8}
+                size={20}
+                radius={7}
                 borderWidth={focused ? 1.5 : 0}
                 borderColor={colors.text.inverse}
               />
@@ -117,9 +118,10 @@ export function MainTabBar({ state, descriptors, navigation }: BottomTabBarProps
               <View>
                 <Ionicons
                   name={iconName}
-                  size={28}
+                  size={20}
                   color={focused ? colors.text.inverse : 'rgba(255,255,255,0.5)'}
                 />
+
                 {route.name === 'chat' && chatUnread > 0 ? (
                   <View style={styles.unreadBadge}>
                     <Text style={styles.unreadBadgeText}>
@@ -147,19 +149,20 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brand.ink,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(255,255,255,0.08)',
-    paddingTop: 8,
+    paddingTop: 0,
     paddingHorizontal: 4,
   },
   item: {
     flex: 1,
-    minHeight: 44,
+    minHeight: 36,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 3,
+    gap: 2,
+    paddingVertical: 2,
   },
   label: {
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 10,
+    lineHeight: 12,
     fontWeight: '700',
     color: 'rgba(255,255,255,0.55)',
   },
@@ -174,17 +177,17 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: -4,
     right: -10,
-    minWidth: 16,
-    height: 16,
+    minWidth: 15,
+    height: 15,
     borderRadius: 8,
-    paddingHorizontal: 4,
+    paddingHorizontal: 3,
     backgroundColor: colors.accent.live,
     alignItems: 'center',
     justifyContent: 'center',
   },
   unreadBadgeText: {
     color: '#fff',
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '800',
   },
 });

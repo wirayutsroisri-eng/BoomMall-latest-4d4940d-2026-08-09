@@ -13,6 +13,8 @@ type Props = {
   muted?: boolean;
   contentFit?: 'contain' | 'cover';
   interactive?: boolean;
+  /** Called once the player reports the video's real pixel dimensions (no scale). */
+  onVideoSize?: (width: number, height: number) => void;
 };
 
 export function ProductVideoThumb({
@@ -23,6 +25,7 @@ export function ProductVideoThumb({
   muted = true,
   contentFit = 'cover',
   interactive = true,
+  onVideoSize,
 }: Props) {
   const source = normalizeMediaUri(uri);
   const player = useVideoPlayer(source, (instance) => {
@@ -33,6 +36,17 @@ export function ProductVideoThumb({
     }
   });
   const { isPlaying } = useEvent(player, 'playingChange', { isPlaying: player.playing });
+  const { status } = useEvent(player, 'statusChange', { status: player.status });
+
+  // รอวิดีโอพร้อมเล่น → อ่านขนาดพิกเซลจริงจาก videoTrack.size
+  useEffect(() => {
+    if (status !== 'readyToPlay') return;
+    const videoTrack = player.videoTrack;
+    if (!videoTrack) return;
+    const w = videoTrack.size.width;
+    const h = videoTrack.size.height;
+    if (w > 0 && h > 0) onVideoSize?.(w, h);
+  }, [onVideoSize, player, status]);
 
   useEffect(() => {
     if (autoPlay) {

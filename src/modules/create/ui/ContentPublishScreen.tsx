@@ -333,6 +333,7 @@ export function ContentPublishScreen() {
                   autoPlay={index === 0}
                   muted
                   interactive={false}
+                  contentFit="contain"
                   style={StyleSheet.absoluteFill}
                 />
               ) : (
@@ -558,7 +559,9 @@ const styles = StyleSheet.create({
     height: 170,
     borderRadius: 10,
     overflow: 'hidden',
-    backgroundColor: '#ddd',
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   coverBadge: {
     position: 'absolute',

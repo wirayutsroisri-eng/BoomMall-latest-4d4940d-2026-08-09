@@ -503,7 +503,7 @@ export function ProductDetailScreen() {
                       uri={displayMediaUri(item.uri)}
                       style={styles.heroImage}
                       autoPlay
-                      contentFit="cover"
+                      contentFit="contain"
                     />
                     <DimensionOverlay overlay={overlay} />
                   </View>

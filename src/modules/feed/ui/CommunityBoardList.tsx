@@ -233,9 +233,17 @@ export function CommunityBoardList({
     const w = widthSV.value;
     const pages = tabCountSV.value;
     const idx = snapPagerIndex(pagerX.value, w, pages, vx);
-    pagerX.value = withSpring(-idx * w, { ...IOS_SPRING, velocity: vx });
     draggingTabs.value = 0;
-    runOnJS(commitTab)(idx);
+    // Do not change React/Zustand state until the native/UI-thread snap has
+    // reached its final page. This keeps adjacent board/feed lanes mounted and
+    // motion-only for the entire drag and settle animation.
+    pagerX.value = withSpring(
+      -idx * w,
+      { ...IOS_SPRING, velocity: vx },
+      (finished) => {
+        if (finished) runOnJS(commitTab)(idx);
+      },
+    );
   };
 
   const horizontalSwipe = Gesture.Pan()

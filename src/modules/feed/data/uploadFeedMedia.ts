@@ -2,7 +2,8 @@ import { isRemoteMediaUrl, prepareChatMedia } from '@/modules/chat/data/chatMedi
 
 async function toRemote(uri: string): Promise<string> {
   if (!uri || isRemoteMediaUrl(uri)) return uri;
-  const uploaded = await prepareChatMedia(uri);
+  // Feed posts keep full original resolution + near-lossless quality.
+  const uploaded = await prepareChatMedia(uri, { highQuality: true });
   return uploaded.url || uri;
 }
 

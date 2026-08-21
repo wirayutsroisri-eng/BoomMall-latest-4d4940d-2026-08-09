@@ -20,7 +20,8 @@ export async function persistCreateMedia(
     try {
       const ctx = ImageManipulator.manipulate(source);
       const rendered = await ctx.renderAsync();
-      const saved = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: 0.88 });
+      // Near-lossless re-encode — feed photos must keep full sharpness.
+      const saved = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: 0.95 });
       const target = new File(dir, `${Date.now()}.jpg`);
       new File(saved.uri).copy(target, { overwrite: true });
       if (target.exists) return target.uri;

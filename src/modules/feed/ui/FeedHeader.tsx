@@ -31,9 +31,9 @@ export function FeedHeader({ tab, onChangeTab, onPressLive, onPressSearch, onPre
         colors={
           onBoard
             ? ['rgba(244,247,245,0.96)', 'rgba(244,247,245,0.75)', 'transparent']
-            : ['rgba(0,0,0,0.4)', 'transparent']
+            : ['rgba(0,0,0,0.16)', 'rgba(0,0,0,0.08)', 'transparent']
         }
-        style={StyleSheet.absoluteFill}
+        style={styles.topScrim}
         pointerEvents="none"
       />
       <View style={styles.row}>
@@ -106,6 +106,14 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 20,
+  },
+  /** Minimal top scrim, low height, only behind header text/icons. */
+  topScrim: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 132,
   },
   row: {
     flexDirection: 'row',

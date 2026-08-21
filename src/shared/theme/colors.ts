@@ -36,5 +36,7 @@ export const colors = {
   feed: {
     gradientTop: 'rgba(7, 20, 15, 0.35)',
     gradientBottom: 'rgba(7, 20, 15, 0.85)',
+    /** Minimal low-height scrim strictly behind bottom caption/author text. */
+    captionScrim: 'rgba(7, 20, 15, 0.55)',
   },
 } as const;

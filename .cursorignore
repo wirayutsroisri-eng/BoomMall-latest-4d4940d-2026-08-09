@@ -1,0 +1,45 @@
+# ===== Dependencies =====
+node_modules/
+
+# ===== Expo =====
+.expo/
+dist/
+web-build/
+
+# ===== Native iOS =====
+ios/
+
+# ===== Native Android =====
+android/
+
+# ===== Build outputs =====
+build/
+coverage/
+
+# ===== Cache / Temp =====
+.cache/
+.tmp/
+.temp/
+.parcel-cache/
+.next/
+.nuxt/
+.output/
+artifacts/
+
+# ===== IDE / Editor =====
+.vscode/
+.idea/
+
+# ===== Lock files (large, not useful for AI) =====
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# ===== Testing =====
+.nyc_output/
+
+# ===== Misc =====
+*.tsbuildinfo
+*.tgz
+.eslintcache
+.stylelintcache

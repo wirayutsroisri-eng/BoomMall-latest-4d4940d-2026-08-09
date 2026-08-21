@@ -259,7 +259,7 @@ export const ProductBottomSheet = forwardRef<BottomSheetModal, Props>(
                         <ProductVideoThumb
                           uri={displayMediaUri(slide.uri)}
                           style={styles.slideMedia}
-                          contentFit="cover"
+                          contentFit="contain"
                           interactive={false}
                         />
                       ) : (

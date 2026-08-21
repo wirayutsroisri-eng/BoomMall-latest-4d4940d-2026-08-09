@@ -58,15 +58,15 @@ export function SpinningDisc({ spinning = false, onPress }: Props) {
 const styles = StyleSheet.create({
   wrap: {
     marginTop: 0,
-    width: 38,
-    height: 38,
+    width: 34,
+    height: 34,
     alignItems: 'center',
     justifyContent: 'center',
   },
   disc: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     backgroundColor: '#2A2A2A',
     alignItems: 'center',
     justifyContent: 'center',
@@ -79,16 +79,16 @@ const styles = StyleSheet.create({
   },
   groove: {
     position: 'absolute',
-    width: 25,
-    height: 25,
-    borderRadius: 13,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.2)',
   },
   label: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
     backgroundColor: colors.brand.primary,
     alignItems: 'center',
     justifyContent: 'center',
@@ -100,3 +100,4 @@ const styles = StyleSheet.create({
     backgroundColor: '#2A2A2A',
   },
 });
+

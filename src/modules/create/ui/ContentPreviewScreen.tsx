@@ -20,7 +20,7 @@ import {
   DEFAULT_OVERLAY_TRANSFORM,
   type OverlayTransform,
 } from '@/modules/create/domain/overlay';
-import { computeContainMediaSize } from '@/modules/create/domain/cameraPreviewLayout';
+import { computeContainMediaSizeFill } from '@/modules/create/domain/cameraPreviewLayout';
 import { persistCreateMedia } from '@/modules/create/data/persistCreateMedia';
 import { useCreateDraftStore } from '@/modules/create/state/create-draft-store';
 import { openListenScreenNow } from '@/shared/navigation/safeNavigate';
@@ -127,7 +127,7 @@ export function ContentPreviewScreen() {
   );
 
   useEffect(() => {
-    if (!uri || mediaType !== 'image') {
+    if (!uri || mediaType === 'video') {
       setMediaPixelSize(null);
       return;
     }
@@ -146,14 +146,17 @@ export function ContentPreviewScreen() {
     };
   }, [mediaType, uri]);
 
+  // Video: no dynamic dimension calculation — let the native player handle
+  // aspect ratio + EXIF rotation. The canvas fills the full viewport via
+  // styles.videoCanvas and VideoView uses contentFit="contain".
   const canvasLayout = useMemo(() => {
     if (mediaType === 'video') {
-      return computeContainMediaSize(screenWidth, screenHeight, 9, 16);
+      return null;
     }
     if (!mediaPixelSize) {
       return { width: screenWidth, height: screenHeight };
     }
-    return computeContainMediaSize(
+    return computeContainMediaSizeFill(
       screenWidth,
       screenHeight,
       mediaPixelSize.width,
@@ -260,7 +263,15 @@ export function ContentPreviewScreen() {
     <View style={styles.root}>
       <View style={styles.mediaStage}>
         {/* เฉพาะเลเยอร์สื่อ — จับภาพส่วนนี้ตอนกดถัดไป (ไม่รวม UI chrome) */}
-        <View ref={canvasRef} style={[styles.canvas, canvasLayout]} collapsable={false}>
+        <View
+          ref={canvasRef}
+          style={[
+            styles.canvas,
+            mediaType === 'video' && styles.videoCanvas,
+            canvasLayout,
+          ]}
+          collapsable={false}
+        >
         {mediaType === 'video' && uri ? (
           <ProductVideoThumb
             uri={uri}
@@ -268,7 +279,7 @@ export function ContentPreviewScreen() {
             muted={!!draftMusic.trim()}
             interactive={false}
             contentFit="contain"
-            style={StyleSheet.absoluteFill}
+            style={{ ...StyleSheet.absoluteFill, width: '100%', height: '100%' }}
           />
         ) : uri ? (
           <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="contain" />
@@ -535,6 +546,16 @@ const styles = StyleSheet.create({
   },
   canvas: {
     overflow: 'hidden',
+    backgroundColor: '#000',
+  },
+  videoCanvas: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    position: 'relative',
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#000',
   },
   textCanvas: {

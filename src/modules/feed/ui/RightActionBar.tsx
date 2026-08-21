@@ -73,23 +73,25 @@ export function RightActionBar({
   return (
     <View style={styles.wrap} pointerEvents="box-none">
       {onTip ? (
-        <Pressable onPress={handleTip} style={styles.action} hitSlop={4} accessibilityLabel="เหรียญ">
+        <Pressable onPress={handleTip} style={styles.action} hitSlop={10} accessibilityLabel="เหรียญ">
           <Animated.View style={tipStyle}>
-            <CoinIcon size={32} empty active={Boolean(tipped)} />
+            <CoinIcon size={28} empty active={Boolean(tipped)} />
           </Animated.View>
+
           <Text style={[styles.label, tipped && styles.tipLabelActive]}>{formatCount(tips)}</Text>
         </Pressable>
       ) : null}
 
       {onLike ? (
-        <Pressable onPress={handleLike} style={styles.action} hitSlop={4} accessibilityLabel="ถูกใจ">
+        <Pressable onPress={handleLike} style={styles.action} hitSlop={10} accessibilityLabel="ถูกใจ">
           <Animated.View style={likeStyle}>
             <Ionicons
               name={liked ? 'heart' : 'heart-outline'}
-              size={32}
+              size={28}
               color={liked ? colors.brand.pink : colors.text.inverse}
               style={styles.iconShadow}
             />
+
           </Animated.View>
           <Text style={[styles.label, liked && styles.likeLabelActive]}>
             {formatCount(likes ?? 0)}
@@ -132,18 +134,19 @@ function Action({
   animatedStyle?: object;
 }) {
   return (
-    <Pressable onPress={onPress} style={styles.action} hitSlop={4}>
+    <Pressable onPress={onPress} style={styles.action} hitSlop={10}>
       <Animated.View style={animatedStyle}>
-        <Ionicons name={icon} size={32} color={color} style={styles.iconShadow} />
+        <Ionicons name={icon} size={28} color={color} style={styles.iconShadow} />
       </Animated.View>
       <Text style={styles.label}>{label}</Text>
     </Pressable>
   );
 }
 
-const ACTION_GAP = 14;
-const ICON_LABEL_GAP = 4;
-const ACTION_SLOT = 58;
+const ACTION_GAP = 12;
+const ICON_LABEL_GAP = 3;
+const ACTION_SLOT = 52;
+
 
 const styles = StyleSheet.create({
   wrap: {
@@ -168,12 +171,13 @@ const styles = StyleSheet.create({
   },
   label: {
     color: colors.text.inverse,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '800',
-    lineHeight: 16,
+    lineHeight: 15,
     textShadowColor: 'rgba(0,0,0,0.5)',
     textShadowRadius: 4,
   },
+
   tipLabelActive: {
     color: colors.accent.warning,
   },

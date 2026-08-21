@@ -1,21 +1,21 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
-  cancelAnimation,
   Easing,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
-  withRepeat,
   withSequence,
   withSpring,
   withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
+import type { VideoPlayer } from 'expo-video';
+
 import { colors } from '@/shared/theme/colors';
 import type { FeedItem } from '@/modules/feed/domain/types';
 import { DEFAULT_OVERLAY_TRANSFORM } from '@/modules/create/domain/overlay';
@@ -27,9 +27,11 @@ import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
 import { Avatar } from '@/shared/components/Avatar';
 import { RightActionBar } from './RightActionBar';
 import { FeedVideoLayer } from './FeedVideoLayer';
+import { FeedSeekBar } from './FeedSeekBar';
 import { FeedPinchZoomLayer } from './FeedPinchZoomLayer';
 import { IOS_SPRING, clampPagerX, snapPagerIndex } from './feedMotion';
 import { hasFeedMusic } from '@/modules/feed/domain/feedMusic';
+
 
 /** แคปชันยาวเกินนี้ → แสดงปุ่มย่อ/ขยาย */
 const CAPTION_COLLAPSE_CHARS = 42;
@@ -97,7 +99,29 @@ export function FeedReelCard({
   const [page, setPage] = useState(0);
   const [captionExpanded, setCaptionExpanded] = useState(false);
   const activeUri = gallery[Math.min(page, Math.max(gallery.length - 1, 0))];
+  // Real photo aspect ratio (from upload pixels) so image posts are never cropped.
+  const imageAspectRatio = useMemo(() => {
+    if (item.imageWidth && item.imageHeight && item.imageHeight > 0) {
+      return item.imageWidth / item.imageHeight;
+    }
+    return undefined;
+  }, [item.imageWidth, item.imageHeight]);
+  // รูปแสดงตามสัดส่วนพิกเซลจริงของไฟล์ (contain ในจอ ไม่ crop/ขยายซูม)
+  // วิดีโอไม่ใช้ mediaLayout — FeedVideoLayer ขยายเต็มการ์ด (contain เหมือนรูปภาพ ไม่ crop/ซูม)
+  const mediaLayout = useMemo(() => {
+    if (imageAspectRatio) {
+      let w = screenWidth;
+      let h = w / imageAspectRatio;
+      if (h > height) {
+        h = height;
+        w = h * imageAspectRatio;
+      }
+      return { width: Math.round(w), height: Math.round(h) };
+    }
+    return { width: screenWidth, height };
+  }, [height, imageAspectRatio, screenWidth]);
   const authorKey = item.authorHandle.replace(/^@/, '');
+
   const myProfile = useLoyaltyStore((s) => s.profile);
   const authorName = item.isUserPost ? myProfile.displayName || item.author : item.author;
   const avatarUri = item.isUserPost
@@ -109,7 +133,6 @@ export function FeedReelCard({
   const expandMusic = useMusicPlayerStore((s) => s.expand);
   const chromeHidden = useFeedChromeStore((s) => s.chromeHidden);
   const captionsEnabled = useFeedChromeStore((s) => s.captionsEnabled);
-  const playbackRate = useFeedChromeStore((s) => s.playbackRate);
   const setChromeHidden = useFeedChromeStore((s) => s.setChromeHidden);
   const setMediaZoomed = useFeedChromeStore((s) => s.setMediaZoomed);
   const hasMusic = hasFeedMusic(item.musicTitle);
@@ -128,7 +151,9 @@ export function FeedReelCard({
   const caption = item.caption?.trim() ?? '';
   const captionCollapsible = caption.length > CAPTION_COLLAPSE_CHARS;
 
-  const progress = useSharedValue(0);
+  const playbackProgress = useSharedValue(0);
+  const centerIconScale = useSharedValue(0);
+  const centerIconOpacity = useSharedValue(0);
   const heartScale = useSharedValue(0);
   const heartOpacity = useSharedValue(0);
   const widthSV = useSharedValue(screenWidth);
@@ -136,6 +161,17 @@ export function FeedReelCard({
   const panStartPagerX = useSharedValue(0);
   const draggingTabs = useSharedValue(0);
   const zoomed = useSharedValue(0);
+
+  const [player, setPlayer] = useState<VideoPlayer | null>(null);
+  const [, setIsPaused] = useState(false);
+  const [isManuallyPaused, setIsManuallyPaused] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [centerIconName, setCenterIconName] = useState<'play' | 'pause'>('play');
+  const isScrubbingRef = useRef(false);
+  /** Timestamp of the last media tap — used to detect a double-tap like. */
+  const lastTapTimeRef = useRef(0);
+
 
   const onMediaZoomChange = useCallback(
     (next: boolean) => {
@@ -170,17 +206,50 @@ export function FeedReelCard({
     if (!isActive) setCaptionExpanded(false);
   }, [isActive]);
 
+  // A manual pause belongs to the currently visible reel only. Reset it only
+  // when this card *becomes active again* (the user scrolled away and came
+  // back) — never while it stays active, or autoplay would restart a video the
+  // user explicitly paused. FlatList's viewability drives the threshold.
+  const wasActiveRef = useRef(isActive);
   useEffect(() => {
-    const duration = Math.max(2500, Math.round(15000 / playbackRate));
-    if (isActive) {
-      progress.value = 0;
-      progress.value = withRepeat(withTiming(1, { duration, easing: Easing.linear }), -1, false);
-    } else {
-      cancelAnimation(progress);
-      progress.value = 0;
+    if (isActive && !wasActiveRef.current) {
+      // Reset is intentionally sync: FlatList viewability drives it, so the
+      // next autoplay of this reel starts from a clean slate.
+      setIsManuallyPaused(false);
     }
-    return () => cancelAnimation(progress);
-  }, [isActive, progress, page, playbackRate]);
+    wasActiveRef.current = isActive;
+  }, [isActive]);
+
+  // Reset playback state whenever the clip changes.
+  useEffect(() => {
+    setCurrentTime(0);
+    setDuration(0);
+    setIsPaused(false);
+    isScrubbingRef.current = false;
+    playbackProgress.value = 0;
+  }, [item.id, page, playbackProgress]);
+
+  // Drive the seek bar from the player's real time updates.
+  useEffect(() => {
+    if (!player) return;
+    const timeSub = player.addListener('timeUpdate', ({ currentTime: t }) => {
+      const d = player.duration;
+      if (d > 0) {
+        setDuration(d);
+        setCurrentTime(t);
+        if (!isScrubbingRef.current) {
+          playbackProgress.value = t / d;
+        }
+      }
+    });
+    const playingSub = player.addListener('playingChange', ({ isPlaying }) => {
+      setIsPaused(!isPlaying);
+    });
+    return () => {
+      timeSub.remove();
+      playingSub.remove();
+    };
+  }, [player, playbackProgress]);
 
   const toggleCaption = () => {
     if (!captionCollapsible) return;
@@ -188,14 +257,121 @@ export function FeedReelCard({
     setCaptionExpanded((v) => !v);
   };
 
-  const progressStyle = useAnimatedStyle(() => ({
-    width: `${progress.value * 100}%`,
+  const burstCenterIcon = (name: 'play' | 'pause') => {
+    setCenterIconName(name);
+    centerIconScale.value = 0.5;
+    centerIconOpacity.value = 1;
+    centerIconScale.value = withSequence(
+      withTiming(1.1, { duration: 160, easing: Easing.out(Easing.back(2)) }),
+      withTiming(1, { duration: 100 }),
+    );
+    centerIconOpacity.value = withSequence(
+      withTiming(1, { duration: 120 }),
+      withTiming(0, { duration: 450, easing: Easing.out(Easing.ease) }),
+    );
+  };
+
+  const setVideoPlaying = (playing: boolean) => {
+    if (!player) return;
+    if (playing) {
+      setIsManuallyPaused(false);
+      player.play();
+      setIsPaused(false);
+      burstCenterIcon('pause');
+    } else {
+      player.pause();
+      setIsManuallyPaused(true);
+      setIsPaused(true);
+      burstCenterIcon('play');
+    }
+  };
+
+  const handleVideoTap = () => {
+    console.log('[VIDEO_DEBUG] TAP_RECEIVED', { feedId: item.id, hasPlayer: Boolean(player) });
+    if (!player) return;
+    if (player.playing) {
+      console.log('[VIDEO_DEBUG] PAUSE_CALLED', { feedId: item.id });
+      setVideoPlaying(false);
+    } else {
+      console.log('[VIDEO_DEBUG] PLAY_CALLED', { feedId: item.id });
+      setVideoPlaying(true);
+    }
+  };
+
+  /**
+   * Single tap toggles play/pause immediately (no waiting for the double-tap
+   * recognizer). A second tap within 280ms is treated as a double-tap like and
+   * undoes the first tap's play/pause toggle, exactly like TikTok/iG.
+   */
+  const handleMediaTap = () => {
+    // Tap timestamp is intentionally impure (event handler, not render).
+    // eslint-disable-next-line react-hooks/purity
+    const now = Date.now();
+    const isDoubleTap = lastTapTimeRef.current !== 0 && now - lastTapTimeRef.current < 280;
+    lastTapTimeRef.current = now;
+
+    if (isDoubleTap) {
+      lastTapTimeRef.current = 0;
+      // Undo the single-tap toggle from the first tap of this double-tap.
+      if (player) {
+        if (player.playing) setVideoPlaying(false);
+        else setVideoPlaying(true);
+      }
+      burstHeart();
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      if (!liked) onLike?.();
+      return;
+    }
+
+    restoreChrome();
+    handleVideoTap();
+  };
+
+  const handleScrub = (ratio: number) => {
+    playbackProgress.value = ratio;
+    if (player) {
+      const d = player.duration;
+      if (d > 0) {
+        player.currentTime = ratio * d;
+        setCurrentTime(ratio * d);
+      }
+    }
+  };
+
+  const handleSeek = (ratio: number) => {
+    if (!player) return;
+    const d = player.duration;
+    if (d > 0) {
+      player.currentTime = ratio * d;
+      setCurrentTime(ratio * d);
+      playbackProgress.value = ratio;
+      // Start playing automatically after seeking/releasing the seek bar
+      player.play();
+    }
+  };
+
+  const handleScrubStart = () => {
+    isScrubbingRef.current = true;
+    // Pause player during scrubbing interaction
+    if (player && player.playing) {
+      player.pause();
+    }
+  };
+
+  const handleScrubEnd = () => {
+    isScrubbingRef.current = false;
+  };
+
+  const centerIconStyle = useAnimatedStyle(() => ({
+    opacity: centerIconOpacity.value,
+    transform: [{ scale: centerIconScale.value }],
   }));
 
   const heartStyle = useAnimatedStyle(() => ({
     opacity: heartOpacity.value,
     transform: [{ scale: heartScale.value }],
   }));
+
 
   const burstHeart = () => {
     heartScale.value = 0.4;
@@ -210,12 +386,6 @@ export function FeedReelCard({
     );
   };
 
-  const onDoubleTapLike = () => {
-    burstHeart();
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    if (!liked) onLike?.();
-  };
-
   const openLongPressMenu = () => {
     if (!onLongPressMenu) return;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -226,12 +396,6 @@ export function FeedReelCard({
     if (chromeHidden) setChromeHidden(false);
   };
 
-  const doubleTap = Gesture.Tap()
-    .numberOfTaps(2)
-    .onEnd(() => {
-      runOnJS(onDoubleTapLike)();
-    });
-
   const longPress = Gesture.LongPress()
     .minDuration(400)
     .maxDistance(12)
@@ -239,12 +403,26 @@ export function FeedReelCard({
       runOnJS(openLongPressMenu)();
     });
 
+  // This recognizer lives on the media layer, below every interactive overlay.
+  // `maxDistance` cancels it as soon as the finger becomes a scroll/swipe.
+  //
+  // NOTE: we deliberately do NOT compose a `numberOfTaps(2)` tap here. With
+  // `Gesture.Exclusive(doubleTap, …)` the single tap had to wait ~500ms for the
+  // double tap to fail, which made play/pause feel laggy. Double-tap is instead
+  // detected manually inside handleMediaTap via a 280ms timestamp window, so a
+  // single tap responds instantly.
   const singleTap = Gesture.Tap()
     .numberOfTaps(1)
     .maxDuration(250)
-    .onEnd(() => {
-      runOnJS(restoreChrome)();
+    .maxDistance(10)
+    // eslint-disable-next-line react-hooks/refs -- gesture callback (not render) closes over refs.
+    .onEnd((_event, success) => {
+      if (!success) return;
+      runOnJS(handleMediaTap)();
     });
+
+  const mediaGesture = Gesture.Exclusive(longPress, singleTap);
+
 
   const goNextPhoto = () => {
     setPage((p) => Math.min(gallery.length - 1, p + 1));
@@ -267,12 +445,25 @@ export function FeedReelCard({
     const w = widthSV.value;
     const pages = tabCountSV.value;
     const idx = snapPagerIndex(pagerX.value, w, pages, vx);
-    pagerX.value = withSpring(-idx * w, { ...IOS_SPRING, velocity: vx });
     draggingTabs.value = 0;
-    runOnJS(commitTab)(idx);
+    // Keep the whole snap on the UI thread. Updating the tab store here used to
+    // re-render/focus the incoming lane while the spring was still around 75%.
+    pagerX.value = withSpring(
+      -idx * w,
+      { ...IOS_SPRING, velocity: vx },
+      (finished) => {
+        if (finished) runOnJS(commitTab)(idx);
+      },
+    );
   };
 
   const horizontalSwipe = Gesture.Pan()
+    // The pager gesture wraps the whole card, including the action buttons.
+    // On iOS its native recognizer must not cancel a Pressable's touch stream.
+    .cancelsTouchesInView(false)
+    // The media tap is mounted in a nested GestureDetector. Without this
+    // cross-detector relation, iOS lets the outer pan recognizer block the tap.
+    .simultaneousWithExternalGesture(singleTap, longPress)
     .activeOffsetX([-12, 12])
     .failOffsetY([-22, 22])
     .onStart(() => {
@@ -371,33 +562,46 @@ export function FeedReelCard({
       pagerX.value = withSpring(panStartPagerX.value, IOS_SPRING);
     });
 
-  const composedGesture = Gesture.Simultaneous(
-    Gesture.Exclusive(doubleTap, singleTap),
-    longPress,
-    horizontalSwipe,
-  );
-
   return (
-    <GestureDetector gesture={composedGesture}>
-      <View style={[styles.card, { height }]}>
+    <View style={{ height }}>
+      <GestureDetector gesture={horizontalSwipe}>
+        <View style={[styles.card, { height: '100%' }]}>
         <FeedPinchZoomLayer
           resetKey={`${item.id}:${page}`}
-          enabled={Boolean(item.videoUri || activeUri)}
+          enabled={Boolean(activeUri && !item.videoUri)}
           onZoomChange={onMediaZoomChange}
+          contentGesture={mediaGesture}
         >
           {item.videoUri ? (
-            <FeedVideoLayer uri={item.videoUri} isActive={isActive} />
+            <View style={styles.videoStage}>
+              <FeedVideoLayer
+                uri={item.videoUri}
+                isActive={isActive}
+                isManuallyPaused={isManuallyPaused}
+                contentFit="contain"
+                onPlayerReady={setPlayer}
+                style={StyleSheet.absoluteFill}
+              />
+            </View>
           ) : activeUri ? (
-            <Image source={{ uri: activeUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+            <View style={styles.imageStage}>
+              <Image
+                source={{ uri: activeUri }}
+                style={[styles.imageContain, { width: mediaLayout.width, height: mediaLayout.height }]}
+                resizeMode="contain"
+              />
+            </View>
           ) : (
             <LinearGradient colors={item.gradient} style={StyleSheet.absoluteFill} />
           )}
         </FeedPinchZoomLayer>
+
         {!chromeHidden ? (
           <LinearGradient
-            colors={[colors.feed.gradientTop, 'transparent', colors.feed.gradientBottom]}
-            locations={[0, 0.35, 1]}
-            style={StyleSheet.absoluteFill}
+            colors={['transparent', colors.feed.captionScrim]}
+            locations={[0, 1]}
+            style={styles.captionScrim}
+            pointerEvents="none"
           />
         ) : null}
 
@@ -423,7 +627,7 @@ export function FeedReelCard({
         </Animated.View>
 
         {!chromeHidden ? (
-          <View style={styles.meta}>
+          <View style={styles.meta} pointerEvents="box-none">
             {item.isLive ? (
               <View style={styles.liveBadge}>
                 <View style={styles.liveDot} />
@@ -533,15 +737,35 @@ export function FeedReelCard({
           />
         ) : null}
 
-        {!chromeHidden ? (
-          <View style={styles.progressTrack} pointerEvents="none">
-            <Animated.View style={[styles.progressFill, progressStyle]} />
-          </View>
+        {item.videoUri ? (
+          <Animated.View style={[styles.centerIcon, centerIconStyle]} pointerEvents="none">
+            <Ionicons
+              name={centerIconName === 'play' ? 'play' : 'pause'}
+              size={72}
+              color="rgba(255,255,255,0.92)"
+            />
+          </Animated.View>
         ) : null}
-      </View>
-    </GestureDetector>
+
+        </View>
+      </GestureDetector>
+
+      {/* Seek bar placed outside horizontalSwipe GestureDetector to receive touch events */}
+      {item.videoUri && !chromeHidden ? (
+        <FeedSeekBar
+          progress={playbackProgress.value}
+          currentTime={currentTime}
+          duration={duration}
+          onScrub={handleScrub}
+          onSeek={handleSeek}
+          onScrubStart={handleScrubStart}
+          onScrubEnd={handleScrubEnd}
+        />
+      ) : null}
+    </View>
   );
 }
+
 
 const styles = StyleSheet.create({
   card: {
@@ -566,12 +790,55 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.35)',
   },
   pageDotActive: { backgroundColor: '#fff' },
+  /** Full-bleed stage that centers the photo without cropping (contain). */
+  imageStage: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.brand.ink,
+  },
+  imageContain: {
+    width: '100%',
+    height: '100%',
+  },
+  /**
+   * Full-bleed stage that centers the video — identical to `imageStage`.
+   * Video uses contentFit="contain" so it keeps its original aspect ratio
+   * (no zoom / no edge crop), exactly like photos on the feed.
+   */
+  videoStage: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.brand.ink,
+  },
+  /** Full-bleed cover — fills viewport, may crop edges (aspectFill). */
+  imageCover: {
+    ...StyleSheet.absoluteFill,
+  },
+  /** Slight low-height gradient strictly behind bottom caption/author text. */
+  captionScrim: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 220,
+    zIndex: 9,
+  },
   heartBurst: {
     ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 12,
   },
+
+  centerIcon: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 11,
+  },
+
   meta: {
     position: 'absolute',
     left: 14,
@@ -660,17 +927,5 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.7)',
     fontSize: 13,
     fontWeight: '700',
-  },
-  progressTrack: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: 2,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: colors.brand.primary,
   },
 });

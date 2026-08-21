@@ -5,8 +5,8 @@
 
 import {
   EXTERNAL_TRANSFER_ENABLED,
+  formatBoomCoinCount,
   formatCoinBalance,
-  formatLifetimeCoins,
 } from '../domain/boom-coin';
 import type { LedgerCommitResult, LedgerTransactionRow } from '../domain/ledger-types';
 import {
@@ -80,7 +80,7 @@ export class WalletService {
     const lifetime = this.engine.getLifetimeReceived(profileId);
     return {
       lifetimeCoinsReceived: lifetime,
-      display: formatLifetimeCoins(lifetime),
+      display: formatBoomCoinCount(lifetime),
     };
   }
 

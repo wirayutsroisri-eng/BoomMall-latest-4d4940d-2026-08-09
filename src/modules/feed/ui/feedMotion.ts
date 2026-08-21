@@ -1,24 +1,22 @@
 import { Easing, type WithSpringConfig } from 'react-native-reanimated';
 
-/** Spring แบบ interactive dismiss ของ iOS — แน่น ไม่เด้งเกิน */
+/** Spring แบบ interactive dismiss ของ iOS — แน่น ไม่เด้งเกิน (ปรับความเร็วให้ดูด Snap เร็วและแน่นขึ้น) */
 export const IOS_SPRING: WithSpringConfig = {
-  damping: 28,
-  stiffness: 340,
-  mass: 0.82,
+  damping: 24,
+  stiffness: 380,
+  mass: 0.7,
   overshootClamping: true,
   energyThreshold: 6e-3,
 };
 
 /**
- * Spring สำหรับปัดข้ามแท็บฟีด — นุ่ม ลื่น ไหลตามนิ้ว ไม่ปุ๊บปั๊บ
- * ลด stiffness + เพิ่ม damping + ปล่อยให้มี overshoot เล็กน้อยตามธรรมชาติ
- * เพื่อให้การ snap กลับตำแหน่งรู้สึกต่อเนื่องเหมือน UIScrollView ของ iOS
+ * Spring สำหรับปัดข้ามแท็บฟีด — แน่น กระชับ ดูดเข้าล็อกทันทีโดยไม่ลอยช้า
  */
 export const PAGER_SPRING: WithSpringConfig = {
   damping: 22,
-  stiffness: 190,
-  mass: 1,
-  overshootClamping: false,
+  stiffness: 280,
+  mass: 0.8,
+  overshootClamping: true,
   energyThreshold: 4e-3,
 };
 

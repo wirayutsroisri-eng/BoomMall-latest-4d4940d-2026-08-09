@@ -52,11 +52,6 @@ export function formatBoomCoinCount(n: number): string {
   return String(v);
 }
 
-/** @deprecated Prefer formatBoomCoinCount — same compact social formatter. */
-export function formatLifetimeCoins(n: number): string {
-  return formatBoomCoinCount(n);
-}
-
 /**
  * Spendable wallet balance — full digits with grouping (ขึ้น–ลงตามใช้จ่ายจริง).
  * 100 → "100" · 12_580 → "12,580"

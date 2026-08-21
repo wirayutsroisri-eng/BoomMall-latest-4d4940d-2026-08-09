@@ -91,6 +91,9 @@ export const CreateCaptureLiveCamera = forwardRef<LiveCameraHandle, Props>(funct
         active={active}
         mirror={facing === 'front'}
         zoom={0}
+        // บันทึกวิดีโอความละเอียดสูงสุด (Android only) — กันวิดีโอใหม่ resolution ต่ำ
+        // แล้วแสดงเล็กใน Feed (Feed แสดงขนาดออริจินัลแบบ NoUpscale)
+        videoQuality="2160p"
         ratio={Platform.OS === 'android' ? cameraPreviewRatioProp(mode) : undefined}
         onCameraReady={onReady}
         onMountError={(e) => onMountError(e.message)}

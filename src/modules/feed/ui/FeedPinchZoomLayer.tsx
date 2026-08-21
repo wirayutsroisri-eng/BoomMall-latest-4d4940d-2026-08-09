@@ -1,6 +1,11 @@
 import React, { useEffect } from 'react';
 import { StyleSheet } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import {
+  Gesture,
+  GestureDetector,
+  type ComposedGesture,
+  type GestureType,
+} from 'react-native-gesture-handler';
 import Animated, {
   runOnJS,
   useAnimatedStyle,
@@ -14,6 +19,8 @@ type Props = {
   resetKey: string;
   enabled?: boolean;
   onZoomChange?: (zoomed: boolean) => void;
+  /** Optional media gesture composed on the same native detector as pinch/pan. */
+  contentGesture?: GestureType | ComposedGesture;
 };
 
 const MAX_SCALE = 3.5;
@@ -31,7 +38,13 @@ function clampPan(offset: number, span: number, scale: number) {
 }
 
 /** Pinch + pan zoom for full-bleed feed media (TikTok-style). */
-export function FeedPinchZoomLayer({ children, resetKey, enabled = true, onZoomChange }: Props) {
+export function FeedPinchZoomLayer({
+  children,
+  resetKey,
+  enabled = true,
+  onZoomChange,
+  contentGesture,
+}: Props) {
   const scale = useSharedValue(1);
   const startScale = useSharedValue(1);
   const tx = useSharedValue(0);
@@ -100,7 +113,9 @@ export function FeedPinchZoomLayer({ children, resetKey, enabled = true, onZoomC
       ty.value = clampPan(startTy.value + e.translationY, spanH.value, s);
     });
 
-  const gesture = Gesture.Simultaneous(pinch, pan);
+  const gesture = contentGesture
+    ? Gesture.Simultaneous(contentGesture, pinch, pan)
+    : Gesture.Simultaneous(pinch, pan);
 
   const style = useAnimatedStyle(() => ({
     transform: [{ translateX: tx.value }, { translateY: ty.value }, { scale: scale.value }],

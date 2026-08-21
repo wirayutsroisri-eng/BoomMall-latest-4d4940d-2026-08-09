@@ -6,6 +6,7 @@ import {
   useWindowDimensions,
   View,
   Alert,
+  InteractionManager,
   type LayoutChangeEvent,
   type ViewToken,
 } from 'react-native';
@@ -13,7 +14,13 @@ import { BottomSheetModal } from '@gorhom/bottom-sheet';
 import { StatusBar } from 'expo-status-bar';
 import { router, useIsFocused } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  useAnimatedReaction,
+  runOnJS,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
 import { useCallStore } from '@/modules/chat/state/call-store';
@@ -78,11 +85,16 @@ export function HomeFeedScreen() {
 
   const [viewportHeight, setViewportHeight] = useState(0);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
+  const [playbackActiveItemId, setPlaybackActiveItemId] = useState<string | null>(null);
+  const [playbackTab, setPlaybackTab] = useState<FeedTab>(tab);
+  const isScrollingRef = useRef(false);
   const [reportTarget, setReportTarget] = useState<FeedItem | null>(null);
   const [menuItem, setMenuItem] = useState<FeedItem | null>(null);
   const [shareItem, setShareItem] = useState<FeedItem | null>(null);
   const [loginOpen, setLoginOpen] = useState(false);
   const onBoard = tab === 'board';
+  /** Persist scroll position per tab so switching tabs retains the active item. */
+  const activeItemByTabRef = useRef<Partial<Record<FeedTab, string | null>>>({});
   const blockedUserIds = useModerationStore((s) => s.blockedUserIds);
   const hiddenContentIds = useModerationStore((s) => s.hiddenContentIds);
   const removedContentIds = useModerationStore((s) => s.removedContentIds);
@@ -164,9 +176,25 @@ export function HomeFeedScreen() {
   );
 
   useEffect(() => {
-    setActiveItemId(items[0]?.id ?? null);
-    activeIndexRef.current = 0;
+    // Restore the previously active item for this tab (persisted across tab switches).
+    const restored = activeItemByTabRef.current[tab];
+    const candidate = restored && items.find((i) => i.id === restored) ? restored : items[0]?.id ?? null;
+    setActiveItemId(candidate);
+    activeIndexRef.current = candidate ? items.findIndex((i) => i.id === candidate) : 0;
   }, [tab, items]);
+
+  // Save the active item whenever it changes, so we can restore it on tab switch.
+  useEffect(() => {
+    if (activeItemId) {
+      activeItemByTabRef.current[tab] = activeItemId;
+    }
+  }, [activeItemId, tab]);
+
+  // Synchronize playbackTab and playbackActiveItemId immediately when tab or activeItemId changes (Zero-Delay Playback)
+  useEffect(() => {
+    setPlaybackTab(tab);
+    setPlaybackActiveItemId(activeItemId);
+  }, [tab, activeItemId]);
 
   useEffect(() => {
     const i = Math.max(0, TAB_ORDER.indexOf(tab));
@@ -278,7 +306,7 @@ export function HomeFeedScreen() {
       <FeedReelCard
         item={item}
         height={viewportHeight}
-        isActive={laneTab === tab && item.id === activeItemId}
+        isActive={laneTab === playbackTab && item.id === playbackActiveItemId}
         onComment={() => openCommentsSheet(item.id)}
         onShare={() => setShareItem(item)}
         onLike={() => likeClip(item)}
@@ -309,7 +337,8 @@ export function HomeFeedScreen() {
       />
     ),
     [
-      activeItemId,
+      playbackActiveItemId,
+      playbackTab,
       commitTabIndex,
       likeClip,
       openAuthor,
@@ -322,7 +351,6 @@ export function HomeFeedScreen() {
       screenWidth,
       setActive,
       startCall,
-      tab,
       viewportHeight,
     ],
   );
@@ -336,7 +364,7 @@ export function HomeFeedScreen() {
             if (laneTab === 'board') {
               return (
                 <View key={laneTab} style={{ width: screenWidth, flex: 1 }}>
-                  {feedFocused && Math.abs(0 - tabIndex) <= 1 ? (
+                  {feedFocused ? (
                     <CommunityBoardList
                       items={boardItems}
                       topInset={insets.top}
@@ -353,7 +381,7 @@ export function HomeFeedScreen() {
             const laneItems = feedsByTab[laneTab] ?? [];
             return (
               <View key={laneTab} style={{ width: screenWidth, flex: 1 }}>
-                {feedFocused && viewportHeight > 0 && Math.abs(TAB_ORDER.indexOf(laneTab) - tabIndex) <= 1 ? (
+                {feedFocused && viewportHeight > 0 ? (
                   laneItems.length === 0 ? (
                     <View style={[styles.emptyLane, { paddingTop: insets.top + 88 }]}>
                       <Text style={styles.emptyTitle}>ยังไม่มีโพสต์</Text>
@@ -370,6 +398,8 @@ export function HomeFeedScreen() {
                     pagingEnabled
                     scrollEnabled={laneTab === tab && !mediaZoomed}
                     decelerationRate="fast"
+                    bounces={false}
+                    overScrollMode="never"
                     showsVerticalScrollIndicator={false}
                     snapToInterval={viewportHeight}
                     snapToAlignment="start"
@@ -397,11 +427,17 @@ export function HomeFeedScreen() {
           <FeedHeader
             tab={tab}
             onChangeTab={(next) => {
-              void Haptics.selectionAsync();
-              setTab(next);
               const i = TAB_ORDER.indexOf(next);
-              if (i < 0) return;
-              pagerX.value = withSpring(-i * screenWidth, IOS_SPRING);
+              if (i < 0 || next === tab) return;
+              // Header taps follow the same rule as swipes: animate the pure
+              // viewport first, then commit active/focus state after 100% snap.
+              pagerX.value = withSpring(
+                -i * screenWidth,
+                IOS_SPRING,
+                (finished) => {
+                  if (finished) runOnJS(commitTabIndex)(i);
+                },
+              );
             }}
             onPressSearch={() => router.push('/search')}
             onPressMore={
@@ -522,6 +558,7 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: colors.brand.ink,
+    paddingTop: 17,
   },
   rootBoard: {
     backgroundColor: colors.surface.canvas,

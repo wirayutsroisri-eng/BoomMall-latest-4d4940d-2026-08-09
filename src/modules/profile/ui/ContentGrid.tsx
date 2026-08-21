@@ -77,8 +77,8 @@ export function ContentGrid({
   const fadeColors =
     tone === 'bright'
       ? (['transparent', 'rgba(0,0,0,0.38)'] as const)
-      : (['transparent', 'rgba(0,0,0,0.72)'] as const);
-  const fadeHeight = tone === 'bright' ? '38%' : '55%';
+      : (['transparent', 'rgba(0,0,0,0.42)'] as const);
+  const fadeHeight = tone === 'bright' ? '38%' : '32%';
 
   if (items.length === 0) {
     return (
