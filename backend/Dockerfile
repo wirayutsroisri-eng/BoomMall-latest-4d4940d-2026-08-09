@@ -1,29 +1,46 @@
-FROM node:22-alpine AS deps
+# syntax=docker/dockerfile:1
+
+ARG NODE_VERSION=22.17.0
+
+FROM node:${NODE_VERSION}-bookworm-slim AS base
 WORKDIR /app
+ENV NODE_ENV=production
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates openssl \
+  && rm -rf /var/lib/apt/lists/*
+
+FROM base AS build
+ENV NODE_ENV=development
 COPY package.json package-lock.json ./
 RUN npm ci
-
-FROM node:22-alpine AS build
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY package.json package-lock.json tsconfig.json ./
+COPY tsconfig.json ./
 COPY prisma ./prisma
 COPY src ./src
 RUN npx prisma generate && npm run build
 
-FROM node:22-alpine AS runner
-WORKDIR /app
-ENV NODE_ENV=production
-RUN addgroup -S boom && adduser -S boom -G boom \
-  && mkdir -p /app/deploy/certs \
-  && chown -R boom:boom /app
+FROM base AS production-dependencies
 COPY package.json package-lock.json ./
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
-COPY --from=build /app/prisma ./prisma
-RUN npm prune --omit=dev \
+COPY prisma ./prisma
+RUN npm ci --omit=dev && npx prisma generate
+
+FROM base AS runner
+ENV PORT=4000 \
+    API_HOST_BIND=0.0.0.0
+RUN groupadd --system boom \
+  && useradd --system --gid boom --create-home boom \
+  && mkdir -p /app/data /app/deploy/certs \
   && chown -R boom:boom /app
+
+COPY --chown=boom:boom package.json package-lock.json ./
+COPY --chown=boom:boom --from=production-dependencies /app/node_modules ./node_modules
+COPY --chown=boom:boom --from=build /app/dist ./dist
+COPY --chown=boom:boom --from=build /app/prisma ./prisma
+COPY --chown=boom:boom assets ./assets
+
 USER boom
 EXPOSE 4000
-# Mount TLS material: ./deploy/certs → /app/deploy/certs
-CMD ["sh", "-c", "node dist/cli/migrate-deploy.js && node dist/index.js"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||4000)+'/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+
+# Keep the backend's existing production start/migration contract.
+CMD ["npm", "run", "start:prod"]
