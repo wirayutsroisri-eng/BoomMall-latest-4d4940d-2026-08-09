@@ -10,12 +10,14 @@ import { AppError } from '../../../lib/errors';
 import { chatMediaExtension, normalizeChatMime } from '../mediaTypes';
 
 export type ObjectStorageConfig = {
+  provider: 'cloudflare-r2' | 'aws-s3' | 's3-compatible';
   bucket: string;
   region: string;
   endpoint?: string;
   accessKeyId?: string;
   secretAccessKey?: string;
   cdnBaseUrl?: string;
+  forcePathStyle: boolean;
 };
 
 let cachedClient: S3Client | null = null;
@@ -31,17 +33,20 @@ export function objectStorageConfig(): ObjectStorageConfig | null {
   const endpoint = process.env.S3_ENDPOINT?.trim() || undefined;
   const accessKeyId = process.env.AWS_ACCESS_KEY_ID?.trim() || undefined;
   const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY?.trim() || undefined;
+  const isR2 = Boolean(endpoint && /\.r2\.cloudflarestorage\.com\/?$/i.test(endpoint));
   if (endpoint && (!accessKeyId || !secretAccessKey)) {
     cachedConfig = null;
     return null;
   }
   cachedConfig = {
+    provider: isR2 ? 'cloudflare-r2' : endpoint ? 's3-compatible' : 'aws-s3',
     bucket,
-    region: process.env.AWS_REGION?.trim() || 'ap-southeast-1',
+    region: process.env.AWS_REGION?.trim() || (isR2 ? 'auto' : 'ap-southeast-1'),
     endpoint,
     accessKeyId,
     secretAccessKey,
     cdnBaseUrl: process.env.CDN_BASE_URL?.trim().replace(/\/$/, '') || undefined,
+    forcePathStyle: Boolean(endpoint && !isR2),
   };
   return cachedConfig;
 }
@@ -50,13 +55,61 @@ export function isObjectStorageConfigured() {
   return Boolean(objectStorageConfig());
 }
 
+export function objectStorageReadiness() {
+  const config = objectStorageConfig();
+  const endpoint = process.env.S3_ENDPOINT?.trim();
+  const isR2 = Boolean(endpoint && /\.r2\.cloudflarestorage\.com\/?$/i.test(endpoint));
+  if (!config) {
+    const missing = [
+      ...(process.env.AWS_S3_BUCKET?.trim() || process.env.S3_BUCKET?.trim()
+        ? []
+        : ['AWS_S3_BUCKET (or S3_BUCKET)']),
+      ...(endpoint && !process.env.AWS_ACCESS_KEY_ID?.trim() ? ['AWS_ACCESS_KEY_ID'] : []),
+      ...(endpoint && !process.env.AWS_SECRET_ACCESS_KEY?.trim() ? ['AWS_SECRET_ACCESS_KEY'] : []),
+      ...(isR2 && !process.env.CDN_BASE_URL?.trim() ? ['CDN_BASE_URL'] : []),
+    ];
+    return {
+      configured: false,
+      provider: isR2 ? 'cloudflare-r2' as const : endpoint ? 's3-compatible' as const : 'unconfigured' as const,
+      endpointConfigured: Boolean(endpoint),
+      publicBaseConfigured: Boolean(process.env.CDN_BASE_URL?.trim()),
+      missing,
+    };
+  }
+  const missing = config.provider === 'cloudflare-r2' && !config.cdnBaseUrl
+    ? ['CDN_BASE_URL']
+    : [];
+  return {
+    configured: missing.length === 0,
+    provider: config.provider,
+    bucket: config.bucket,
+    endpointConfigured: Boolean(config.endpoint),
+    publicBaseConfigured: Boolean(config.cdnBaseUrl),
+    region: config.region,
+    missing,
+  };
+}
+
+export function assertMediaAssetStorageReady(): ObjectStorageConfig {
+  const config = objectStorageConfig();
+  if (!config) throw new AppError('OBJECT_STORAGE_NOT_CONFIGURED', 'Object storage is not configured', 501);
+  if (config.provider === 'cloudflare-r2' && !config.cdnBaseUrl) {
+    throw new AppError(
+      'MEDIA_PUBLIC_BASE_URL_REQUIRED',
+      'Cloudflare R2 media requires CDN_BASE_URL or a public custom-domain base URL',
+      501,
+    );
+  }
+  return config;
+}
+
 function s3(): { client: S3Client; config: ObjectStorageConfig } {
   const config = objectStorageConfig();
   if (!config) throw new AppError('OBJECT_STORAGE_NOT_CONFIGURED', 'Object storage is not configured', 501);
   if (!cachedClient) {
     cachedClient = new S3Client({
       region: config.region,
-      ...(config.endpoint ? { endpoint: config.endpoint, forcePathStyle: true } : {}),
+      ...(config.endpoint ? { endpoint: config.endpoint, forcePathStyle: config.forcePathStyle } : {}),
       ...(config.accessKeyId && config.secretAccessKey
         ? { credentials: { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey } }
         : {}),
@@ -110,17 +163,20 @@ export class UploadService {
     assetId: string,
     filename: string,
     mimeType: string,
+    contentLength?: number,
   ) {
     const normalizedMime = mimeType.trim().toLowerCase();
     const extension = mediaAssetExtension(normalizedMime);
     if (!extension) throw new AppError('UNSUPPORTED_MEDIA_TYPE', 'unsupported image or video type', 415);
     const kind = normalizedMime.startsWith('video/') ? 'video' : 'image';
+    assertMediaAssetStorageReady();
     const { client, config } = s3();
-    const key = `feed-media/${safeUserSegment(userId)}/${assetId}/original.${extension}`;
+    const key = `media/${safeUserSegment(userId)}/${assetId}/original.${extension}`;
     const uploadUrl = await getSignedUrl(client, new PutObjectCommand({
       Bucket: config.bucket,
       Key: key,
       ContentType: normalizedMime,
+      ...(contentLength != null ? { ContentLength: contentLength } : {}),
     }), { expiresIn: 900 });
     return {
       uploadUrl,
@@ -128,7 +184,10 @@ export class UploadService {
       fileKey: key,
       mediaType: kind as 'image' | 'video',
       mimeType: normalizedMime,
-      headers: { 'Content-Type': normalizedMime },
+      headers: {
+        'Content-Type': normalizedMime,
+        ...(contentLength != null ? { 'Content-Length': String(contentLength) } : {}),
+      },
       expiresIn: 900,
       originalFilename: filename.replace(/[/\\]/g, '').slice(0, 180) || `media.${extension}`,
     };

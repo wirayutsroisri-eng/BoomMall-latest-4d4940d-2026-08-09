@@ -18,6 +18,10 @@ function positiveInteger(value: number | undefined) {
   return value != null && Number.isFinite(value) && value > 0 ? Math.round(value) : undefined;
 }
 
+export function mediaAssetMaxBytes(type: 'image' | 'video') {
+  return type === 'image' ? 25 * 1024 * 1024 : 1024 * 1024 * 1024;
+}
+
 function validateInput(input: AssetInput) {
   if (input.type !== 'image' && input.type !== 'video') {
     throw new AppError('UNSUPPORTED_MEDIA_TYPE', 'type must be image or video', 422);
@@ -27,8 +31,11 @@ function validateInput(input: AssetInput) {
     throw new AppError('MEDIA_TYPE_MISMATCH', 'media type does not match mimeType', 422);
   }
   const fileSize = positiveInteger(input.fileSize);
-  const max = input.type === 'image' ? 25 * 1024 * 1024 : 1024 * 1024 * 1024;
-  if (fileSize != null && fileSize > max) throw new AppError('MEDIA_TOO_LARGE', 'media file is too large', 413);
+  if (fileSize == null) {
+    throw new AppError('MEDIA_FILE_SIZE_REQUIRED', 'media file size is required', 422);
+  }
+  const max = mediaAssetMaxBytes(input.type);
+  if (fileSize > max) throw new AppError('MEDIA_TOO_LARGE', 'media file is too large', 413);
   return { mime, fileSize };
 }
 
@@ -60,7 +67,13 @@ function dto(row: {
 export async function createMediaAssetUploadSession(ownerId: string, input: AssetInput) {
   const { mime, fileSize } = validateInput(input);
   const id = randomUUID();
-  const signed = await UploadService.generateMediaAssetUploadUrl(ownerId, id, input.filename, mime);
+  const signed = await UploadService.generateMediaAssetUploadUrl(
+    ownerId,
+    id,
+    input.filename,
+    mime,
+    fileSize,
+  );
   const row = await prisma.mediaAsset.create({
     data: {
       id,
@@ -86,12 +99,25 @@ export async function confirmMediaAsset(ownerId: string, assetId: string) {
   if (existing.status === 'READY') return dto(existing);
   try {
     const uploaded = await UploadService.assertObjectUploaded(existing.storageKey);
+    const actualSize = uploaded.contentLength;
+    const expectedType = existing.mimeType.trim().toLowerCase();
+    const actualType = uploaded.contentType?.split(';')[0]?.trim().toLowerCase();
+    const type = existing.type === 'VIDEO' ? 'video' : 'image';
+    if (actualSize == null || actualSize <= 0 || actualSize > mediaAssetMaxBytes(type)) {
+      throw new Error('uploaded object size violates media policy');
+    }
+    if (existing.fileSize != null && BigInt(actualSize) !== existing.fileSize) {
+      throw new Error('uploaded object size does not match upload session');
+    }
+    if (!actualType || actualType !== expectedType) {
+      throw new Error('uploaded object content type does not match upload session');
+    }
     const row = await prisma.mediaAsset.update({
       where: { id: assetId },
       data: {
         status: 'READY',
-        fileSize: uploaded.contentLength != null ? BigInt(uploaded.contentLength) : existing.fileSize,
-        mimeType: uploaded.contentType || existing.mimeType,
+        fileSize: BigInt(actualSize),
+        mimeType: actualType,
       },
     });
     return dto(row);

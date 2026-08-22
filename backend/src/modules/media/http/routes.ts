@@ -1,8 +1,14 @@
 import { Router } from 'express';
 import { requireUserOrDevHeader, type UserAuthedRequest } from '../../../middleware/userAuth';
 import { confirmMediaAsset, createMediaAssetUploadSession } from '../MediaAssetService';
+import { objectStorageReadiness } from '../../chat/services/upload.service';
 
 export const mediaAssetRouter = Router();
+
+/** Safe diagnostics: never returns credentials, tokens, or signed URLs. */
+mediaAssetRouter.get('/readiness', requireUserOrDevHeader, (_req, res) => {
+  res.json({ ok: true, data: objectStorageReadiness() });
+});
 
 mediaAssetRouter.post('/upload-session', requireUserOrDevHeader, async (req: UserAuthedRequest, res, next) => {
   try {

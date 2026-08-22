@@ -55,8 +55,8 @@ describe('MediaAsset lifecycle', () => {
     });
     mocks.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ ...row(), ...data, id: 'asset-1' }));
     mocks.findUnique.mockResolvedValue(row());
-    mocks.head.mockResolvedValue({ contentLength: 200, contentType: 'image/jpeg' });
-    mocks.update.mockResolvedValue({ ...row('READY'), fileSize: BigInt(200) });
+    mocks.head.mockResolvedValue({ contentLength: 100, contentType: 'image/jpeg' });
+    mocks.update.mockResolvedValue({ ...row('READY'), fileSize: BigInt(100) });
 
     const session = await createMediaAssetUploadSession('user-1', {
       type: 'image', filename: 'photo.jpg', mimeType: 'image/jpeg', fileSize: 100,
@@ -66,7 +66,7 @@ describe('MediaAsset lifecycle', () => {
 
     const ready = await confirmMediaAsset('user-1', 'asset-1');
     expect(ready.status).toBe('ready');
-    expect(ready.fileSize).toBe(200);
+    expect(ready.fileSize).toBe(100);
   });
 
   it('marks the asset failed and rejects confirmation when the object is absent', async () => {
@@ -75,5 +75,34 @@ describe('MediaAsset lifecycle', () => {
     mocks.update.mockResolvedValue(row('FAILED'));
     await expect(confirmMediaAsset('user-1', 'asset-1')).rejects.toThrow(/could not be confirmed/i);
     expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'FAILED' } }));
+  });
+
+  it('rejects an object whose actual size differs from the signed upload policy', async () => {
+    mocks.findUnique.mockResolvedValue(row());
+    mocks.head.mockResolvedValue({ contentLength: 101, contentType: 'image/jpeg' });
+    mocks.update.mockResolvedValue(row('FAILED'));
+    await expect(confirmMediaAsset('user-1', 'asset-1')).rejects.toThrow(/could not be confirmed/i);
+    expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'FAILED' } }));
+  });
+
+  it('rejects an object whose MIME type differs from the upload session', async () => {
+    mocks.findUnique.mockResolvedValue(row());
+    mocks.head.mockResolvedValue({ contentLength: 100, contentType: 'image/png' });
+    mocks.update.mockResolvedValue(row('FAILED'));
+    await expect(confirmMediaAsset('user-1', 'asset-1')).rejects.toThrow(/could not be confirmed/i);
+  });
+
+  it('requires a declared file size before issuing an upload session', async () => {
+    await expect(createMediaAssetUploadSession('user-1', {
+      type: 'image', filename: 'photo.jpg', mimeType: 'image/jpeg',
+    })).rejects.toThrow(/file size is required/i);
+    expect(mocks.presign).not.toHaveBeenCalled();
+  });
+
+  it('rejects an oversized file before issuing an upload session', async () => {
+    await expect(createMediaAssetUploadSession('user-1', {
+      type: 'image', filename: 'photo.jpg', mimeType: 'image/jpeg', fileSize: 25 * 1024 * 1024 + 1,
+    })).rejects.toThrow(/too large/i);
+    expect(mocks.presign).not.toHaveBeenCalled();
   });
 });
