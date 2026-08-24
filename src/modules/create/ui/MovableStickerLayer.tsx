@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -53,7 +53,9 @@ export function MovableStickerLayer({
   const startScale = useSharedValue(initialTransform.scale);
   const startRotation = useSharedValue(initialTransform.rotation);
 
-  armed.value = resizeArmed ? 1 : 0;
+  useEffect(() => {
+    armed.set(resizeArmed ? 1 : 0);
+  }, [armed, resizeArmed]);
 
   const emit = () => {
     onTransformChange?.({

@@ -1,27 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  Alert,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as AppleAuthentication from 'expo-apple-authentication';
 import * as LocalAuthentication from 'expo-local-authentication';
-import * as Haptics from 'expo-haptics';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { createWalletDomain } from '@/modules/wallet/services/WalletDomain';
-import { useBoomWalletStore } from '@/modules/wallet/state/boom-wallet-store';
 import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
 import { useModerationStore } from '@/modules/safety/state/moderation-store';
-import { exchangeSocialLogin, useAuthStore } from '@/modules/auth/state/auth-store';
+import { useAuthStore } from '@/modules/auth/state/auth-store';
 import { useActivityStore } from '@/modules/account/state/activity-store';
 import { useMusicLibraryStore } from '@/modules/music/state/music-library-store';
+import { useFeedStore } from '@/modules/feed/state/feed-store';
+import { useFollowStore } from '@/modules/social/state/follow-store';
 import { confirmDeleteAccount } from '@/modules/account/services/deleteAccountFlow';
 import { openLegalDocument } from '@/shared/legal/openLegal';
 import { colors } from '@/shared/theme/colors';
@@ -30,8 +19,6 @@ import { SettingsRow, SettingsSection } from './SettingsPrimitives';
 export function AccountSettingsScreen() {
   const insets = useSafeAreaInsets();
   const profile = useLoyaltyStore((s) => s.profile);
-  const profileId = useBoomWalletStore((s) => s.profileId);
-  const setSession = useAuthStore((s) => s.setSession);
   const user = useAuthStore((s) => s.user);
   const reports = useModerationStore((s) => s.reports);
   const openReports = reports.filter((r) => r.status === 'open').length;
@@ -39,66 +26,44 @@ export function AccountSettingsScreen() {
     (s) => s.entries.filter((e) => e.category !== 'shop' && e.subtitle !== 'สินค้า').length,
   );
   const musicCount = useMusicLibraryStore((s) => s.watchHistory.length);
-  const [deviceCount, setDeviceCount] = useState(0);
   const [biometric, setBiometric] = useState(false);
-  const [appleAvailable, setAppleAvailable] = useState(false);
-  const [appleUser, setAppleUser] = useState<string | null>(null);
 
   useEffect(() => {
-    setDeviceCount(createWalletDomain().security.listDevices(profileId).length);
     void LocalAuthentication.hasHardwareAsync().then(setBiometric);
-    if (Platform.OS === 'ios') {
-      void AppleAuthentication.isAvailableAsync().then(setAppleAvailable);
-    }
-    void AsyncStorage.getItem('boommall-apple-user-id').then(setAppleUser);
-  }, [profileId]);
+  }, []);
 
   const loginLabel = useMemo(() => {
-    if (appleUser) return 'เชื่อม Apple แล้ว';
-    if (user?.provider === 'apple') return 'Sign in with Apple';
-    if (user?.provider === 'google') return 'Google';
-    if (user?.provider === 'facebook') return 'Facebook';
-    if (user?.provider === 'phone') return 'เบอร์โทรศัพท์';
-    if (user?.provider === 'email') return 'อีเมล';
-    if (user) return user.provider;
+    if (user?.provider === 'apple') return 'เข้าสู่ระบบด้วยบัญชี Apple';
+    if (user?.provider === 'google') return 'เข้าสู่ระบบด้วยบัญชี Google';
+    if (user?.provider === 'facebook') return 'เข้าสู่ระบบด้วยบัญชี Facebook';
+    if (user?.provider === 'phone') return 'เข้าสู่ระบบด้วยเบอร์โทรศัพท์';
+    if (user?.provider === 'email') return 'เข้าสู่ระบบด้วยอีเมล';
     return 'ยังไม่ได้เข้าสู่ระบบ';
-  }, [appleUser, user]);
-
-  const onAppleSignIn = async () => {
-    try {
-      const cred = await AppleAuthentication.signInAsync({
-        requestedScopes: [
-          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-          AppleAuthentication.AppleAuthenticationScope.EMAIL,
-        ],
-      });
-      if (!cred.user || !cred.identityToken) {
-        throw new Error('ไม่ได้รับ Apple identity token');
-      }
-      const name =
-        [cred.fullName?.givenName, cred.fullName?.familyName].filter(Boolean).join(' ') ||
-        user?.displayName ||
-        'Apple User';
-      const session = await exchangeSocialLogin({
-        provider: 'apple',
-        providerUserId: cred.user,
-        displayName: name,
-        identityToken: cred.identityToken,
-      });
-      await setSession(session);
-      await AsyncStorage.setItem('boommall-apple-user-id', cred.user);
-      setAppleUser(cred.user);
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('เข้าสู่ระบบด้วย Apple แล้ว', 'บัญชีนี้เชื่อมกับ Sign in with Apple แล้ว');
-    } catch (e: unknown) {
-      const err = e as { code?: string };
-      if (err?.code === 'ERR_REQUEST_CANCELED') return;
-      Alert.alert('เข้าสู่ระบบไม่สำเร็จ', e instanceof Error ? e.message : 'ลองใหม่อีกครั้ง');
-    }
-  };
+  }, [user?.provider]);
 
   const onDeleteAccount = () => {
     confirmDeleteAccount();
+  };
+
+  const onSignOut = () => {
+    Alert.alert('ออกจากระบบ?', 'คุณจะต้องเข้าสู่ระบบอีกครั้งเพื่อใช้งานบัญชีนี้', [
+      { text: 'ยกเลิก', style: 'cancel' },
+      {
+        text: 'ออกจากระบบ',
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            useFeedStore.getState().switchAccount(null);
+            useFollowStore.getState().reset();
+            await useAuthStore.getState().clearSession();
+            useLoyaltyStore.getState().deleteAccount();
+            router.replace('/(tabs)/profile');
+          })().catch(() => {
+            Alert.alert('ออกจากระบบไม่สำเร็จ', 'กรุณาลองใหม่อีกครั้ง');
+          });
+        },
+      },
+    ]);
   };
 
   return (
@@ -122,36 +87,6 @@ export function AccountSettingsScreen() {
             <Text style={styles.profileMeta}>{loginLabel}</Text>
           </View>
         </View>
-
-        <SettingsSection title="บัญชี" />
-        <SettingsRow
-          icon="phone-portrait-outline"
-          title="อุปกรณ์ที่เข้าสู่ระบบ"
-          subtitle={deviceCount ? `${deviceCount} เครื่องที่ใช้งานอยู่` : 'ยังไม่มีอุปกรณ์'}
-          onPress={() => router.push('/settings/devices')}
-        />
-        {appleAvailable ? (
-          <View style={styles.appleWrap}>
-            <AppleAuthentication.AppleAuthenticationButton
-              buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
-              buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
-              cornerRadius={12}
-              style={{ width: '100%', height: 44 }}
-              onPress={() => void onAppleSignIn()}
-            />
-            <Text style={styles.hint}>
-              {user?.provider === 'apple' || appleUser
-                ? 'บัญชีนี้เข้าสู่ระบบด้วย Sign in with Apple แล้ว'
-                : 'กดเพื่อเข้าสู่ระบบด้วย Apple'}
-            </Text>
-          </View>
-        ) : (
-          <SettingsRow
-            icon="logo-apple"
-            title="Sign in with Apple"
-            subtitle="ใช้อุปกรณ์ iOS ที่รองรับ Sign in with Apple"
-          />
-        )}
 
         <SettingsSection title="ศูนย์กิจกรรมผู้ใช้" />
         <SettingsRow
@@ -191,6 +126,12 @@ export function AccountSettingsScreen() {
           subtitle="อ่านข้อกำหนดการใช้บริการ"
           onPress={() => void openLegalDocument('terms')}
         />
+
+        <SettingsSection title="บัญชี" />
+        <Pressable style={styles.signOutBtn} onPress={onSignOut} accessibilityRole="button">
+          <Ionicons name="log-out-outline" size={19} color={colors.text.primary} />
+          <Text style={styles.signOutText}>ออกจากระบบ</Text>
+        </Pressable>
 
         <SettingsSection title="โซนอันตราย" />
         <Pressable style={styles.deleteBtn} onPress={onDeleteAccount} accessibilityRole="button">
@@ -235,8 +176,19 @@ const styles = StyleSheet.create({
   profileName: { fontWeight: '900', fontSize: 16, color: colors.text.primary },
   profileHandle: { color: colors.text.secondary, fontSize: 13, marginTop: 2 },
   profileMeta: { color: colors.text.muted, fontSize: 12, marginTop: 2 },
-  appleWrap: { marginBottom: 4, gap: 8 },
   hint: { color: colors.text.muted, fontSize: 12, lineHeight: 18, marginTop: 4 },
+  signOutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: colors.surface.card,
+    borderWidth: 1,
+    borderColor: colors.border.soft,
+    borderRadius: 14,
+    paddingVertical: 14,
+  },
+  signOutText: { color: colors.text.primary, fontWeight: '900', fontSize: 15 },
   deleteBtn: {
     flexDirection: 'row',
     alignItems: 'center',

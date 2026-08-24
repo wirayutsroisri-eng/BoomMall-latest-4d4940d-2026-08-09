@@ -35,6 +35,7 @@ export function isDemoCatalogFeedItem(item: FeedItem): boolean {
 /** คลิป/รูปที่ผู้ใช้ถ่ายหรืออัปโหลดจริง — ไม่ใช่ไล่สีหรือรูปสุ่ม */
 export function isLiveUgcFeedItem(item: FeedItem): boolean {
   if (isDemoCatalogFeedItem(item)) return false;
+  if (item.mediaUnavailable) return true;
   const uris = [item.imageUri, item.videoUri, ...(item.imageUris ?? [])];
   return uris.some((u) => mediaUriLooksLive(u));
 }

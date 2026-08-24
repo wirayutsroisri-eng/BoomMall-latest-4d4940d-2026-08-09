@@ -78,26 +78,48 @@ export async function createSocialPost(input: {
     ? String(input.lane)
     : 'foryou';
   const tags = Array.isArray(input.tags) ? input.tags.map(String).slice(0, 12) : [];
+  const clientPostId = input.media && typeof input.media === 'object' && !Array.isArray(input.media)
+    ? String((input.media as Record<string, unknown>).clientPostId ?? '').trim()
+    : '';
   const mediaAssetIds = assertPublishMediaContract(input.media, { requireAssets: true });
   const readyAssets = await readyMediaAssetsForPublish(input.authorId, mediaAssetIds);
   const publishMedia = readyAssets.length ? buildCanonicalPostMedia(input.media, readyAssets) : input.media;
 
   if (await prismaReady()) {
-    const row = await prisma.socialPost.create({
-      data: {
-        id: randomUUID(),
-        authorId: input.authorId,
-        body,
-        mediaJson: (publishMedia as object) ?? [],
-        lat: input.lat,
-        lng: input.lng,
-        locationLabel: input.locationLabel,
-        tagsJson: tags,
-        linkUrl: input.linkUrl,
-        lane,
-      },
+    if (clientPostId) {
+      const existing = await prisma.socialPost.findFirst({
+        where: {
+          authorId: input.authorId,
+          mediaJson: { path: ['clientPostId'], equals: clientPostId },
+        },
+      });
+      if (existing) return mapPost(existing);
+    }
+    const row = await prisma.$transaction(async (tx) => {
+      const created = await tx.socialPost.create({
+        data: {
+          id: randomUUID(),
+          authorId: input.authorId,
+          body,
+          mediaJson: (publishMedia as object) ?? [],
+          lat: input.lat,
+          lng: input.lng,
+          locationLabel: input.locationLabel,
+          tagsJson: tags,
+          linkUrl: input.linkUrl,
+          lane,
+        },
+      });
+      console.info('[POST_FLOW] database post created', { postId: created.id });
+      if (mediaAssetIds.length) {
+        await tx.mediaAsset.updateMany({
+          where: { id: { in: mediaAssetIds }, ownerId: input.authorId, status: 'READY' },
+          data: { postId: created.id },
+        });
+      }
+      return created;
     });
-    await attachMediaAssetsToPost(input.authorId, mediaAssetIds, row.id);
+    console.info('[POST_FLOW] database transaction success', { postId: row.id });
     return mapPost(row);
   }
 
@@ -120,6 +142,15 @@ export async function createSocialPost(input: {
     createdAt: new Date().toISOString(),
   };
   const store = readStore();
+  if (clientPostId) {
+    const existing = store.posts.find((post) => {
+      const media = post.media;
+      return media && typeof media === 'object' && !Array.isArray(media)
+        && (media as Record<string, unknown>).clientPostId === clientPostId
+        && post.authorId === input.authorId;
+    });
+    if (existing) return existing;
+  }
   store.posts.unshift(dto);
   writeStore(store);
   return dto;

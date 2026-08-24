@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
-import { StyleSheet } from 'react-native';
+import { Alert, StyleSheet } from 'react-native';
 import { useVaultStore } from '@/modules/vault/state/vault-store';
 import { useKnowledgeStore } from '@/modules/knowledge/state/knowledge-store';
 import { useBoomWalletStore } from '@/modules/wallet/state/boom-wallet-store';
@@ -24,12 +24,10 @@ import {
 import { AppPromptHost } from '@/shared/components/AppPrompt';
 import { PhotoLibraryHost } from '@/shared/media/PhotoLibraryHost';
 import { AvatarPhotoHost } from '@/modules/profile/ui/AvatarPhotoHost';
-import {
-  hydrateOwnProfileFromServer,
-  syncLocalProfilePhotosIfNeeded,
-} from '@/modules/profile/data/syncOwnProfile';
+import { hydrateOwnProfileFromServer } from '@/modules/profile/data/syncOwnProfile';
 import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
 import { whenStoresHydrated } from '@/shared/state/whenStoreHydrated';
+import { resolveApiBase } from '@/shared/api/apiBase';
 
 type Props = {
   children: React.ReactNode;
@@ -42,11 +40,40 @@ export function AppProviders({ children }: Props) {
   const hydrateMusic = useMusicLibraryStore((s) => s.hydrate);
   const hydrateAuth = useAuthStore((s) => s.hydrate);
   const sessionToken = useAuthStore((s) => s.sessionToken);
+  const authHydrated = useAuthStore((s) => s.hydrated);
+  const userId = useAuthStore((s) => s.user?.id ?? null);
+
+  useEffect(() => {
+    const apiBaseUrl = resolveApiBase();
+    console.info('[RUNTIME_CONFIG] apiBaseUrl =', apiBaseUrl || '<not configured>');
+    console.info('[RUNTIME_CONFIG] mediaApiUrl =', apiBaseUrl ? `${apiBaseUrl}/api/v1/media-assets` : '<not configured>');
+  }, []);
 
   useEffect(() => {
     if (sessionToken) void ensurePushRegistered();
     else clearPushRegistrationCache();
   }, [sessionToken]);
+
+  useEffect(() => {
+    if (!authHydrated || !useFeedStore.persist.hasHydrated()) return;
+    const changed = useFeedStore.getState().switchAccount(userId);
+    if (!changed) return;
+    useFollowStore.getState().reset();
+    if (userId) {
+      void useFollowStore.getState().hydrateFromServer();
+      void useFeedStore.getState().hydrateFromServer();
+    }
+  }, [authHydrated, userId]);
+
+  useEffect(() => {
+    if (!authHydrated || !userId || !sessionToken) return;
+    void hydrateOwnProfileFromServer().catch((error: unknown) => {
+      Alert.alert(
+        'โหลดบัญชีไม่สำเร็จ',
+        error instanceof Error ? error.message : 'ไม่สามารถดึงข้อมูลบัญชีจากฐานข้อมูลได้',
+      );
+    });
+  }, [authHydrated, sessionToken, userId]);
 
   useEffect(() => {
     setCommerceHooks({
@@ -62,9 +89,6 @@ export function AppProviders({ children }: Props) {
       whenStoresHydrated([useLoyaltyStore, useFeedStore], () => {
         void useFollowStore.getState().hydrateFromServer();
         void useFeedStore.getState().hydrateFromServer();
-        void hydrateOwnProfileFromServer().then(() => {
-          void syncLocalProfilePhotosIfNeeded();
-        });
       });
       void ensurePushRegistered();
       void useChatStore.getState().hydrateInbox().finally(() => {

@@ -9,6 +9,7 @@ import type { FeedItem } from '@/modules/feed/domain/types';
 
 type Options = {
   isSelf?: boolean;
+  ownerUserId?: string;
   displayName?: string;
   shopName?: string;
   /** ตัดโพสต์เว็บบอร์ดออกจากกริดคลิป */
@@ -28,9 +29,12 @@ export function buildOwnerFeedItems(
   const key = normalizeAuthorHandle(handle);
   if (!key) return [];
 
+  const ownerUserId = options.ownerUserId?.trim();
   const fromStore = options.isSelf
-    ? storeItems.filter(
-        (i) => i.isUserPost || normalizeAuthorHandle(i.authorHandle) === key,
+    ? storeItems.filter((i) =>
+        ownerUserId
+          ? i.authorId === ownerUserId
+          : normalizeAuthorHandle(i.authorHandle) === key,
       )
     : selectFeedByAuthor(storeItems, key);
 

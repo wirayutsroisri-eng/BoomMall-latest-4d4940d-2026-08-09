@@ -175,7 +175,7 @@ export const CommentsBottomSheet = forwardRef<BottomSheetModal, Props>(
     const toggleCommentLike = useFeedStore((s) => s.toggleCommentLike);
     const profile = useLoyaltyStore((s) => s.profile);
     const authUser = useAuthStore((s) => s.user);
-    const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+    const authenticated = useAuthStore((s) => Boolean(s.sessionToken && s.user));
     const blockedUserIds = useModerationStore((s) => s.blockedUserIds);
     const [replyTo, setReplyTo] = useState<FeedComment | null>(null);
     const [editTarget, setEditTarget] = useState<FeedComment | null>(null);
@@ -309,7 +309,7 @@ export const CommentsBottomSheet = forwardRef<BottomSheetModal, Props>(
     const onSendText = useCallback(
       (text: string) => {
         if (!text || !feedId) return;
-        if (!isAuthenticated()) return;
+        if (!authenticated) return;
         if (editTarget) {
           updateComment(feedId, editTarget.id, text);
           setEditTarget(null);
@@ -325,7 +325,7 @@ export const CommentsBottomSheet = forwardRef<BottomSheetModal, Props>(
         addComment,
         editTarget,
         feedId,
-        isAuthenticated,
+        authenticated,
         myInitial,
         profile.displayName,
         replyTo,

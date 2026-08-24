@@ -11,15 +11,16 @@ type PendingAction = 'feed' | 'shop' | 'create' | 'chat' | null;
  * Social login is mandatory before Feed / Shop / Create / Chat (UGC + marketplace).
  */
 export default function TabsLayout() {
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const authenticated = useAuthStore((s) => Boolean(s.sessionToken && s.user));
   const hydrated = useAuthStore((s) => s.hydrated);
   const [loginOpen, setLoginOpen] = useState(false);
   const [pending, setPending] = useState<PendingAction>(null);
   const hideTabBar = isChatWindow(usePathname());
+  const mustAuthenticate = hydrated && !authenticated;
 
   const requireAuth = (action: Exclude<PendingAction, null>, proceed?: () => void) => {
     if (!hydrated) return;
-    if (isAuthenticated()) {
+    if (authenticated) {
       proceed?.();
       return;
     }
@@ -41,7 +42,7 @@ export default function TabsLayout() {
           options={{ title: 'หน้าแรก' }}
           listeners={{
             tabPress: (e) => {
-              if (isAuthenticated()) return;
+              if (authenticated) return;
               e.preventDefault();
               requireAuth('feed');
             },
@@ -52,7 +53,7 @@ export default function TabsLayout() {
           options={{ title: 'ร้านค้า' }}
           listeners={{
             tabPress: (e) => {
-              if (isAuthenticated()) return;
+              if (authenticated) return;
               e.preventDefault();
               requireAuth('shop');
             },
@@ -73,7 +74,7 @@ export default function TabsLayout() {
           options={{ title: 'แชต', headerShown: false }}
           listeners={{
             tabPress: (e) => {
-              if (isAuthenticated()) return;
+              if (authenticated) return;
               e.preventDefault();
               requireAuth('chat');
             },
@@ -83,11 +84,12 @@ export default function TabsLayout() {
       </Tabs>
 
       <SocialLoginGate
-        visible={loginOpen}
-        onClose={() => {
-          setLoginOpen(false);
-          setPending(null);
-        }}
+        visible={mustAuthenticate || loginOpen}
+        dismissible={!mustAuthenticate}
+        onClose={mustAuthenticate ? undefined : () => {
+            setLoginOpen(false);
+            setPending(null);
+          }}
         onAuthenticated={() => {
           setLoginOpen(false);
           const next = pending;

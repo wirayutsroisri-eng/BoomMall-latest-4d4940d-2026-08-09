@@ -3,28 +3,33 @@
  * Recreated automatically if a reviewer deleted it while testing account deletion.
  */
 
+import { randomUUID } from 'node:crypto';
 import { prisma } from '../../lib/prisma';
+import { AppError } from '../../lib/errors';
 import { hashPassword } from './PasswordService';
 import { getProfileByEmail, upsertProfile } from './ProfileService';
 import { restoreHardDeletedUser, upsertUser } from '../../services/moderation';
 
 export const APPLE_REVIEW_EMAIL = (
-  process.env.APPLE_REVIEW_EMAIL?.trim() || 'apple-review@boommall.com'
+  process.env.APPLE_REVIEW_EMAIL?.trim() || ''
 ).toLowerCase();
-export const APPLE_REVIEW_PASSWORD = process.env.APPLE_REVIEW_PASSWORD?.trim() || 'Password1234';
-const APPLE_REVIEW_NAME = 'Apple Review';
-const APPLE_REVIEW_HANDLE = 'applereview';
+export const APPLE_REVIEW_PASSWORD = process.env.APPLE_REVIEW_PASSWORD?.trim() || '';
+const APPLE_REVIEW_NAME = process.env.APPLE_REVIEW_NAME?.trim() || '';
+const APPLE_REVIEW_HANDLE = process.env.APPLE_REVIEW_HANDLE?.trim() || '';
 
 export function isAppleReviewEmail(email: string) {
-  return email.trim().toLowerCase() === APPLE_REVIEW_EMAIL;
-}
-
-export function appleReviewUserId() {
-  return `email_${APPLE_REVIEW_EMAIL}`.slice(0, 64);
+  return Boolean(APPLE_REVIEW_EMAIL) && email.trim().toLowerCase() === APPLE_REVIEW_EMAIL;
 }
 
 export async function ensureAppleReviewAccount() {
-  const userId = appleReviewUserId();
+  if (!APPLE_REVIEW_EMAIL || !APPLE_REVIEW_PASSWORD || !APPLE_REVIEW_NAME || !APPLE_REVIEW_HANDLE) {
+    throw new AppError('CONFIG', 'Apple Review account environment is incomplete', 503);
+  }
+  const existing = await getProfileByEmail(APPLE_REVIEW_EMAIL);
+  const identity = await prisma.authIdentity.findUnique({
+    where: { provider_providerUserId: { provider: 'email', providerUserId: APPLE_REVIEW_EMAIL } },
+  });
+  const userId = existing?.userId ?? identity?.userId ?? randomUUID();
   restoreHardDeletedUser(userId, APPLE_REVIEW_NAME, APPLE_REVIEW_HANDLE);
   upsertUser({
     id: userId,
@@ -33,9 +38,8 @@ export async function ensureAppleReviewAccount() {
   });
 
   const passwordHash = await hashPassword(APPLE_REVIEW_PASSWORD);
-  const existing = await getProfileByEmail(APPLE_REVIEW_EMAIL);
   await upsertProfile({
-    userId: existing?.userId ?? userId,
+    userId,
     displayName: APPLE_REVIEW_NAME,
     handle: APPLE_REVIEW_HANDLE,
     email: APPLE_REVIEW_EMAIL,
@@ -43,8 +47,7 @@ export async function ensureAppleReviewAccount() {
     role: 'BUYER',
   });
 
-  try {
-    await prisma.authIdentity.upsert({
+  await prisma.authIdentity.upsert({
       where: {
         provider_providerUserId: { provider: 'email', providerUserId: APPLE_REVIEW_EMAIL },
       },
@@ -55,7 +58,4 @@ export async function ensureAppleReviewAccount() {
       },
       update: { userId },
     });
-  } catch {
-    /* migrate not applied */
-  }
 }

@@ -15,10 +15,6 @@ export type VerifiedAppleIdentity = {
   email?: string;
 };
 
-function allowDevAuth() {
-  return process.env.ALLOW_DEV_AUTH === '1' || process.env.NODE_ENV !== 'production';
-}
-
 export async function verifyAppleIdentityToken(
   identityToken: string,
   expectedSub?: string,
@@ -26,25 +22,11 @@ export async function verifyAppleIdentityToken(
   const audience = process.env.APPLE_CLIENT_ID?.trim();
 
   if (!audience) {
-    if (!allowDevAuth()) {
-      throw new AppError(
-        'APPLE_NOT_CONFIGURED',
-        'APPLE_CLIENT_ID required for Sign in with Apple in production',
-        503,
-      );
-    }
-    // Dev path: decode without verify (never ship as production trust)
-    const decoded = jose.decodeJwt(identityToken);
-    const sub = typeof decoded.sub === 'string' ? decoded.sub : expectedSub;
-    if (!sub) throw new AppError('UNAUTHORIZED', 'Apple token missing sub', 401);
-    if (expectedSub && expectedSub !== sub) {
-      throw new AppError('UNAUTHORIZED', 'Apple sub mismatch', 401);
-    }
-    return {
-      provider: 'apple',
-      providerUserId: sub,
-      email: typeof decoded.email === 'string' ? decoded.email : undefined,
-    };
+    throw new AppError(
+      'APPLE_NOT_CONFIGURED',
+      'APPLE_CLIENT_ID required for Sign in with Apple',
+      503,
+    );
   }
 
   try {

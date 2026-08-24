@@ -3,8 +3,6 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
 import { prisma } from '../../lib/prisma';
 import { AppError } from '../../lib/errors';
 
@@ -33,39 +31,35 @@ export type ProfileDto = {
   updatedAt: string;
 };
 
-type Store = {
-  profiles: ProfileDto[];
-  eula: Array<{
-    userId: string;
-    policyKey: string;
-    version: string;
-    acceptedAt: string;
-  }>;
-};
-
-const DATA_FILE = path.join(process.cwd(), 'data', 'auth-profile.json');
-
-function readStore(): Store {
+async function database<T>(operation: () => Promise<T>): Promise<T> {
   try {
-    if (!fs.existsSync(DATA_FILE)) return { profiles: [], eula: [] };
-    return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')) as Store;
-  } catch {
-    return { profiles: [], eula: [] };
+    return await operation();
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    throw new AppError(
+      'DATABASE_UNAVAILABLE',
+      'ไม่สามารถเชื่อมต่อฐานข้อมูลบัญชีได้ กรุณาลองใหม่อีกครั้ง',
+      503,
+      { cause: error instanceof Error ? error.message : String(error) },
+    );
   }
 }
 
-function writeStore(s: Store) {
-  const dir = path.dirname(DATA_FILE);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(DATA_FILE, JSON.stringify(s, null, 2), 'utf8');
+function optionalText(value: string | undefined, field: string, max: number) {
+  if (value == null) return;
+  const text = value.trim();
+  if (!text || text.length > max) {
+    throw new AppError('VALIDATION', `${field} ไม่ถูกต้อง`, 400);
+  }
 }
 
-async function prismaReady() {
+function optionalPublicUrl(value: string | undefined, field: string) {
+  if (value == null) return;
   try {
-    await prisma.userProfile.findFirst({ take: 1 });
-    return true;
+    const url = new URL(value);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('protocol');
   } catch {
-    return false;
+    throw new AppError('VALIDATION', `${field} ต้องเป็น URL จากเซิร์ฟเวอร์`, 400);
   }
 }
 
@@ -125,8 +119,18 @@ export async function upsertProfile(input: {
   passwordHash?: string;
 }): Promise<ProfileDto> {
   if (!input.userId.trim()) throw new AppError('VALIDATION', 'userId required', 400);
+  optionalText(input.displayName, 'displayName', 60);
+  optionalText(input.handle, 'handle', 32);
+  if (input.handle && !/^@?[a-zA-Z0-9_.]+$/.test(input.handle.trim())) {
+    throw new AppError('VALIDATION', 'handle ใช้ได้เฉพาะตัวอักษร ตัวเลข จุด และขีดล่าง', 400);
+  }
+  if (input.bio != null && input.bio.length > 160) {
+    throw new AppError('VALIDATION', 'bio ยาวเกิน 160 ตัวอักษร', 400);
+  }
+  optionalPublicUrl(input.avatarUrl, 'avatarUrl');
+  optionalPublicUrl(input.coverUrl, 'coverUrl');
 
-  if (await prismaReady()) {
+  return database(async () => {
     const existing = await prisma.userProfile.findUnique({ where: { userId: input.userId } });
     const privacyJson = input.privacy
       ? { ...asPrivacy(existing?.privacyJson), ...input.privacy }
@@ -161,48 +165,27 @@ export async function upsertProfile(input: {
       },
     });
     return mapProfile(row);
-  }
-
-  const store = readStore();
-  const existing = store.profiles.find((p) => p.userId === input.userId);
-  const row: ProfileDto = {
-    userId: input.userId,
-    displayName: input.displayName ?? existing?.displayName,
-    handle: input.handle ?? existing?.handle,
-    role: input.role ?? existing?.role ?? 'BUYER',
-    shopId: input.shopId ?? existing?.shopId,
-    bio: input.bio ?? existing?.bio,
-    avatarUrl: input.avatarUrl ?? existing?.avatarUrl,
-    coverUrl: input.coverUrl ?? existing?.coverUrl,
-    email: input.email ?? existing?.email,
-    privacy: { ...asPrivacy(existing?.privacy), ...input.privacy },
-    updatedAt: new Date().toISOString(),
-  };
-  store.profiles = [row, ...store.profiles.filter((p) => p.userId !== input.userId)];
-  writeStore(store);
-  return row;
+  });
 }
 
 export async function getProfile(userId: string): Promise<ProfileDto | null> {
-  if (await prismaReady()) {
+  return database(async () => {
     const row = await prisma.userProfile.findUnique({ where: { userId } });
     if (!row) return null;
     return mapProfile(row);
-  }
-  return readStore().profiles.find((p) => p.userId === userId) ?? null;
+  });
 }
 
 export async function getProfileByEmail(email: string): Promise<(ProfileDto & { passwordHash?: string }) | null> {
   const key = email.trim().toLowerCase();
   if (!key) return null;
-  if (await prismaReady()) {
+  return database(async () => {
     const row = await prisma.userProfile.findFirst({
       where: { email: { equals: key, mode: 'insensitive' } },
     });
     if (!row) return null;
     return { ...mapProfile(row), passwordHash: row.passwordHash ?? undefined };
-  }
-  return readStore().profiles.find((p) => (p.email ?? '').toLowerCase() === key) ?? null;
+  });
 }
 
 export async function acceptEula(input: {
@@ -217,7 +200,7 @@ export async function acceptEula(input: {
   }
   await upsertProfile({ userId: input.userId });
 
-  if (await prismaReady()) {
+  return database(async () => {
     const row = await prisma.eulaAcceptance.upsert({
       where: {
         userId_policyKey_version: {
@@ -242,25 +225,7 @@ export async function acceptEula(input: {
       version: row.version,
       acceptedAt: row.acceptedAt.toISOString(),
     };
-  }
-
-  const store = readStore();
-  const hit = store.eula.find(
-    (e) =>
-      e.userId === input.userId &&
-      e.policyKey === input.policyKey &&
-      e.version === input.version,
-  );
-  if (hit) return hit;
-  const row = {
-    userId: input.userId,
-    policyKey: input.policyKey,
-    version: input.version,
-    acceptedAt: new Date().toISOString(),
-  };
-  store.eula.unshift(row);
-  writeStore(store);
-  return row;
+  });
 }
 
 export async function hasAcceptedEula(
@@ -268,29 +233,25 @@ export async function hasAcceptedEula(
   policyKey: string,
   version: string,
 ): Promise<boolean> {
-  if (await prismaReady()) {
+  return database(async () => {
     const row = await prisma.eulaAcceptance.findUnique({
       where: {
         userId_policyKey_version: { userId, policyKey, version },
       },
     });
     return Boolean(row);
-  }
-  return readStore().eula.some(
-    (e) => e.userId === userId && e.policyKey === policyKey && e.version === version,
-  );
+  });
 }
 
 export async function listProfiles(limit = 100) {
   const take = Math.min(limit, 300);
-  if (await prismaReady()) {
+  return database(async () => {
     const rows = await prisma.userProfile.findMany({
       orderBy: { updatedAt: 'desc' },
       take,
     });
     return rows.map(mapProfile);
-  }
-  return readStore().profiles.slice(0, take);
+  });
 }
 
 export function authDomainStatus() {

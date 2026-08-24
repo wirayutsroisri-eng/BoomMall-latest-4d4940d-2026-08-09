@@ -213,6 +213,7 @@ export function socialPostToFeedItem(
   const portableImages = media.images.filter(isPortableServerMediaUri);
   const resolvedImages = assetImages.length ? assetImages : portableImages.length ? portableImages : editorImages;
   const imageUris = resolvedImages.length ? resolvedImages : undefined;
+  const serverDeclaredMedia = media.images.length > 0 || Boolean(media.video) || Boolean(media.editorMedia?.length);
   const editorVideo = media.editorMedia
     ?.find((item) => item.type === 'video' && isPortableServerMediaUri(item.uri))
     ?.uri;
@@ -252,6 +253,7 @@ export function socialPostToFeedItem(
     imageUris,
     videoUri,
     mediaAssets: readyAssets.length ? readyAssets : undefined,
+    mediaUnavailable: serverDeclaredMedia && !imageUris?.length && !videoUri,
     editorMedia: media.editorMedia,
     overlays: media.overlays,
     overlayText: media.overlayText,
@@ -291,19 +293,10 @@ export function mergeFeedItems(remote: FeedItem[], local: FeedItem[]): FeedItem[
       ) {
         byId.set(item.id, existingWithComposition);
       }
-      const remoteHasMedia = mediaUriLooksLive(existing.imageUri) || mediaUriLooksLive(existing.videoUri);
-      const localHasMedia = mediaUriLooksLive(item.imageUri) || mediaUriLooksLive(item.videoUri);
-      if (!remoteHasMedia && localHasMedia) {
-        byId.set(item.id, {
-          ...existingWithComposition,
-          ...item,
-          isUserPost: Boolean(existing.isUserPost || item.isUserPost),
-        });
-      }
       continue;
     }
     const keepLocal =
-      item.isUserPost || item.id.startsWith('feed-user-') || item.lane === 'board';
+      item.id.startsWith('feed-user-') || item.lane === 'board';
     if (!keepLocal) continue;
     if (item.lane === 'board' || isLiveUgcFeedItem(item)) byId.set(item.id, item);
   }

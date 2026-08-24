@@ -1,18 +1,23 @@
 import { authHeaders, getApiBase } from '@/modules/auth/state/auth-store';
+import { apiFetch } from '@/shared/api/apiBase';
 
 async function req(method: string, path: string, body?: unknown) {
   const base = getApiBase();
-  if (!base) return null;
+  if (!base) throw new Error('ยังไม่ได้ตั้งค่าเซิร์ฟเวอร์ BoomMall');
   try {
-    const res = await fetch(`${base}${path}`, {
+    const res = await apiFetch(`${base}${path}`, {
       method,
       headers: authHeaders(),
       body: body == null ? undefined : JSON.stringify(body),
     });
-    if (!res.ok) return null;
-    return await res.json().catch(() => null);
-  } catch {
-    return null;
+    const json = await res.json().catch(() => null);
+    if (!res.ok || json?.ok === false) {
+      throw new Error(json?.error?.message ?? `เซิร์ฟเวอร์ไม่สามารถดำเนินการได้ (${res.status})`);
+    }
+    return json;
+  } catch (error) {
+    if (error instanceof Error) throw error;
+    throw new Error('ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ BoomMall ได้');
   }
 }
 
@@ -41,16 +46,18 @@ export function apiUpsertProfile(input: {
   return req('POST', '/api/v1/auth/profiles', input);
 }
 
-export async function apiGetProfile(userId: string): Promise<{
+export async function apiGetOwnProfile(): Promise<{
   displayName?: string | null;
   handle?: string | null;
   bio?: string | null;
   avatarUrl?: string | null;
   coverUrl?: string | null;
 } | null> {
-  const json = await req('GET', `/api/v1/auth/profiles/${encodeURIComponent(userId)}`);
-  const data = json && typeof json === 'object' ? (json as { data?: Record<string, unknown> }).data : null;
-  if (!data || typeof data !== 'object') return null;
+  const json = await req('GET', '/api/v1/auth/me');
+  const envelope = json && typeof json === 'object' ? (json as { data?: Record<string, unknown> }).data : null;
+  const candidate = envelope?.profile;
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null;
+  const data = candidate as Record<string, unknown>;
   return {
     displayName: typeof data.displayName === 'string' ? data.displayName : null,
     handle: typeof data.handle === 'string' ? data.handle : null,
@@ -63,7 +70,7 @@ export async function apiGetProfile(userId: string): Promise<{
 export async function apiDeleteAccount() {
   const base = getApiBase();
   if (!base) throw new Error('ยังไม่ได้ตั้งค่าเซิร์ฟเวอร์ — ไม่สามารถลบบัญชีบนเซิร์ฟเวอร์ได้');
-  const res = await fetch(`${base}/api/v1/auth/me`, {
+  const res = await apiFetch(`${base}/api/v1/auth/me`, {
     method: 'DELETE',
     headers: authHeaders(),
   });

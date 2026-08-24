@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Image,
@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import * as Crypto from 'expo-crypto';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
 import { persistCreateMedia } from '@/modules/create/data/persistCreateMedia';
 import { pickDevicePhotos } from '@/shared/media/photoLibraryStore';
@@ -133,7 +134,7 @@ export function ContentPublishScreen() {
   const setMedia = useCreateDraftStore((s) => s.setMedia);
   const editFeedId = useCreateDraftStore((s) => s.editFeedId);
   const isEditing = Boolean(editFeedId);
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const authenticated = useAuthStore((s) => Boolean(s.sessionToken && s.user));
   const authUser = useAuthStore((s) => s.user);
   const hideContent = useModerationStore((s) => s.hideContent);
 
@@ -153,6 +154,8 @@ export function ContentPublishScreen() {
   const [privacy] = useState('ทุกคนสามารถดูโพสต์นี้ได้');
   const [linkLabel, setLinkLabel] = useState<string | null>(draft.publishLinkLabel);
   const [publishing, setPublishing] = useState(false);
+  const publishingRef = useRef(false);
+  const clientPostIdRef = useRef<string | null>(null);
 
   const coverUri = mediaUris[0] ?? null;
   const mediaType =
@@ -161,8 +164,9 @@ export function ContentPublishScreen() {
 
   const closeAll = () => {
     useFeedStore.getState().setTab('foryou');
-    if (router.canDismiss()) router.dismissAll();
-    router.navigate('/(tabs)');
+    // One atomic stack action. Calling dismissAll() and navigate() back-to-back
+    // can race the native iOS modal transition and leave create-publish visible.
+    router.dismissTo('/(tabs)');
   };
 
   const addFromLibrary = async () => {
@@ -197,7 +201,7 @@ export function ContentPublishScreen() {
   };
 
   const publish = async (asDraft: boolean) => {
-    if (!isAuthenticated()) {
+    if (!authenticated) {
       Alert.alert('ต้องเข้าสู่ระบบ', 'โพสต์คอนเทนต์ได้เฉพาะบัญชีโซเชียลเท่านั้น');
       return;
     }
@@ -211,8 +215,11 @@ export function ContentPublishScreen() {
       closeAll();
       return;
     }
-    if (publishing) return;
+    if (publishingRef.current) return;
+    publishingRef.current = true;
+    clientPostIdRef.current ??= Crypto.randomUUID();
     setPublishing(true);
+    console.info('[POST_FLOW] 01 start', { mediaCount: mediaUris.length, mediaType });
 
     const musicTitle = sanitizeMusicTitle(draft.music);
     const captionParts = [
@@ -238,6 +245,7 @@ export function ContentPublishScreen() {
       overlays: draft.overlays,
     };
 
+    let succeeded = false;
     try {
     if (isEditing && editFeedId) {
       const ok = await updatePost(editFeedId, postPayload);
@@ -261,12 +269,19 @@ export function ContentPublishScreen() {
         }
       })();
       clearDraft();
+      console.info('[POST_FLOW] clear composer draft');
+      publishingRef.current = false;
+      setPublishing(false);
+      console.info('[POST_FLOW] 07 reset uploading state');
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       closeAll();
+      console.info('[POST_FLOW] 08 navigation success');
+      succeeded = true;
       return;
     }
 
     const postId = await addPost({
+      clientPostId: clientPostIdRef.current,
       caption,
       price: 0,
       channel: 'C2C',
@@ -297,15 +312,36 @@ export function ContentPublishScreen() {
     })();
 
     clearDraft();
+    clientPostIdRef.current = null;
+    console.info('[POST_FLOW] clear composer draft');
+    publishingRef.current = false;
+    setPublishing(false);
+    console.info('[POST_FLOW] 07 reset uploading state');
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     closeAll();
+    console.info('[POST_FLOW] 08 navigation success');
+    succeeded = true;
     } catch (error) {
+      const statusCode = (error as { statusCode?: number } | null)?.statusCode;
+      console.error('[POST_FLOW_ERROR]', {
+        step: (error as { step?: string } | null)?.step ?? 'create-post',
+        message: error instanceof Error ? error.message : String(error),
+        statusCode,
+      });
       Alert.alert(
-        'ยังโพสต์ไม่ได้',
-        `อัปโหลดสื่อไม่สำเร็จ ร่างและไฟล์ในหน้าแต่งยังอยู่ กรุณาลองใหม่\n${error instanceof Error ? error.message : ''}`.trim(),
+        'อัปโหลดรูปไม่สำเร็จ',
+        `โพสต์นี้ถูกเก็บไว้ในฉบับร่างแล้ว\n${error instanceof Error ? error.message : ''}`.trim(),
+        [
+          { text: 'เก็บไว้ในร่าง', style: 'cancel' },
+          { text: 'ลองใหม่', onPress: () => void publish(false) },
+        ],
       );
     } finally {
-      setPublishing(false);
+      if (!succeeded) {
+        publishingRef.current = false;
+        setPublishing(false);
+        console.info('[POST_FLOW] 07 reset uploading state');
+      }
     }
   };
 

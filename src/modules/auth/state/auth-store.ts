@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
-import { ENABLE_OFFLINE_LOCAL_SESSION } from '@/shared/compliance/appStoreGates';
 import { apiFetch, resolveApiBase } from '@/shared/api/apiBase';
 
 export type SocialProvider = 'apple' | 'google' | 'line' | 'facebook' | 'email' | 'phone';
@@ -72,7 +71,7 @@ export const useAuthStore = create<AuthState>()(
           user = null;
         }
         const isLocal = Boolean(token?.startsWith('local.'));
-        if (isLocal && !ENABLE_OFFLINE_LOCAL_SESSION) {
+        if (isLocal) {
           await saveSecure(null);
           await AsyncStorage.removeItem(USER_KEY);
           set({ sessionToken: null, user: null, hydrated: true });
@@ -103,34 +102,12 @@ function apiError(json: Record<string, unknown>, status: number) {
   return new Error(err?.message ?? `ไม่สำเร็จ (${status})`);
 }
 
-/** Bearer JWT in store builds. `x-user-id` is LAN-only and ignored in production. */
+/** Authentication is exclusively the backend-issued Bearer JWT. */
 export function authHeaders(extra?: Record<string, string>): Record<string, string> {
   const token = useAuthStore.getState().sessionToken;
-  const userId = useAuthStore.getState().user?.id;
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...extra };
   if (token) headers.Authorization = `Bearer ${token}`;
-  if (userId && ((typeof __DEV__ !== 'undefined' && __DEV__) || ENABLE_OFFLINE_LOCAL_SESSION)) {
-    headers['x-user-id'] = userId;
-  }
   return headers;
-}
-
-function utf8ToBase64(value: string) {
-  const chars =
-    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  const bytes = unescape(encodeURIComponent(value));
-  let out = '';
-  for (let i = 0; i < bytes.length; i += 3) {
-    const a = bytes.charCodeAt(i);
-    const b = i + 1 < bytes.length ? bytes.charCodeAt(i + 1) : 0;
-    const c = i + 2 < bytes.length ? bytes.charCodeAt(i + 2) : 0;
-    const triplet = (a << 16) | (b << 8) | c;
-    out += chars[(triplet >> 18) & 63];
-    out += chars[(triplet >> 12) & 63];
-    out += i + 1 < bytes.length ? chars[(triplet >> 6) & 63] : '=';
-    out += i + 2 < bytes.length ? chars[triplet & 63] : '=';
-  }
-  return out;
 }
 
 export async function exchangeSocialLogin(input: {
@@ -139,23 +116,11 @@ export async function exchangeSocialLogin(input: {
   displayName: string;
   handle?: string;
   identityToken?: string;
+  mode: 'login' | 'register';
 }): Promise<{ sessionToken: string; user: AuthUser }> {
   const base = getApiBase();
   if (!base) {
-    if (!ENABLE_OFFLINE_LOCAL_SESSION) {
-      throw new Error('ยังไม่ได้ตั้งค่าเซิร์ฟเวอร์ — ไม่สามารถสมัครหรือเข้าสู่ระบบได้');
-    }
-    const user: AuthUser = {
-      id: `${input.provider}_${input.providerUserId}`.slice(0, 64),
-      displayName: input.displayName,
-      handle: input.handle,
-      provider: input.provider,
-      status: 'active',
-    };
-    return {
-      sessionToken: `local.${utf8ToBase64(user.id)}`,
-      user,
-    };
+    throw new Error('ยังไม่ได้ตั้งค่าเซิร์ฟเวอร์ — ไม่สามารถสมัครหรือเข้าสู่ระบบได้');
   }
 
   const res = await apiFetch(`${base}/api/v1/auth/login/social`, {
@@ -177,16 +142,7 @@ export async function exchangeEmailLogin(input: {
 }): Promise<{ sessionToken: string; user: AuthUser }> {
   const base = getApiBase();
   if (!base) {
-    if (!ENABLE_OFFLINE_LOCAL_SESSION) {
-      throw new Error('ยังไม่ได้ตั้งค่าเซิร์ฟเวอร์ — ไม่สามารถสมัครหรือเข้าสู่ระบบได้');
-    }
-    const user: AuthUser = {
-      id: `email_${input.email}`.slice(0, 64),
-      displayName: input.displayName || input.email.split('@')[0] || 'User',
-      provider: 'email',
-      status: 'active',
-    };
-    return { sessionToken: `local.${utf8ToBase64(user.id)}`, user };
+    throw new Error('ยังไม่ได้ตั้งค่าเซิร์ฟเวอร์ — ไม่สามารถสมัครหรือเข้าสู่ระบบได้');
   }
   const path = input.mode === 'register' ? '/api/v1/auth/register' : '/api/v1/auth/login';
   const res = await apiFetch(`${base}${path}`, {
@@ -238,12 +194,19 @@ export async function requestPhoneOtp(phone: string): Promise<PhoneOtpRequestRes
 export async function verifyPhoneOtp(input: {
   phone: string;
   code: string;
+  mode: 'login' | 'register';
+  displayName?: string;
 }): Promise<{ sessionToken: string; user: AuthUser }> {
   const base = requireApiBase();
   const res = await apiFetch(`${base}/api/v1/auth/otp/verify`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ phone: input.phone, code: input.code }),
+    body: JSON.stringify({
+      phone: input.phone,
+      code: input.code,
+      mode: input.mode,
+      displayName: input.displayName,
+    }),
   });
   const json = await readApiJson(res);
   if (!res.ok || json.ok === false) throw apiError(json, res.status);

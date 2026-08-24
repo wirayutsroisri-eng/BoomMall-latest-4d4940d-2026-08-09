@@ -7,42 +7,38 @@ import { upsertProfile } from './ProfileService';
 
 const ROLES = new Set(['BUYER', 'SELLER', 'ADMIN']);
 
-async function ignoreMissingTable(run: () => Promise<unknown>) {
-  try {
-    await run();
-  } catch {
-    /* table may not exist yet */
-  }
-}
-
 export async function deleteOwnAccount(userId: string, actor: string) {
   if (!userId) throw new AppError('VALIDATION', 'userId required', 400);
 
-  await ignoreMissingTable(() => prisma.socialLike.deleteMany({ where: { userId } }));
-  await ignoreMissingTable(() => prisma.socialComment.deleteMany({ where: { authorId: userId } }));
-  await ignoreMissingTable(() => prisma.socialPost.deleteMany({ where: { authorId: userId } }));
-  await ignoreMissingTable(() => prisma.boardVote.deleteMany({ where: { userId } }));
-  await ignoreMissingTable(() => prisma.boardReply.deleteMany({ where: { authorId: userId } }));
-  await ignoreMissingTable(() => prisma.boardThread.deleteMany({ where: { authorId: userId } }));
-  await ignoreMissingTable(() =>
-    prisma.follow.deleteMany({
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.socialLike.deleteMany({ where: { userId } });
+      await tx.socialComment.deleteMany({ where: { authorId: userId } });
+      await tx.socialPost.deleteMany({ where: { authorId: userId } });
+      await tx.boardVote.deleteMany({ where: { userId } });
+      await tx.boardReply.deleteMany({ where: { authorId: userId } });
+      await tx.boardThread.deleteMany({ where: { authorId: userId } });
+      await tx.follow.deleteMany({
       where: { OR: [{ followerId: userId }, { followingId: userId }] },
-    }),
-  );
-  await ignoreMissingTable(() => prisma.pushDevice.deleteMany({ where: { userId } }));
-  await ignoreMissingTable(() => prisma.eulaAcceptance.deleteMany({ where: { userId } }));
-  await ignoreMissingTable(() => prisma.sellerNotification.deleteMany({ where: { userId } }));
-  await ignoreMissingTable(() => prisma.authIdentity.deleteMany({ where: { userId } }));
-  await ignoreMissingTable(() => prisma.chatParticipant.deleteMany({ where: { userId } }));
-  await ignoreMissingTable(() =>
-    prisma.chatMessage.updateMany({
-      where: { senderId: userId },
-      data: { body: '', status: 'DELETED' },
-    }),
-  );
-  await ignoreMissingTable(() => prisma.userProfile.deleteMany({ where: { userId } }));
+      });
+      await tx.pushDevice.deleteMany({ where: { userId } });
+      await tx.eulaAcceptance.deleteMany({ where: { userId } });
+      await tx.sellerNotification.deleteMany({ where: { userId } });
+      await tx.authIdentity.deleteMany({ where: { userId } });
+      await tx.chatParticipant.deleteMany({ where: { userId } });
+      await tx.chatMessage.updateMany({
+        where: { senderId: userId },
+        data: { body: '', status: 'DELETED' },
+      });
+      await tx.userProfile.deleteMany({ where: { userId } });
+    });
+  } catch (error) {
+    throw new AppError('DATABASE_UNAVAILABLE', 'ไม่สามารถลบบัญชีจากฐานข้อมูลได้ กรุณาลองใหม่อีกครั้ง', 503, {
+      cause: error instanceof Error ? error.message : String(error),
+    });
+  }
 
-  hardDeleteUser({ userId, actor, reason: 'user_requested_delete' });
+  hardDeleteUser({ userId, actor, reason: 'user_requested_delete', allowReRegistration: true });
   return { ok: true as const, userId, deletedAt: new Date().toISOString() };
 }
 

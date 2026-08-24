@@ -125,70 +125,6 @@ function ensureSeed(store: StoreShape): StoreShape {
   if (!store.content) store.content = {};
   if (!store.reports) store.reports = [];
 
-  if (Object.keys(store.users).length === 0) {
-    const now = new Date().toISOString();
-    store.users['user-spam'] = {
-      id: 'user-spam',
-      displayName: 'สแปมทดสอบ',
-      handle: '@spam_demo',
-      status: 'active',
-      banCount: 0,
-      social: { google: 'google-spam-demo' },
-      productIds: ['ms-spam-1'],
-      contentIds: ['feed-01', 'feed-02'],
-      createdAt: now,
-      updatedAt: now,
-    };
-    store.users['user-ok'] = {
-      id: 'user-ok',
-      displayName: 'ช่างเอิร์ธ',
-      handle: '@earth_ok',
-      status: 'active',
-      banCount: 0,
-      social: { apple: 'apple-earth-demo' },
-      productIds: ['ms-01'],
-      contentIds: ['feed-03'],
-      createdAt: now,
-      updatedAt: now,
-    };
-  }
-
-  if (store.reports.length === 0) {
-    const now = Date.now();
-    store.reports = [
-      {
-        id: `rpt_seed_${now}_1`,
-        kind: 'content',
-        targetId: 'feed-01',
-        targetLabel: 'ตัวอย่างโพสต์ · สแปมราคา',
-        reason: 'สแปมหรือหลอกลวง',
-        details: 'โพสต์โฆษณาซ้ำ',
-        status: 'open',
-        createdAt: new Date(now - 3600_000).toISOString(),
-        reporterRef: 'reporter-a',
-      },
-      {
-        id: `rpt_seed_${now}_2`,
-        kind: 'content',
-        targetId: 'feed-01',
-        targetLabel: 'ตัวอย่างโพสต์ · สแปมราคา',
-        reason: 'สแปมหรือหลอกลวง',
-        status: 'open',
-        createdAt: new Date(now - 3000_000).toISOString(),
-        reporterRef: 'reporter-b',
-      },
-      {
-        id: `rpt_seed_${now}_3`,
-        kind: 'user',
-        targetId: 'user-spam',
-        targetLabel: '@spam_demo',
-        reason: 'การคุกคามหรือกลั่นแกล้ง',
-        status: 'open',
-        createdAt: new Date(now - 1800_000).toISOString(),
-        reporterRef: 'reporter-c',
-      },
-    ];
-  }
   return store;
 }
 
@@ -810,7 +746,7 @@ export function reportsForTarget(targetId: string) {
   return readStore().reports.filter((r) => r.targetId === targetId);
 }
 
-export function hardDeleteUser(input: { userId: string; actor: string; reason?: string }) {
+export function hardDeleteUser(input: { userId: string; actor: string; reason?: string; allowReRegistration?: boolean }) {
   const store = readStore();
   const user = store.users[input.userId];
   if (!user) return null;
@@ -819,7 +755,11 @@ export function hardDeleteUser(input: { userId: string; actor: string; reason?: 
   const now = new Date().toISOString();
 
   // Blacklist social ids before purge
-  addBlacklist(store, user, input.actor, reason);
+  if (input.allowReRegistration) {
+    store.blacklist = store.blacklist.filter((entry) => entry.userId !== input.userId);
+  } else {
+    addBlacklist(store, user, input.actor, reason);
+  }
   quarantineUserContent(store, user, input.actor, reason);
 
   // Rule 8: purge personal fields

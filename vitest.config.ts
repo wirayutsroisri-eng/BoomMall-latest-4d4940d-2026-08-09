@@ -7,6 +7,8 @@ export default defineConfig({
     include: [
       'src/**/*.test.ts',
       'backend/src/modules/ecommerce/**/*.test.ts',
+      'backend/src/modules/auth/**/*.test.ts',
+      'backend/src/modules/feed/**/*.test.ts',
       'backend/src/modules/media/**/*.test.ts',
     ],
   },

@@ -1,25 +1,63 @@
+import { fetch as expoFetch } from 'expo/fetch';
+import { File } from 'expo-file-system';
 import { useAuthStore } from '@/modules/auth/state/auth-store';
+import { authHeaders, getApiBase } from '@/modules/auth/state/auth-store';
 import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
-import { apiGetProfile, apiUpsertProfile } from '@/modules/social/data/socialApi';
+import { apiGetOwnProfile, apiUpsertProfile } from '@/modules/social/data/socialApi';
 import { uploadFeedMedia } from '@/modules/feed/data/uploadFeedMedia';
 import { persistCreateMedia } from '@/modules/create/data/persistCreateMedia';
 import { isRemoteMediaUrl } from '@/modules/chat/data/chatMedia';
+import { MediaUploadError } from '@/modules/media/data/mediaAssetApi';
 
 function asHttp(uri?: string | null) {
   const u = uri?.trim() ?? '';
   return /^https?:\/\//i.test(u) ? u : '';
 }
 
+async function uploadProfilePhoto(uri: string) {
+  try {
+    const uploaded = await uploadFeedMedia({ imageUris: [uri] });
+    return uploaded.imageUris[0] || uri;
+  } catch (error) {
+    // Local development may intentionally run without S3/R2. The authenticated
+    // backend media endpoint persists the file on the API server and returns a
+    // stable HTTP URL, so profile photos still survive reload/app restart.
+    if (!(error instanceof MediaUploadError) || error.statusCode !== 501) throw error;
+    const base = getApiBase();
+    if (!base) throw error;
+    const file = new File(uri);
+    if (!file.exists) throw new Error('PROFILE_PHOTO_FILE_MISSING');
+    const mimeType = file.type || 'image/jpeg';
+    const response = await expoFetch(`${base}/api/v1/chat-domain/media`, {
+      method: 'POST',
+      headers: authHeaders({
+        'Content-Type': mimeType,
+        'x-mime-type': mimeType,
+        'x-filename': file.name || `profile-${Date.now()}.jpg`,
+      }),
+      body: file,
+    });
+    const json = await response.json().catch(() => null) as {
+      data?: { url?: string };
+      error?: { message?: string };
+    } | null;
+    const remote = asHttp(json?.data?.url);
+    if (!response.ok || !remote) {
+      throw new Error(json?.error?.message || `PROFILE_PHOTO_UPLOAD_FAILED_${response.status}`);
+    }
+    return remote;
+  }
+}
+
 export async function saveProfilePhoto(kind: 'avatar' | 'cover', uri: string) {
   const stable = await persistCreateMedia(uri, 'image');
-  const uploaded = await uploadFeedMedia({ imageUris: [stable] });
-  const remote = uploaded.imageUris[0] || stable;
+  const remote = await uploadProfilePhoto(stable);
   if (kind === 'cover') {
+    await apiUpsertProfile({ coverUrl: asHttp(remote) || undefined });
     useLoyaltyStore.getState().updateProfile({ coverUri: remote });
-    void apiUpsertProfile({ coverUrl: asHttp(remote) || undefined });
   } else {
+    await apiUpsertProfile({ avatarUrl: asHttp(remote) || undefined });
     useLoyaltyStore.getState().updateProfile({ avatarUri: remote });
-    void apiUpsertProfile({ avatarUrl: asHttp(remote) || undefined });
   }
   return remote;
 }
@@ -27,19 +65,18 @@ export async function saveProfilePhoto(kind: 'avatar' | 'cover', uri: string) {
 export async function hydrateOwnProfileFromServer() {
   const user = useAuthStore.getState().user;
   if (!user?.id) return;
-  const remote = await apiGetProfile(user.id);
-  if (!remote) return;
-  const local = useLoyaltyStore.getState().profile;
+  const remote = await apiGetOwnProfile();
+  if (!remote?.displayName?.trim()) {
+    throw new Error('ไม่พบข้อมูลโปรไฟล์จริงของบัญชีนี้ในฐานข้อมูล');
+  }
   const remoteAvatar = asHttp(remote.avatarUrl);
   const remoteCover = asHttp(remote.coverUrl);
   useLoyaltyStore.getState().updateProfile({
-    displayName: remote.displayName?.trim() || local.displayName,
-    handle: remote.handle?.trim() || local.handle,
-    bio: remote.bio ?? local.bio,
-    ...(remoteAvatar || local.avatarUri
-      ? { avatarUri: remoteAvatar || local.avatarUri }
-      : {}),
-    ...(remoteCover || local.coverUri ? { coverUri: remoteCover || local.coverUri } : {}),
+    displayName: remote.displayName.trim(),
+    handle: remote.handle?.trim() || '',
+    bio: remote.bio ?? '',
+    avatarUri: remoteAvatar || null,
+    coverUri: remoteCover || null,
   });
 }
 

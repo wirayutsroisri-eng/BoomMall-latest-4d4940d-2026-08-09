@@ -11,6 +11,7 @@ import * as Clipboard from 'expo-clipboard';
 import { useAvatarPhotoStore, type ProfilePhotoKind } from '@/modules/profile/state/avatar-photo-store';
 import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
+import { useAuthStore } from '@/modules/auth/state/auth-store';
 import { useFollowStore } from '@/modules/social/state/follow-store';
 import { normalizeAuthorHandle } from '@/modules/feed/domain/selectFeedByAuthor';
 import { isLiveUgcFeedItem } from '@/modules/feed/domain/isLiveUgcFeedItem';
@@ -68,6 +69,7 @@ function holdToPeekPhoto(onPeek: () => void) {
 export function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const profile = useLoyaltyStore((s) => s.profile);
+  const userId = useAuthStore((s) => s.user?.id);
   const items = useFeedStore((s) => s.items);
   const [tab, setTab] = useState<ProfileTab>('videos');
 
@@ -76,9 +78,10 @@ export function ProfileScreen() {
     () =>
       buildOwnerFeedItems(myHandle, items, {
         isSelf: true,
+        ownerUserId: userId,
         displayName: profile.displayName,
       }),
-    [items, myHandle, profile.displayName],
+    [items, myHandle, profile.displayName, userId],
   );
   const likedItems = useMemo(
     () => items.filter((i) => i.liked && isLiveUgcFeedItem(i)),

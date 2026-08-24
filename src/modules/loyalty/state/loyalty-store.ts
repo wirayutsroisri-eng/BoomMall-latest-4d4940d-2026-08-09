@@ -26,8 +26,8 @@ type LoyaltyState = {
 };
 
 const DEFAULT_PROFILE: VipProfile = {
-  displayName: 'ผู้ใช้ BoomMall',
-  handle: '@boommall_user',
+  displayName: '',
+  handle: '',
   bio: '',
   websiteUrl: '',
   avatarUri: null,

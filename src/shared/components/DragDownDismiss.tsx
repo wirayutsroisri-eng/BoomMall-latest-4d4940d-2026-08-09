@@ -112,7 +112,9 @@ export function DragDownDismiss({
     opacity: interpolate(dismissY.value, [0, SCREEN_H * 0.55], [1, 0], 'clamp'),
   }));
 
-  const tapDim = dimPressToDismiss ?? showDim;
+  // `enabled=false` means the surface is not closable. Keep the dim layer as
+  // a visual/modal touch barrier, but never turn it into a dismiss control.
+  const tapDim = enabled && (dimPressToDismiss ?? showDim);
 
   const closeFromDim = useCallback(() => {
     dismissY.value = withTiming(SCREEN_H, { duration: 180 }, (finished) => {

@@ -12,16 +12,12 @@ export type VerifiedFacebookIdentity = {
   email?: string;
 };
 
-function allowDevAuth() {
-  return process.env.ALLOW_DEV_AUTH === '1' || process.env.NODE_ENV !== 'production';
-}
-
 export async function verifyFacebookAccessToken(
   accessToken: string,
   expectedId?: string,
 ): Promise<VerifiedFacebookIdentity> {
   const appId = process.env.FACEBOOK_APP_ID?.trim();
-  if (!appId && !allowDevAuth()) {
+  if (!appId) {
     throw new AppError(
       'FACEBOOK_NOT_CONFIGURED',
       'FACEBOOK_APP_ID required for Facebook Login in production',
@@ -31,14 +27,6 @@ export async function verifyFacebookAccessToken(
 
   if (!accessToken || accessToken.length < 10) {
     throw new AppError('UNAUTHORIZED', 'Invalid Facebook access token', 401);
-  }
-
-  if (!appId && allowDevAuth()) {
-    return {
-      provider: 'facebook',
-      providerUserId: expectedId || `dev-fb-${accessToken.slice(0, 12)}`,
-      name: 'Facebook User',
-    };
   }
 
   const url = new URL('https://graph.facebook.com/me');

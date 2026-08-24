@@ -15,10 +15,6 @@ export type VerifiedGoogleIdentity = {
   name?: string;
 };
 
-function allowDevAuth() {
-  return process.env.ALLOW_DEV_AUTH === '1' || process.env.NODE_ENV !== 'production';
-}
-
 export async function verifyGoogleIdentityToken(
   identityToken: string,
   expectedSub?: string,
@@ -34,25 +30,11 @@ export async function verifyGoogleIdentityToken(
   const audience = audiences.length === 1 ? audiences[0] : audiences.length > 1 ? audiences : '';
 
   if (!audience || (Array.isArray(audience) && audience.length === 0)) {
-    if (!allowDevAuth()) {
-      throw new AppError(
-        'GOOGLE_NOT_CONFIGURED',
-        'GOOGLE_CLIENT_ID required for Google Sign-In in production',
-        503,
-      );
-    }
-    const decoded = jose.decodeJwt(identityToken);
-    const sub = typeof decoded.sub === 'string' ? decoded.sub : expectedSub;
-    if (!sub) throw new AppError('UNAUTHORIZED', 'Google token missing sub', 401);
-    if (expectedSub && expectedSub !== sub) {
-      throw new AppError('UNAUTHORIZED', 'Google sub mismatch', 401);
-    }
-    return {
-      provider: 'google',
-      providerUserId: sub,
-      email: typeof decoded.email === 'string' ? decoded.email : undefined,
-      name: typeof decoded.name === 'string' ? decoded.name : undefined,
-    };
+    throw new AppError(
+      'GOOGLE_NOT_CONFIGURED',
+      'GOOGLE_CLIENT_ID required for Google Sign-In',
+      503,
+    );
   }
 
   try {

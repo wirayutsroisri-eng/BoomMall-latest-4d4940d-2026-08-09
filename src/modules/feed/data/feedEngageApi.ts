@@ -74,8 +74,40 @@ export async function publishSocialPost(input: {
   linkUrl?: string;
   lane?: string;
 }): Promise<SocialPostDto | null> {
-  const json = (await post('/api/v1/feed/posts', input)) as { data?: SocialPostDto } | null;
-  return json?.data ?? null;
+  const base = getApiBase();
+  if (!base) throw new Error('FEED_API_UNAVAILABLE');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30_000);
+  console.info('[POST_FLOW] 05 create post start');
+  console.info('[POST_MEDIA] create post start');
+  try {
+    const response = await fetch(`${base}/api/v1/feed/posts`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(input),
+      signal: controller.signal,
+    });
+    const json = await response.json().catch(() => null) as {
+      data?: SocialPostDto;
+      error?: { code?: string; message?: string };
+    } | null;
+    if ((response.status !== 200 && response.status !== 201) || !json?.data) {
+      const error = new Error(json?.error?.code || json?.error?.message || 'FEED_PUBLISH_FAILED') as Error & { statusCode?: number };
+      error.statusCode = response.status;
+      throw error;
+    }
+    console.info('[POST_FLOW] 06 create post success', {
+      postId: json.data.id,
+      statusCode: response.status,
+    });
+    console.info('[POST_MEDIA] create post success', { postId: json.data.id });
+    return json.data;
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error('FEED_PUBLISH_TIMEOUT');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function syncFeedPostUpdate(

@@ -1,15 +1,8 @@
 import { create } from 'zustand';
-import { SEED_FOLLOWING_HANDLES } from '@/modules/feed/data/seedFollows';
 import { apiFollow, apiListFollowing, apiUnfollow } from '@/modules/social/data/socialApi';
 
 function normalizeHandle(handle: string) {
   return handle.replace(/^@/, '').trim().toLowerCase();
-}
-
-function seedFollowing(): Record<string, true> {
-  const out: Record<string, true> = {};
-  for (const h of SEED_FOLLOWING_HANDLES) out[h] = true;
-  return out;
 }
 
 type FollowState = {
@@ -21,13 +14,14 @@ type FollowState = {
   /** TikTok: แตะ + ในฟีด = follow ทันที; คืน true ถ้าเพิ่ง follow */
   followIfNeeded: (handle: string) => boolean;
   hydrateFromServer: () => Promise<void>;
+  reset: () => void;
 };
 
 /**
  * Shared follow graph — ฟีด + โปรไฟล์ใช้สถานะเดียวกัน
  */
 export const useFollowStore = create<FollowState>((set, get) => ({
-  following: seedFollowing(),
+  following: {},
   isFollowing: (handle) => Boolean(get().following[normalizeHandle(handle)]),
   follow: (handle) => {
     const key = normalizeHandle(handle);
@@ -56,11 +50,11 @@ export const useFollowStore = create<FollowState>((set, get) => ({
   },
   hydrateFromServer: async () => {
     const handles = await apiListFollowing();
-    if (!handles.length) return;
-    set((s) => {
-      const following = { ...s.following };
+    set(() => {
+      const following: Record<string, true> = {};
       for (const h of handles) following[normalizeHandle(h)] = true;
       return { following };
     });
   },
+  reset: () => set({ following: {} }),
 }));

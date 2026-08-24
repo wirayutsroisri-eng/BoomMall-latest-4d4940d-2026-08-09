@@ -17,7 +17,7 @@ import { useChatStore } from '@/modules/chat/state/chat-store';
 import { jumpToChatThread } from '@/shared/navigation/safeNavigate';
 import { useFollowStore } from '@/modules/social/state/follow-store';
 import { normalizeAuthorHandle } from '@/modules/feed/domain/selectFeedByAuthor';
-import { buildCreatorPortfolio } from '@/modules/profile/data/mockCreatorPortfolio';
+import { buildCreatorPortfolio } from '@/modules/profile/data/creatorPortfolio';
 import type { FeedItem } from '@/modules/feed/domain/types';
 import { Avatar } from '@/shared/components/Avatar';
 import { ReportBlockSheet } from '@/modules/safety/ui/ReportBlockSheet';

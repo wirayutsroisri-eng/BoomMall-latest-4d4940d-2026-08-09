@@ -97,6 +97,8 @@ export function AuthForm({
 
   const ids = googleClientIds();
   const fbId = facebookAppId();
+  const googleReady = Boolean(Platform.OS === 'ios' ? ids.ios || ids.web : ids.android || ids.web);
+  const facebookReady = Boolean(fbId);
   const showLine = ENABLE_LINE_LOGIN && Boolean(process.env.EXPO_PUBLIC_LINE_CHANNEL_ID);
 
   useEffect(() => {
@@ -119,13 +121,19 @@ export function AuthForm({
     name: string,
     identityToken?: string,
   ) => {
+    const accountName = name.trim() || displayName.trim();
+    if (mode === 'register' && !accountName) {
+      Alert.alert('ชื่อที่แสดง', 'กรุณากรอกชื่อจริงที่ต้องการแสดงในโปรไฟล์');
+      return;
+    }
     setBusy(provider);
     try {
       const session = await exchangeSocialLogin({
         provider,
         providerUserId,
-        displayName: name,
+        displayName: accountName,
         identityToken,
+        mode,
       });
       await setSession(session);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -149,8 +157,7 @@ export function AuthForm({
       if (!cred.user) throw new Error('ไม่ได้รับ Apple user id');
       if (!cred.identityToken) throw new Error('ไม่ได้รับ Apple identity token');
       const name =
-        [cred.fullName?.givenName, cred.fullName?.familyName].filter(Boolean).join(' ') ||
-        'Apple User';
+        [cred.fullName?.givenName, cred.fullName?.familyName].filter(Boolean).join(' ');
       await finishSocial('apple', cred.user, name, cred.identityToken);
     } catch (e) {
       if ((e as { code?: string })?.code === 'ERR_REQUEST_CANCELED') return;
@@ -186,7 +193,7 @@ export function AuthForm({
       if (!idToken) throw new Error('ไม่ได้รับ Google id_token');
       const payload = decodeJwtPayload(idToken);
       if (!payload.sub) throw new Error('Google token ไม่มี sub');
-      await finishSocial('google', payload.sub, payload.name || 'Google User', idToken);
+      await finishSocial('google', payload.sub, payload.name || '', idToken);
     } catch (e) {
       Alert.alert('Google Sign-In', e instanceof Error ? e.message : 'ไม่สำเร็จ');
     } finally {
@@ -222,7 +229,7 @@ export function AuthForm({
       );
       const me = (await meRes.json()) as { id?: string; name?: string };
       if (!me.id) throw new Error('Facebook ไม่คืน user id');
-      await finishSocial('facebook', me.id, me.name || 'Facebook User', accessToken);
+      await finishSocial('facebook', me.id, me.name || '', accessToken);
     } catch (e) {
       Alert.alert('Facebook Login', e instanceof Error ? e.message : 'ไม่สำเร็จ');
     } finally {
@@ -235,7 +242,11 @@ export function AuthForm({
   };
 
   const onSendOtp = async () => {
-    if (phone.replace(/\D/g, '').length < 9) {
+    if (mode === 'register' && !displayName.trim()) {
+      Alert.alert('ชื่อที่แสดง', 'กรุณากรอกชื่อจริงที่ต้องการแสดงในโปรไฟล์');
+      return;
+    }
+    if (!/^0[689]\d{8}$/.test(phone)) {
       Alert.alert('เบอร์โทร', 'กรอกเบอร์มือถือไทย 10 หลัก เช่น 08x xxx xxxx');
       return;
     }
@@ -243,14 +254,13 @@ export function AuthForm({
     try {
       const result = await requestPhoneOtp(phone);
       setOtpSent(true);
-      setOtp('');
+      setOtp(result.debugCode ?? '');
       setResendIn(result.resendInSec);
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       if (result.debugCode) {
-        Alert.alert(
-          'ส่งรหัสแล้ว',
-          `ส่งไปที่ ${result.phoneMasked}\n\nโหมดพัฒนา (ยังไม่ต่อ SMS จริง): ${result.debugCode}`,
-        );
+        // Development backend has no SMS provider. The debug code is still
+        // verified by the real backend and creates the same durable account.
+        await onVerifyOtp(result.debugCode);
       } else {
         Alert.alert('ส่งรหัสแล้ว', `กรอกรหัส 6 หลักที่ส่งไปยัง ${result.phoneMasked}`);
       }
@@ -267,7 +277,12 @@ export function AuthForm({
     otpLock.current = true;
     setBusy('otp');
     try {
-      const session = await verifyPhoneOtp({ phone, code });
+      const session = await verifyPhoneOtp({
+        phone,
+        code,
+        mode,
+        displayName: mode === 'register' ? displayName.trim() : undefined,
+      });
       await setSession(session);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onAuthenticated?.();
@@ -281,6 +296,10 @@ export function AuthForm({
   };
 
   const onEmail = async () => {
+    if (mode === 'register' && !displayName.trim()) {
+      Alert.alert('ชื่อที่แสดง', 'กรุณากรอกชื่อจริงที่ต้องการแสดงในโปรไฟล์');
+      return;
+    }
     if (!email.trim() || password.length < 8) {
       Alert.alert('อีเมล', 'ใส่อีเมลและรหัสผ่านอย่างน้อย 8 ตัวอักษร');
       return;
@@ -313,8 +332,37 @@ export function AuthForm({
 
   return (
     <View style={styles.body}>
+      {onSwitchMode ? (
+        <View style={styles.modeTabs} accessibilityRole="tablist">
+          <Pressable
+            style={[styles.modeTab, mode === 'register' && styles.modeTabActive]}
+            onPress={() => onSwitchMode('register')}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: mode === 'register' }}
+          >
+            <Text style={[styles.modeTabText, mode === 'register' && styles.modeTabTextActive]}>
+              สมัครสมาชิก
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[styles.modeTab, mode === 'login' && styles.modeTabActive]}
+            onPress={() => onSwitchMode('login')}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: mode === 'login' }}
+          >
+            <Text style={[styles.modeTabText, mode === 'login' && styles.modeTabTextActive]}>
+              เข้าสู่ระบบ
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       <Text style={styles.title}>{heading}</Text>
       <Text style={styles.msg}>{sub}</Text>
+
+      <Text style={styles.sectionTitle}>
+        {mode === 'register' ? 'สมัครด้วยบัญชีโซเชียล' : 'เข้าสู่ระบบด้วยบัญชีโซเชียล'}
+      </Text>
 
       {Platform.OS === 'ios' ? (
         <AppleAuthentication.AppleAuthenticationButton
@@ -330,39 +378,43 @@ export function AuthForm({
         />
       ) : null}
 
-      <Pressable
-        style={[styles.btn, styles.google]}
-        onPress={() => void onGoogle()}
-        disabled={!!busy}
-      >
-        {busy === 'google' ? (
-          <ActivityIndicator color="#1F1F1F" />
-        ) : (
-          <>
-            <Ionicons name="logo-google" size={18} color="#EA4335" />
-            <Text style={styles.googleText}>
-              {mode === 'register' ? 'สมัครด้วย Google' : 'เข้าสู่ระบบด้วย Google'}
-            </Text>
-          </>
-        )}
-      </Pressable>
+      {googleReady ? (
+        <Pressable
+          style={[styles.btn, styles.google]}
+          onPress={() => void onGoogle()}
+          disabled={!!busy}
+        >
+          {busy === 'google' ? (
+            <ActivityIndicator color="#1F1F1F" />
+          ) : (
+            <>
+              <Ionicons name="logo-google" size={18} color="#EA4335" />
+              <Text style={styles.googleText}>
+                {mode === 'register' ? 'สมัครด้วย Google' : 'เข้าสู่ระบบด้วย Google'}
+              </Text>
+            </>
+          )}
+        </Pressable>
+      ) : null}
 
-      <Pressable
-        style={[styles.btn, styles.facebook]}
-        onPress={() => void onFacebook()}
-        disabled={!!busy}
-      >
-        {busy === 'facebook' ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <>
-            <Ionicons name="logo-facebook" size={20} color="#fff" />
-            <Text style={styles.btnText}>
-              {mode === 'register' ? 'สมัครด้วย Facebook' : 'เข้าสู่ระบบด้วย Facebook'}
-            </Text>
-          </>
-        )}
-      </Pressable>
+      {facebookReady ? (
+        <Pressable
+          style={[styles.btn, styles.facebook]}
+          onPress={() => void onFacebook()}
+          disabled={!!busy}
+        >
+          {busy === 'facebook' ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <>
+              <Ionicons name="logo-facebook" size={20} color="#fff" />
+              <Text style={styles.btnText}>
+                {mode === 'register' ? 'สมัครด้วย Facebook' : 'เข้าสู่ระบบด้วย Facebook'}
+              </Text>
+            </>
+          )}
+        </Pressable>
+      ) : null}
 
       {showLine ? (
         <Pressable style={[styles.btn, styles.line]} onPress={() => void onLine()} disabled={!!busy}>
@@ -379,25 +431,47 @@ export function AuthForm({
 
       <View style={styles.orRow}>
         <View style={styles.orLine} />
-        <Text style={styles.orText}>หรือเบอร์โทรศัพท์</Text>
+        <Text style={styles.orText}>
+          {mode === 'register' ? 'สมัครด้วยเบอร์มือถือ' : 'เข้าสู่ระบบด้วยเบอร์มือถือ'}
+        </Text>
         <View style={styles.orLine} />
       </View>
 
+      {mode === 'register' ? (
+        <TextInput
+          style={styles.input}
+          placeholder="ชื่อที่แสดงในโปรไฟล์"
+          placeholderTextColor={colors.text.muted}
+          value={displayName}
+          onChangeText={setDisplayName}
+          maxLength={60}
+          autoComplete="name"
+          accessibilityLabel="ชื่อที่แสดงในโปรไฟล์"
+        />
+      ) : null}
+
       <View style={styles.phoneCard}>
+        <Text style={styles.phoneHelp}>กรอกเบอร์มือถือไทย 10 หลัก ระบบจะส่งรหัส SMS ให้</Text>
         <View style={styles.phoneRow}>
-          <View style={styles.ccBox}>
-            <Text style={styles.ccText}>+66</Text>
-          </View>
           <TextInput
             style={styles.phoneInput}
-            placeholder="8x xxx xxxx"
+            placeholder="08xxxxxxxx"
             placeholderTextColor={colors.text.muted}
-            keyboardType="phone-pad"
+            keyboardType="number-pad"
             textContentType="telephoneNumber"
             autoComplete="tel"
             value={phone}
-            onChangeText={setPhone}
+            onChangeText={(value) => {
+              const next = value.replace(/\D/g, '').slice(0, 10);
+              setPhone(next);
+              if (otpSent) {
+                setOtpSent(false);
+                setOtp('');
+              }
+            }}
+            maxLength={10}
             editable={!busy}
+            accessibilityLabel="เบอร์มือถือไทย 10 หลัก"
           />
         </View>
 
@@ -444,7 +518,9 @@ export function AuthForm({
             ) : (
               <>
                 <Ionicons name="phone-portrait-outline" size={18} color="#fff" />
-                <Text style={styles.btnText}>ส่งรหัส SMS</Text>
+                <Text style={styles.btnText}>
+                  {mode === 'register' ? 'รับรหัสเพื่อสมัครสมาชิก' : 'รับรหัสเพื่อเข้าสู่ระบบ'}
+                </Text>
               </>
             )}
           </Pressable>
@@ -452,20 +528,17 @@ export function AuthForm({
       </View>
 
       <Pressable onPress={() => setShowEmail((v) => !v)} style={styles.emailToggle}>
-        <Text style={styles.emailToggleText}>{showEmail ? 'ซ่อนอีเมล' : 'หรือใช้อีเมล'}</Text>
+        <Text style={styles.emailToggleText}>
+          {showEmail
+            ? 'ซ่อนการใช้อีเมล'
+            : mode === 'register'
+              ? 'ตัวเลือกอื่น: สมัครด้วยอีเมล'
+              : 'ตัวเลือกอื่น: เข้าสู่ระบบด้วยอีเมล'}
+        </Text>
       </Pressable>
 
       {showEmail ? (
         <View style={styles.emailBox}>
-          {mode === 'register' ? (
-            <TextInput
-              style={styles.input}
-              placeholder="ชื่อที่แสดง"
-              placeholderTextColor={colors.text.muted}
-              value={displayName}
-              onChangeText={setDisplayName}
-            />
-          ) : null}
           <TextInput
             style={styles.input}
             placeholder="อีเมล"
@@ -501,14 +574,6 @@ export function AuthForm({
             )}
           </Pressable>
         </View>
-      ) : null}
-
-      {onSwitchMode ? (
-        <Pressable onPress={() => onSwitchMode(mode === 'register' ? 'login' : 'register')}>
-          <Text style={styles.switchText}>
-            {mode === 'register' ? 'มีบัญชีแล้ว? เข้าสู่ระบบ' : 'ยังไม่มีบัญชี? สมัคร'}
-          </Text>
-        </Pressable>
       ) : null}
 
       <Text style={styles.legal}>
@@ -563,8 +628,27 @@ function OtpBoxes({
 
 const styles = StyleSheet.create({
   body: { gap: 10 },
+  modeTabs: {
+    flexDirection: 'row',
+    padding: 4,
+    borderRadius: 14,
+    backgroundColor: colors.surface.canvas,
+    borderWidth: 1,
+    borderColor: colors.border.soft,
+  },
+  modeTab: {
+    flex: 1,
+    height: 44,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modeTabActive: { backgroundColor: colors.brand.primaryDark },
+  modeTabText: { fontSize: 15, fontWeight: '800', color: colors.text.secondary },
+  modeTabTextActive: { color: '#fff' },
   title: { fontSize: 22, fontWeight: '900', color: colors.text.primary, letterSpacing: -0.4 },
   msg: { fontSize: 14, lineHeight: 20, color: colors.text.secondary, marginBottom: 6 },
+  sectionTitle: { fontSize: 14, fontWeight: '800', color: colors.text.primary },
   appleBtn: { width: '100%', height: 52 },
   btn: {
     height: 52,
@@ -596,18 +680,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(0,168,107,0.16)',
   },
-  phoneRow: { flexDirection: 'row', gap: 8 },
-  ccBox: {
-    height: 48,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.border.soft,
-  },
-  ccText: { fontWeight: '800', color: colors.text.primary, fontSize: 15 },
+  phoneRow: { flexDirection: 'row' },
+  phoneHelp: { fontSize: 12, lineHeight: 18, color: colors.text.secondary },
   phoneInput: {
     flex: 1,
     height: 48,
@@ -654,13 +728,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     color: colors.text.primary,
     backgroundColor: colors.surface.canvas,
-  },
-  switchText: {
-    textAlign: 'center',
-    color: colors.text.secondary,
-    fontWeight: '700',
-    fontSize: 13,
-    paddingVertical: 4,
   },
   legal: {
     fontSize: 11,

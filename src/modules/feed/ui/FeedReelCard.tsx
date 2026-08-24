@@ -164,7 +164,6 @@ export function FeedReelCard({
   };
   const caption = item.caption?.trim() ?? '';
 
-  const playbackProgress = useSharedValue(0);
   const centerIconScale = useSharedValue(0);
   const centerIconOpacity = useSharedValue(0);
   const heartScale = useSharedValue(0);
@@ -238,8 +237,7 @@ export function FeedReelCard({
     setDuration(0);
     setIsPaused(false);
     isScrubbingRef.current = false;
-    playbackProgress.value = 0;
-  }, [item.id, playbackProgress]);
+  }, [item.id]);
 
   // Drive the seek bar from the player's real time updates.
   useEffect(() => {
@@ -249,9 +247,6 @@ export function FeedReelCard({
       if (d > 0) {
         setDuration(d);
         setCurrentTime(t);
-        if (!isScrubbingRef.current) {
-          playbackProgress.value = t / d;
-        }
       }
     });
     const playingSub = player.addListener('playingChange', ({ isPlaying }) => {
@@ -261,7 +256,7 @@ export function FeedReelCard({
       timeSub.remove();
       playingSub.remove();
     };
-  }, [player, playbackProgress]);
+  }, [player]);
 
   const burstCenterIcon = (name: 'play' | 'pause') => {
     setCenterIconName(name);
@@ -334,7 +329,6 @@ export function FeedReelCard({
   };
 
   const handleScrub = (ratio: number) => {
-    playbackProgress.value = ratio;
     if (player) {
       const d = player.duration;
       if (d > 0) {
@@ -350,7 +344,6 @@ export function FeedReelCard({
     if (d > 0) {
       player.currentTime = ratio * d;
       setCurrentTime(ratio * d);
-      playbackProgress.value = ratio;
       // Start playing automatically after seeking/releasing the seek bar
       player.play();
     }
@@ -695,7 +688,7 @@ export function FeedReelCard({
       {/* Seek bar placed outside horizontalSwipe GestureDetector to receive touch events */}
       {item.videoUri && !chromeHidden ? (
         <FeedSeekBar
-          progress={playbackProgress.value}
+          progress={duration > 0 ? currentTime / duration : 0}
           currentTime={currentTime}
           duration={duration}
           onScrub={handleScrub}

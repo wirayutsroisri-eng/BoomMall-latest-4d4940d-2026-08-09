@@ -74,7 +74,7 @@ describe('feed media recovery adapter', () => {
     expect(mapped.imageUris).toBeUndefined();
   });
 
-  it('falls back to the current device cached item when the server source is unusable', () => {
+  it('never falls back to a device cached item when published server media is unusable', () => {
     const remote = socialPostToFeedItem(post([
       'file:///var/mobile/Containers/Data/Application/OLD/Library/Caches/photo.jpg',
     ]));
@@ -87,6 +87,7 @@ describe('feed media recovery adapter', () => {
 
     const [recovered] = mergeFeedItems([remote], [local]);
 
-    expect(recovered.imageUri).toBe(local.imageUri);
+    expect(recovered.imageUri).toBeUndefined();
+    expect(recovered.mediaUnavailable).toBe(true);
   });
 });

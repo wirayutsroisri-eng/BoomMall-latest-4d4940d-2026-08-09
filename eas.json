@@ -19,7 +19,7 @@
         "resourceClass": "m-medium"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://REPLACE-WITH-PUBLIC-HTTPS-API"
+        "EXPO_PUBLIC_API_BASE_URL": "https://REPLACE-WITH-PUBLIC-HTTPS-API"
       }
     },
     "play-internal": {
@@ -30,7 +30,7 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://REPLACE-WITH-PUBLIC-HTTPS-API"
+        "EXPO_PUBLIC_API_BASE_URL": "https://REPLACE-WITH-PUBLIC-HTTPS-API"
       }
     },
     "production": {
@@ -41,7 +41,7 @@
         "resourceClass": "m-medium"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://REPLACE-WITH-PUBLIC-HTTPS-API"
+        "EXPO_PUBLIC_API_BASE_URL": "https://REPLACE-WITH-PUBLIC-HTTPS-API"
       }
     }
   },

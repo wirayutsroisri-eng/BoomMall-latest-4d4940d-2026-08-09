@@ -17,11 +17,9 @@ async function main() {
   bootstrapPspFromEnv();
   bootstrapSellerPayoutFromEnv();
   await bootstrapSystem(prisma, env.initialTreasuryMint);
-  try {
+  if (APPLE_REVIEW_EMAIL) {
     await ensureAppleReviewAccount();
-    console.log(`Apple Review demo: ${APPLE_REVIEW_EMAIL}`);
-  } catch (err) {
-    console.warn('Apple Review account seed skipped:', err);
+    console.log(`Apple Review account ready: ${APPLE_REVIEW_EMAIL}`);
   }
   const app = createApp();
   const server = http.createServer(app);

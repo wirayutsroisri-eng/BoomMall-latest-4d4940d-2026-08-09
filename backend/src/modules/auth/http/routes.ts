@@ -58,6 +58,7 @@ authDomainRouter.post('/login/social', async (req, res, next) => {
         displayName: body.displayName ? String(body.displayName) : undefined,
         handle: body.handle ? String(body.handle) : undefined,
         identityToken: body.identityToken ? String(body.identityToken) : undefined,
+        mode: body.mode === 'register' ? 'register' : body.mode === 'login' ? 'login' : undefined,
       }),
     });
   } catch (e) {
@@ -88,6 +89,8 @@ authDomainRouter.post('/otp/verify', async (req, res, next) => {
       data: await verifyPhoneOtp({
         phone: String(body.phone ?? ''),
         code: String(body.code ?? body.otp ?? ''),
+        mode: body.mode === 'register' ? 'register' : body.mode === 'login' ? 'login' : undefined,
+        displayName: body.displayName ? String(body.displayName) : undefined,
       }),
     });
   } catch (e) {
@@ -154,7 +157,21 @@ authDomainRouter.get('/me', requireUser, async (req: UserAuthedRequest, res, nex
 authDomainRouter.get('/profiles/:userId', async (req, res, next) => {
   try {
     const userId = Array.isArray(req.params.userId) ? req.params.userId[0] : req.params.userId;
-    res.json({ ok: true, data: await getProfile(String(userId)) });
+    const profile = await getProfile(String(userId));
+    const data = profile
+      ? {
+          userId: profile.userId,
+          displayName: profile.displayName,
+          handle: profile.handle,
+          role: profile.role,
+          shopId: profile.shopId,
+          bio: profile.bio,
+          avatarUrl: profile.avatarUrl,
+          coverUrl: profile.coverUrl,
+          updatedAt: profile.updatedAt,
+        }
+      : null;
+    res.json({ ok: true, data });
   } catch (e) {
     next(e);
   }

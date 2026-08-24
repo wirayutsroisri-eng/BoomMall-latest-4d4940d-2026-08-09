@@ -21,6 +21,8 @@ import type { BoardSide, CommerceTier, FeedComment, FeedItem, FeedTab } from '..
 import type { MediaAsset } from '@/modules/media/domain/mediaAsset';
 
 type NewPostInput = {
+  /** Stable across retries from one composer session; server uses it to deduplicate. */
+  clientPostId?: string;
   caption: string;
   price: number;
   channel: CommerceTier;
@@ -112,6 +114,8 @@ function bindCompositionToMediaAssets(
 }
 
 type FeedState = {
+  /** Owner of account-scoped persisted state. Null also forces one-time cleanup of legacy caches. */
+  accountOwnerId: string | null;
   tab: FeedTab;
   items: FeedItem[];
   activeProductId: string | null;
@@ -132,7 +136,7 @@ type FeedState = {
   tipClip: (id: string, amount: number) => void;
   addPost: (input: NewPostInput) => Promise<string>;
   updatePost: (feedId: string, input: NewPostInput) => Promise<boolean>;
-  deletePost: (feedId: string) => boolean;
+  deletePost: (feedId: string) => Promise<boolean>;
   renameOwnPosts: (displayName: string) => void;
   openProductSheet: (productId: string) => void;
   closeProductSheet: () => void;
@@ -148,6 +152,7 @@ type FeedState = {
   openCreatorProfile: (handle: string, feedId?: string) => void;
   closeCreatorProfile: () => void;
   hydrateFromServer: () => Promise<void>;
+  switchAccount: (userId: string | null) => boolean;
 };
 
 let commentSeq = 1000;
@@ -156,6 +161,7 @@ export const useFeedStore = create<FeedState>()(
   persist(
     (set, get) => ({
   tab: 'foryou',
+  accountOwnerId: null,
   items: [],
   activeProductId: null,
   activeCommentsFeedId: null,
@@ -328,6 +334,10 @@ export const useFeedStore = create<FeedState>()(
         videoUri: stableVideo,
         editorMedia: stableEditorMedia,
       });
+      const invalidRemoteUri = [...uploaded.imageUris, uploaded.videoUri]
+        .filter((uri): uri is string => Boolean(uri))
+        .find((uri) => !/^https?:\/\//i.test(uri));
+      if (invalidRemoteUri) throw new Error('POST_MEDIA_MUST_USE_REMOTE_URL');
       const uploadedComposition = bindCompositionToMediaAssets(
         stableEditorMedia,
         newItem.overlays,
@@ -339,6 +349,7 @@ export const useFeedStore = create<FeedState>()(
       const saved = await publishSocialPost({
         body: caption,
         media: {
+          clientPostId: input.clientPostId,
           images: uploaded.imageUris,
           video: uploaded.videoUri,
           musicTitle: newItem.musicTitle,
@@ -396,6 +407,25 @@ export const useFeedStore = create<FeedState>()(
           }),
         };
       });
+      console.info('[POST_FLOW] feed updated', { postId: saved.id });
+      const refetchedRows = await fetchFeedPosts(newItem.lane);
+      const refetched = refetchedRows.find((row) => row.id === saved.id);
+      if (refetched) {
+        const refetchedItem = socialPostToFeedItem(refetched, {
+          myUserId: auth?.id,
+          myHandle: authorHandle,
+        });
+        set((state) => ({
+          items: state.items.map((item) => item.id === saved.id ? { ...refetchedItem, isUserPost: true } : item),
+        }));
+        console.info('[POST_MEDIA] server post refetched', { postId: saved.id });
+      } else {
+        console.error('[POST_FLOW_ERROR]', {
+          step: 'server-post-refetch',
+          message: 'SERVER_POST_REFETCH_FAILED',
+          postId: saved.id,
+        });
+      }
     } catch (error) {
       set((state) => ({ items: state.items.filter((item) => item.id !== id) }));
       throw error;
@@ -560,9 +590,16 @@ export const useFeedStore = create<FeedState>()(
 
     return true;
   },
-  deletePost: (feedId) => {
-    const existing = get().items.find((item) => item.id === feedId);
+  deletePost: async (feedId) => {
+    const before = get();
+    const existingIndex = before.items.findIndex((item) => item.id === feedId);
+    const existing = before.items[existingIndex];
     if (!existing?.isUserPost) return false;
+
+    const removedComments = before.commentsByFeedId[feedId];
+    const removedLegacyComments = existing.legacyLocalId
+      ? before.commentsByFeedId[existing.legacyLocalId]
+      : undefined;
 
     set((state) => {
       const nextComments = { ...state.commentsByFeedId };
@@ -578,9 +615,31 @@ export const useFeedStore = create<FeedState>()(
       };
     });
 
-    useVaultStore.getState().removeItemByRef(feedId);
-    void syncFeedPostDelete(feedId);
-    return true;
+    const deleted = await syncFeedPostDelete(feedId);
+    if (deleted) {
+      useVaultStore.getState().removeItemByRef(feedId);
+      return true;
+    }
+
+    // The server is authoritative. Put the exact record back if DELETE failed,
+    // while preserving posts/comments that may have arrived during the request.
+    set((state) => {
+      if (state.items.some((item) => item.id === feedId)) return state;
+      const items = [...state.items];
+      items.splice(Math.min(existingIndex, items.length), 0, existing);
+      const commentsByFeedId = { ...state.commentsByFeedId };
+      if (removedComments) commentsByFeedId[feedId] = removedComments;
+      if (existing.legacyLocalId && removedLegacyComments) {
+        commentsByFeedId[existing.legacyLocalId] = removedLegacyComments;
+      }
+      return {
+        items,
+        commentsByFeedId,
+        activeCommentsFeedId: before.activeCommentsFeedId,
+        activeTipFeedId: before.activeTipFeedId,
+      };
+    });
+    return false;
   },
   renameOwnPosts: (displayName) => {
     const name = displayName.trim();
@@ -772,11 +831,27 @@ export const useFeedStore = create<FeedState>()(
     if (!remote.length && local.length === get().items.length) return;
     set({ items: mergeFeedItems(remote, local) });
   },
+  switchAccount: (userId) => {
+    const nextOwnerId = userId?.trim() || null;
+    if (get().accountOwnerId === nextOwnerId) return false;
+    set({
+      accountOwnerId: nextOwnerId,
+      items: [],
+      commentsByFeedId: {},
+      activeProductId: null,
+      activeCommentsFeedId: null,
+      activeTipFeedId: null,
+      activeCreatorHandle: null,
+      activeCreatorFeedId: null,
+    });
+    return true;
+  },
     }),
     {
       name: 'boommall-feed-v4',
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (s) => ({
+        accountOwnerId: s.accountOwnerId,
         items: keepPersistedFeedItems(s.items).slice(0, 80),
         commentsByFeedId: Object.fromEntries(
           Object.entries(s.commentsByFeedId)

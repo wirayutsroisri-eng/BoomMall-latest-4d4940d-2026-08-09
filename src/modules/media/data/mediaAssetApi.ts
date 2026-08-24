@@ -12,6 +12,42 @@ type UploadSession = {
   };
 };
 
+const MEDIA_API_TIMEOUT_MS = 30_000;
+const OBJECT_UPLOAD_TIMEOUT_MS = 120_000;
+
+export class MediaUploadError extends Error {
+  constructor(
+    message: string,
+    readonly statusCode?: number,
+    readonly step?: string,
+  ) {
+    super(message);
+    this.name = 'MediaUploadError';
+  }
+}
+
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit,
+  timeoutMs: number,
+  step: string,
+) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new MediaUploadError(
+      controller.signal.aborted ? `${step}_TIMEOUT` : message,
+      undefined,
+      step,
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function inferMime(uri: string, type: MediaAssetType) {
   const clean = uri.toLowerCase().split('?')[0] ?? '';
   if (clean.endsWith('.png')) return 'image/png';
@@ -27,10 +63,25 @@ function inferMime(uri: string, type: MediaAssetType) {
 async function apiJson<T>(path: string, init: RequestInit): Promise<T> {
   const base = getApiBase();
   if (!base) throw new Error('MEDIA_API_UNAVAILABLE');
-  const response = await fetch(`${base}${path}`, init);
-  const json = await response.json().catch(() => null) as { data?: T; error?: { code?: string; message?: string } } | null;
+  const response = await fetchWithTimeout(`${base}${path}`, init, MEDIA_API_TIMEOUT_MS, path);
+  let bodyTimer: ReturnType<typeof setTimeout> | undefined;
+  const json = await Promise.race([
+    response.json().catch(() => null),
+    new Promise<null>((_, reject) => {
+      bodyTimer = setTimeout(
+        () => reject(new MediaUploadError(`${path}_RESPONSE_TIMEOUT`, response.status, path)),
+        MEDIA_API_TIMEOUT_MS,
+      );
+    }),
+  ]).finally(() => {
+    if (bodyTimer) clearTimeout(bodyTimer);
+  }) as { data?: T; error?: { code?: string; message?: string } } | null;
   if (!response.ok || !json?.data) {
-    throw new Error(json?.error?.code || json?.error?.message || 'MEDIA_ASSET_REQUEST_FAILED');
+    throw new MediaUploadError(
+      json?.error?.code || json?.error?.message || 'MEDIA_ASSET_REQUEST_FAILED',
+      response.status,
+      path,
+    );
   }
   return json.data;
 }
@@ -43,6 +94,7 @@ export async function uploadMediaAsset(input: {
   duration?: number;
   mimeType?: string;
 }): Promise<MediaAsset> {
+  console.info('[POST_MEDIA] local file selected', { type: input.type, scheme: input.uri.split(':')[0] });
   const file = new File(input.uri);
   if (!file.exists) throw new Error('MEDIA_LOCAL_FILE_MISSING');
   const mimeType = input.mimeType || file.type || inferMime(input.uri, input.type);
@@ -59,17 +111,61 @@ export async function uploadMediaAsset(input: {
       duration: input.duration,
     }),
   });
-  const uploaded = await expoFetch(session.upload.uploadUrl, {
-    method: 'PUT',
-    headers: session.upload.headers ?? { 'Content-Type': session.upload.mimeType },
-    body: file,
+  const uploadTarget = new URL(session.upload.uploadUrl);
+  console.info('[POST_MEDIA] presign success', {
+    uploadTarget: `${uploadTarget.protocol}//${uploadTarget.host}${uploadTarget.pathname}`,
   });
-  if (!uploaded.ok) throw new Error(`MEDIA_OBJECT_UPLOAD_FAILED_${uploaded.status}`);
+  console.info('[POST_MEDIA] S3 PUT start');
+  console.info('[POST_FLOW] 02 media upload start', {
+    assetId: session.asset.id,
+    storageKey: session.asset.storageKey,
+  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), OBJECT_UPLOAD_TIMEOUT_MS);
+  let uploaded: Response;
+  try {
+    uploaded = await expoFetch(session.upload.uploadUrl, {
+      method: 'PUT',
+      headers: session.upload.headers ?? { 'Content-Type': session.upload.mimeType },
+      body: file,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    throw new MediaUploadError(
+      controller.signal.aborted
+        ? 'MEDIA_OBJECT_UPLOAD_TIMEOUT'
+        : error instanceof Error ? error.message : String(error),
+      undefined,
+      'object-upload',
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!uploaded.ok) {
+    throw new MediaUploadError(`MEDIA_OBJECT_UPLOAD_FAILED_${uploaded.status}`, uploaded.status, 'object-upload');
+  }
+  console.info(`[POST_MEDIA] S3 PUT status=${uploaded.status}`);
+  console.info('[POST_FLOW] 03 media upload success', {
+    assetId: session.asset.id,
+    storageKey: session.asset.storageKey,
+  });
   const ready = await apiJson<MediaAsset>(`/api/v1/media-assets/${encodeURIComponent(session.asset.id)}/confirm`, {
     method: 'POST',
     headers: authHeaders(),
     body: '{}',
   });
-  if (ready.status !== 'ready') throw new Error('MEDIA_ASSET_NOT_READY');
+  if (ready.status !== 'ready') throw new MediaUploadError('MEDIA_ASSET_NOT_READY', undefined, 'confirm');
+  if (!/^https?:\/\//i.test(ready.canonicalUrl)) {
+    throw new MediaUploadError('MEDIA_REMOTE_URL_INVALID', undefined, 'confirm');
+  }
+  console.info('[POST_FLOW] 04 remote url received', {
+    assetId: ready.id,
+    storageKey: ready.storageKey,
+    remoteUrl: ready.canonicalUrl,
+  });
+  console.info('[POST_MEDIA] confirm success', {
+    objectKey: ready.storageKey,
+    canonicalUrl: ready.canonicalUrl,
+  });
   return ready;
 }

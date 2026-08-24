@@ -38,6 +38,7 @@ import { useInventoryStore } from '@/modules/commerce/state/inventory-store';
 import { resolveShopMaster } from '@/modules/shop/domain/product-display';
 import { syncFeedInterested, syncFeedLike, syncFeedNotInterested, syncFeedShare } from '@/modules/feed/data/feedEngageApi';
 import { recordActivity } from '@/modules/account/state/activity-store';
+import { useAuthStore } from '@/modules/auth/state/auth-store';
 
 type Props = {
   handle: string;
@@ -62,6 +63,7 @@ export function ProfileFeedScreen({ handle, startId }: Props) {
   const startCall = useCallStore((s) => s.startCall);
   const setActive = useCallStore((s) => s.setActive);
   const profile = useLoyaltyStore((s) => s.profile);
+  const userId = useAuthStore((s) => s.user?.id);
   const hideContent = useModerationStore((s) => s.hideContent);
   const removeContent = useModerationStore((s) => s.removeContent);
   const hiddenContentIds = useModerationStore((s) => s.hiddenContentIds);
@@ -79,6 +81,7 @@ export function ProfileFeedScreen({ handle, startId }: Props) {
     const suppressed = new Set([...hiddenContentIds, ...removedContentIds]);
     const built = buildOwnerFeedItems(ownerKey, storeItems, {
       isSelf,
+      ownerUserId: isSelf ? userId : undefined,
       displayName: isSelf ? profile.displayName : undefined,
     }).filter((item) => !suppressed.has(item.id));
     if (!isSelf || !profile.displayName.trim()) return built;
@@ -88,7 +91,7 @@ export function ProfileFeedScreen({ handle, startId }: Props) {
       author: profile.displayName,
       authorHandle: profile.handle.startsWith('@') ? profile.handle : `@${ownerKey}`,
     }));
-  }, [ownerKey, storeItems, isSelf, profile.displayName, profile.handle, hiddenContentIds, removedContentIds]);
+  }, [ownerKey, storeItems, isSelf, userId, profile.displayName, profile.handle, hiddenContentIds, removedContentIds]);
 
   const initialIndex = useMemo(() => {
     if (!startId) return 0;
@@ -328,11 +331,14 @@ export function ProfileFeedScreen({ handle, startId }: Props) {
             {
               text: 'ลบ',
               style: 'destructive',
-              onPress: () => {
-                if (deletePost(target.id)) {
+              onPress: async () => {
+                const deletion = deletePost(target.id);
+                if (router.canGoBack()) router.back();
+                if (await deletion) {
                   removeContent(target.id);
                   if (target.legacyLocalId) removeContent(target.legacyLocalId);
-                  if (router.canGoBack()) router.back();
+                } else {
+                  Alert.alert('ลบโพสต์ไม่สำเร็จ', 'โพสต์ถูกนำกลับมาแล้ว กรุณาลองอีกครั้ง');
                 }
               },
             },

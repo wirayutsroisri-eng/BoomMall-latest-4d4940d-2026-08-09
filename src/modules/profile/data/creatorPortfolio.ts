@@ -1,10 +1,7 @@
 import { buildOwnerFeedItems } from '@/modules/profile/data/buildOwnerFeedItems';
 import type { FeedItem } from '@/modules/feed/domain/types';
 
-/**
- * พอร์ตโฟลิโอครีเอเตอร์ = คอนเทนต์ของ handle นั้นเท่านั้น
- * (โพสต์ใน store + catalog ที่ authorHandle ตรงกัน — ไม่เติมคลิปคนอื่น)
- */
+/** Build another creator's portfolio exclusively from API/store items owned by that handle. */
 export function buildCreatorPortfolio(
   handle: string,
   author: string,

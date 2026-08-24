@@ -101,7 +101,7 @@ export function HomeFeedScreen() {
   const removedContentIds = useModerationStore((s) => s.removedContentIds);
   const hideContent = useModerationStore((s) => s.hideContent);
   const removeContent = useModerationStore((s) => s.removeContent);
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const authenticated = useAuthStore((s) => Boolean(s.sessionToken && s.user));
   const authHydrated = useAuthStore((s) => s.hydrated);
   const chromeHidden = useFeedChromeStore((s) => s.chromeHidden);
   const autoAdvance = useFeedChromeStore((s) => s.autoAdvance);
@@ -226,14 +226,14 @@ export function HomeFeedScreen() {
 
   const openCommentsSheet = useCallback(
     (feedId: string) => {
-      if (authHydrated && !isAuthenticated()) {
+      if (authHydrated && !authenticated) {
         setLoginOpen(true);
         return;
       }
       openComments(feedId);
       requestAnimationFrame(() => commentsSheetRef.current?.present());
     },
-    [authHydrated, isAuthenticated, openComments],
+    [authHydrated, authenticated, openComments],
   );
 
   const openProduct = useCallback(
@@ -246,7 +246,7 @@ export function HomeFeedScreen() {
 
   const likeClip = useCallback(
     (item: FeedItem) => {
-      if (authHydrated && !isAuthenticated()) {
+      if (authHydrated && !authenticated) {
         setLoginOpen(true);
         return;
       }
@@ -254,7 +254,7 @@ export function HomeFeedScreen() {
       toggleLike(item.id);
       void syncFeedLike(item.id, nextLiked);
     },
-    [authHydrated, isAuthenticated, toggleLike],
+    [authHydrated, authenticated, toggleLike],
   );
 
   const openLongPressMenu = useCallback((item: FeedItem) => {
@@ -485,10 +485,12 @@ export function HomeFeedScreen() {
             {
               text: 'ลบ',
               style: 'destructive',
-              onPress: () => {
-                if (deletePost(target.id)) {
+              onPress: async () => {
+                if (await deletePost(target.id)) {
                   removeContent(target.id);
                   if (target.legacyLocalId) removeContent(target.legacyLocalId);
+                } else {
+                  Alert.alert('ลบโพสต์ไม่สำเร็จ', 'โพสต์ถูกนำกลับมาแล้ว กรุณาลองอีกครั้ง');
                 }
               },
             },
@@ -544,7 +546,7 @@ export function HomeFeedScreen() {
       />
 
       <SocialLoginGate
-        visible={loginOpen || (authHydrated && !isAuthenticated() && feedFocused)}
+        visible={loginOpen}
         onClose={() => setLoginOpen(false)}
         onAuthenticated={() => setLoginOpen(false)}
       />

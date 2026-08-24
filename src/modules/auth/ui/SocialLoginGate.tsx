@@ -14,6 +14,8 @@ type Props = {
   onAuthenticated?: () => void;
   title?: string;
   message?: string;
+  /** Mandatory gates cannot be dismissed until authentication succeeds. */
+  dismissible?: boolean;
 };
 
 /**
@@ -24,40 +26,54 @@ export function SocialLoginGate({
   visible,
   onClose,
   onAuthenticated,
-  title = 'เข้าสู่ระบบเพื่อใช้งาน',
-  message = 'เข้าสู่ระบบด้วย Apple, Google, Facebook หรือเบอร์โทรก่อนใช้ฟีด แชต โพสต์ หรือตลาด',
+  title,
+  message = 'เลือกช่องทางที่พร้อมใช้งานเพื่อเข้าสู่ระบบก่อนใช้ฟีด แชต โพสต์ หรือตลาด',
+  dismissible = true,
 }: Props) {
   const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<AuthFormMode>('login');
   const scrollY = useSharedValue(0);
 
   const close = () => {
+    if (!dismissible) return;
     setMode('login');
     onClose?.();
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
+    <Modal
+      visible={visible}
+      transparent={dismissible}
+      animationType="slide"
+      onRequestClose={dismissible ? close : undefined}
+    >
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={dismissible && Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View
           style={[
             styles.overlay,
+            !dismissible && styles.mandatoryOverlay,
             { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 16 },
           ]}
         >
           <DragDownDismiss
             onDismiss={close}
-            enabled={Boolean(onClose)}
-            showDim
+            enabled={dismissible && Boolean(onClose)}
+            showDim={dismissible}
+            dimPressToDismiss={dismissible && Boolean(onClose)}
             rootInModal
+            rootStyle={!dismissible ? styles.mandatoryRoot : undefined}
             scrollY={scrollY}
-            style={styles.sheet}
+            style={[styles.sheet, !dismissible && styles.mandatorySheet]}
           >
             <ScrollView
+              style={!dismissible ? styles.mandatoryScroll : undefined}
               keyboardShouldPersistTaps="handled"
+              keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+              automaticallyAdjustKeyboardInsets={false}
+              contentInsetAdjustmentBehavior="never"
               showsVerticalScrollIndicator={false}
               onScroll={(e) => {
                 scrollY.value = e.nativeEvent.contentOffset.y;
@@ -69,11 +85,15 @@ export function SocialLoginGate({
                 title={title}
                 message={message}
                 onAuthenticated={onAuthenticated}
-                onClose={close}
+                onClose={dismissible ? close : undefined}
                 onSwitchMode={(next) => {
                   if (next === 'register') {
-                    close();
-                    safePush('/register');
+                    if (dismissible) {
+                      close();
+                      safePush('/register');
+                    } else {
+                      setMode('register');
+                    }
                     return;
                   }
                   setMode(next);
@@ -94,6 +114,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.55)',
     justifyContent: 'flex-end',
   },
+  mandatoryOverlay: {
+    backgroundColor: colors.surface.card,
+  },
+  mandatoryRoot: {
+    backgroundColor: colors.surface.card,
+  },
   sheet: {
     backgroundColor: colors.surface.card,
     borderTopLeftRadius: 20,
@@ -101,5 +127,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 18,
     maxHeight: '92%',
+  },
+  mandatorySheet: {
+    flex: 1,
+    maxHeight: '100%',
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+  },
+  mandatoryScroll: {
+    flex: 1,
   },
 });

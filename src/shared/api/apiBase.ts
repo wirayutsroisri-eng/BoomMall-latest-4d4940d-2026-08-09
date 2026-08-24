@@ -1,5 +1,6 @@
 import { NativeModules, Platform } from 'react-native';
 import Constants from 'expo-constants';
+import { shouldUseConfiguredApiUrl } from './apiBasePolicy';
 
 const DEFAULT_PORT = '4000';
 
@@ -57,9 +58,19 @@ export function resolveApiBase(): string {
   const port = process.env.EXPO_PUBLIC_API_PORT?.trim() || DEFAULT_PORT;
   const extra = Constants.expoConfig?.extra as { apiUrl?: string; devApiHost?: string } | undefined;
   const pinHost = process.env.EXPO_PUBLIC_PIN_API_HOST === '1';
-  const fromEnv = (process.env.EXPO_PUBLIC_API_URL || extra?.apiUrl || '').trim();
+  const fromEnv = (
+    process.env.EXPO_PUBLIC_API_BASE_URL ||
+    process.env.EXPO_PUBLIC_API_URL ||
+    extra?.apiUrl ||
+    ''
+  ).trim();
 
-  if (!pinHost && Platform.OS !== 'web' && typeof __DEV__ !== 'undefined' && __DEV__) {
+  if (
+    !shouldUseConfiguredApiUrl(fromEnv, pinHost) &&
+    Platform.OS !== 'web' &&
+    typeof __DEV__ !== 'undefined' &&
+    __DEV__
+  ) {
     const lan = lanDevHost();
     if (lan) {
       if (fromEnv) {

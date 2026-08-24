@@ -9,12 +9,21 @@ import { useModerationStore } from '@/modules/safety/state/moderation-store';
 import { useActivityStore } from '@/modules/account/state/activity-store';
 import { useMusicLibraryStore } from '@/modules/music/state/music-library-store';
 import { useShopActivityStore } from '@/modules/shop/state/shop-activity-store';
+import { useFeedStore } from '@/modules/feed/state/feed-store';
+import { useFollowStore } from '@/modules/social/state/follow-store';
 
 async function runDeleteAccount() {
   await apiDeleteAccount();
+  useFeedStore.getState().switchAccount(null);
+  useFollowStore.getState().reset();
   await useAuthStore.getState().clearSession();
   useLoyaltyStore.getState().deleteAccount();
-  useModerationStore.setState({ blockedUserIds: [], reports: [] });
+  useModerationStore.setState({
+    blockedUserIds: [],
+    hiddenContentIds: [],
+    removedContentIds: [],
+    reports: [],
+  });
   useActivityStore.getState().clearAll();
   useMusicLibraryStore.getState().clearWatchHistory();
   useShopActivityStore.getState().clearBrowsable();

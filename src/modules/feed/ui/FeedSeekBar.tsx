@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -62,7 +62,11 @@ export function FeedSeekBar({
   };
 
   // Keep the thumb in sync with the live progress when not scrubbing.
-  thumbX.value = withTiming(ratioToX(progress), { duration: 80 });
+  useEffect(() => {
+    if (!isInteracting) {
+      thumbX.set(withTiming(ratioToX(progress), { duration: 80 }));
+    }
+  }, [isInteracting, progress, thumbX]);
 
   const thumbStyle = useAnimatedStyle(() => ({
     transform: [
@@ -91,19 +95,19 @@ export function FeedSeekBar({
   const scrubTo = useCallback(
     (x: number) => {
       const ratio = xToRatio(x);
-      thumbX.value = ratioToX(ratio);
+      thumbX.set(ratioToX(ratio));
       onScrub?.(ratio);
     },
-    [onScrub],
+    [onScrub, thumbX],
   );
 
   const commitSeek = useCallback(
     (x: number) => {
       const ratio = xToRatio(x);
-      thumbX.value = ratioToX(ratio);
+      thumbX.set(ratioToX(ratio));
       onSeek?.(ratio);
     },
-    [onSeek],
+    [onSeek, thumbX],
   );
 
   const pan = Gesture.Pan()

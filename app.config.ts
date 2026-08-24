@@ -18,6 +18,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim() ||
     process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID?.trim();
   const googleScheme = googleReversedClientId(googleIosClientId);
+  const apiUrl = (
+    process.env.EXPO_PUBLIC_API_BASE_URL || process.env.EXPO_PUBLIC_API_URL
+  )?.replace(/\/$/, '');
 
   const existingSchemes = (config.ios?.infoPlist?.LSApplicationQueriesSchemes as string[] | undefined) ?? [];
   const querySchemes = Array.from(
@@ -84,7 +87,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ...(typeof config.extra === 'object' && config.extra ? config.extra : {}),
       facebookAppId: facebookAppId || undefined,
       googleIosClientId: googleIosClientId || undefined,
-      apiUrl: process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '') || undefined,
+      apiUrl: apiUrl || undefined,
       devApiHost: process.env.EXPO_PUBLIC_DEV_API_HOST?.trim() || undefined,
     },
   };

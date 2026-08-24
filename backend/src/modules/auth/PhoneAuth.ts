@@ -49,8 +49,8 @@ export function normalizeThaiPhone(input: string): string {
   let national: string | null = null;
   if (digits.startsWith('66') && digits.length === 11) national = digits.slice(2);
   else if (digits.startsWith('0') && digits.length === 10) national = digits.slice(1);
-  else if (digits.length === 9 && digits.startsWith('8')) national = digits;
-  if (!national || !/^8\d{8}$/.test(national)) {
+  else if (digits.length === 9 && /^[689]/.test(digits)) national = digits;
+  if (!national || !/^[689]\d{8}$/.test(national)) {
     throw new AppError('VALIDATION', 'เบอร์โทรไม่ถูกต้อง — ใช้เบอร์มือถือไทย 10 หลัก', 400);
   }
   return `+66${national}`;

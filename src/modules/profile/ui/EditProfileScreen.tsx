@@ -183,7 +183,6 @@ export function EditProfileScreen() {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.back();
     } catch (error) {
-      console.error('Failed to save profile changes:', error);
       Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถบันทึกการเปลี่ยนแปลงโปรไฟล์ได้');
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {

@@ -79,6 +79,8 @@ export type FeedItem = {
   videoUri?: string;
   /** Canonical remote source of truth. Local URIs remain draft/cache only. */
   mediaAssets?: MediaAsset[];
+  /** Server declared media but supplied no durable remote source. */
+  mediaUnavailable?: boolean;
   /** Canonical non-destructive editor composition. */
   editorMedia?: EditorMedia[];
   overlays?: OverlayObject[];
