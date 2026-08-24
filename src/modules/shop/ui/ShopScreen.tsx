@@ -144,7 +144,13 @@ function pad2(n: number) {
   return n < 10 ? `0${n}` : String(n);
 }
 
-export function ShopScreen() {
+export function ShopScreen({
+  embedded = false,
+  onVerticalScroll,
+}: {
+  embedded?: boolean;
+  onVerticalScroll?: (offsetY: number) => void;
+} = {}) {
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<CategoryKey>('all');
@@ -209,7 +215,7 @@ export function ShopScreen() {
   };
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top + 6 }]}>
+    <View style={[styles.root, { paddingTop: insets.top + (embedded ? 10 : 6) }]}>
       {/* Search + Cart */}
       <View style={styles.searchRow}>
         <Pressable style={styles.searchBox} onPress={() => router.push('/search')}>
@@ -247,6 +253,8 @@ export function ShopScreen() {
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: insets.bottom + 110 }}
+        onScroll={(event) => onVerticalScroll?.(event.nativeEvent.contentOffset.y)}
+        scrollEventThrottle={16}
       >
         {/* Quick tools */}
         <ScrollView

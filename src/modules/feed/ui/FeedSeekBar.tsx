@@ -23,6 +23,7 @@ type Props = {
   onScrubStart?: () => void;
   /** Called when the user stops interacting with the bar. */
   onScrubEnd?: () => void;
+  bottomOffset?: number;
 };
 
 function formatTime(seconds: number): string {
@@ -48,6 +49,7 @@ export function FeedSeekBar({
   onSeek,
   onScrubStart,
   onScrubEnd,
+  bottomOffset = 0,
 }: Props) {
   const widthRef = useRef(1);
   const thumbX = useSharedValue(0);
@@ -142,7 +144,7 @@ export function FeedSeekBar({
   const showLabels = duration > 0;
 
   return (
-    <View style={styles.container} pointerEvents="auto">
+    <View style={[styles.container, { bottom: 7 + bottomOffset }]} pointerEvents="auto">
       {showLabels && isInteracting ? (
         <Animated.View style={[styles.timeRow, timeRowStyle]} pointerEvents="none">
           <Text style={styles.timeText}>{formatTime(currentTime)}</Text>

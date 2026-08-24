@@ -28,6 +28,8 @@ import { errorHandler } from './middleware/errorHandler';
 import { chatMediaDir } from './modules/chat/http/media.controller';
 import { legalPublicRouter } from './modules/legal/routes';
 import { mediaAssetRouter } from './modules/media/http/routes';
+import { ensureLocalMediaUploadDirectories, localMediaUploadDir } from './modules/media/storage/LocalMediaStorageProvider';
+import { configuredMediaStorageKind } from './modules/media/storage';
 
 export function createApp() {
   const env = loadEnv();
@@ -47,6 +49,16 @@ export function createApp() {
   app.use(express.urlencoded({ extended: true, limit: '200mb' }));
   app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
   app.use('/media/chat', express.static(chatMediaDir(), { maxAge: '7d', fallthrough: false }));
+  if (configuredMediaStorageKind() === 'local') {
+    ensureLocalMediaUploadDirectories();
+    app.use('/uploads', express.static(localMediaUploadDir(), {
+      fallthrough: false,
+      immutable: true,
+      maxAge: process.env.NODE_ENV === 'production' ? '1y' : '1h',
+      dotfiles: 'deny',
+      index: false,
+    }));
+  }
   app.use('/legal', legalPublicRouter);
 
   app.get('/health', async (_req, res) => {

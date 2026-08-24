@@ -42,6 +42,7 @@ type Props = {
   screenWidth?: number;
   tabCount?: number;
   onCommitTabIndex?: (index: number) => void;
+  onVerticalScroll?: (offsetY: number) => void;
 };
 
 const TABS: Array<{ key: BoardSide; label: string }> = [
@@ -166,7 +167,7 @@ function BoardTile({
         </View>
         <View style={styles.authorRow}>
           <Avatar
-            uri={`https://i.pravatar.cc/150?u=boommall-${item.authorHandle.replace(/^@/, '').toLowerCase()}`}
+            uri={item.authorAvatarUri}
             initial={item.author.slice(0, 1)}
             size={22}
             radius={11}
@@ -201,6 +202,7 @@ export function CommunityBoardList({
   screenWidth,
   tabCount = 1,
   onCommitTabIndex,
+  onVerticalScroll,
 }: Props) {
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
@@ -328,6 +330,9 @@ export function CommunityBoardList({
             paddingBottom: Math.max(insets.bottom, 16) + 96,
           }}
           showsVerticalScrollIndicator={false}
+          scrollEnabled
+          onScroll={(event) => onVerticalScroll?.(event.nativeEvent.contentOffset.y)}
+          scrollEventThrottle={16}
         >
           <View style={styles.masonry}>
             <View style={[styles.masonryCol, { width: tileW, gap }]}>

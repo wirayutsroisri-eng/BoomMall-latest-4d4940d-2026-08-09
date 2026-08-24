@@ -137,11 +137,13 @@ export async function syncFeedPostDelete(postId: string): Promise<boolean> {
 export async function fetchFeedPosts(
   tab?: string,
   geo?: { lat: number; lng: number; radiusKm?: number },
+  options?: { mine?: boolean },
 ): Promise<SocialPostDto[]> {
   const base = getApiBase();
   if (!base) return [];
   const q = new URLSearchParams();
   if (tab) q.set('tab', tab);
+  if (options?.mine) q.set('mine', '1');
   if (geo) {
     q.set('lat', String(geo.lat));
     q.set('lng', String(geo.lng));

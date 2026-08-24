@@ -16,6 +16,7 @@ export type SocialPostDto = {
   authorId: string;
   authorName?: string | null;
   authorHandle?: string | null;
+  authorAvatarUrl?: string | null;
   body: string;
   media: unknown;
   status: string;
@@ -301,7 +302,7 @@ export async function listSocialPosts(
       const authorIds = [...new Set(mapped.map((p) => p.authorId))];
       const profiles = await prisma.userProfile.findMany({
         where: { userId: { in: authorIds } },
-        select: { userId: true, displayName: true, handle: true },
+        select: { userId: true, displayName: true, handle: true, avatarUrl: true },
       });
       const byUser = new Map(profiles.map((p) => [p.userId, p]));
       mapped = mapped.map((p) => {
@@ -310,6 +311,7 @@ export async function listSocialPosts(
           ...p,
           authorName: profile?.displayName ?? p.authorName,
           authorHandle: profile?.handle ?? p.authorHandle,
+          authorAvatarUrl: profile?.avatarUrl ?? p.authorAvatarUrl,
         };
       });
     } catch {

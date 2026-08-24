@@ -1,5 +1,5 @@
-import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { usePathname } from 'expo-router';
@@ -10,6 +10,7 @@ import { useChatStore } from '@/modules/chat/state/chat-store';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
 import { Avatar } from '@/shared/components/Avatar';
 import { colors } from '@/shared/theme/colors';
+import { useMainTabBarStore } from '@/shared/state/main-tab-bar-store';
 
 const LABELS: Record<string, string> = {
   index: 'หน้าแรก',
@@ -34,6 +35,9 @@ export function MainTabBar({ state, descriptors, navigation }: BottomTabBarProps
   const pathname = usePathname();
   const profile = useLoyaltyStore((s) => s.profile);
   const feedTab = useFeedStore((s) => s.tab);
+  const hidden = useMainTabBarStore((s) => s.hidden);
+  const setHidden = useMainTabBarStore((s) => s.setHidden);
+  const visibility = useRef(new Animated.Value(1)).current;
   const onJobs = feedTab === 'board';
   const chatUnread = useChatStore((s) =>
     s.conversations.reduce(
@@ -42,16 +46,44 @@ export function MainTabBar({ state, descriptors, navigation }: BottomTabBarProps
     ),
   );
 
+  useEffect(() => {
+    Animated.timing(visibility, {
+      toValue: hidden ? 0 : 1,
+      duration: hidden ? 150 : 210,
+      useNativeDriver: true,
+    }).start();
+  }, [hidden, visibility]);
+
+  useEffect(() => {
+    setHidden(false);
+  }, [pathname, setHidden]);
+
   if (isChatWindow(pathname)) return null;
 
   return (
-    <View style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+    <Animated.View
+      pointerEvents={hidden ? 'none' : 'auto'}
+      style={[
+        styles.wrap,
+        {
+          height: 44 + Math.max(insets.bottom, 8),
+          paddingBottom: Math.max(insets.bottom, 8),
+          transform: [{
+            translateY: visibility.interpolate({
+              inputRange: [0, 1],
+              outputRange: [44 + Math.max(insets.bottom, 8), 0],
+            }),
+          }],
+        },
+      ]}
+    >
       {state.routes.map((route: (typeof state.routes)[number], index: number) => {
         const focused = state.index === index;
         const { options } = descriptors[route.key];
         const isCreate = route.name === 'create';
 
         const onPress = () => {
+          setHidden(false);
           void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           const event = navigation.emit({
             type: 'tabPress',
@@ -137,12 +169,18 @@ export function MainTabBar({ state, descriptors, navigation }: BottomTabBarProps
           </Pressable>
         );
       })}
-    </View>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 100,
+    elevation: 100,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',

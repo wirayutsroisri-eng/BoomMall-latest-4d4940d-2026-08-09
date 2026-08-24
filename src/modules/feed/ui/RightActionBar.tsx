@@ -27,6 +27,7 @@ type Props = {
   /** Open YouTube-style Listen Mode for this clip's sound */
   onMusic?: () => void;
   musicActive?: boolean;
+  bottomOffset?: number;
 };
 
 function formatCount(n: number) {
@@ -46,6 +47,7 @@ export function RightActionBar({
   likes,
   onMusic,
   musicActive,
+  bottomOffset = 0,
 }: Props) {
   const tipScale = useSharedValue(1);
   const tipStyle = useAnimatedStyle(() => ({ transform: [{ scale: tipScale.value }] }));
@@ -71,7 +73,7 @@ export function RightActionBar({
   };
 
   return (
-    <View style={styles.wrap} pointerEvents="box-none">
+    <View style={[styles.wrap, { bottom: 18 + bottomOffset }]} pointerEvents="box-none">
       {onTip ? (
         <Pressable onPress={handleTip} style={styles.action} hitSlop={10} accessibilityLabel="เหรียญ">
           <Animated.View style={tipStyle}>

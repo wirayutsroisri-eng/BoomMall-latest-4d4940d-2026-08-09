@@ -43,9 +43,13 @@ export type FeedItem = {
   authorHandle: string;
   /** Backend user id — used for matching push + chat targeting. */
   authorId?: string;
+  /** Canonical profile photo returned with the SocialPost author profile. */
+  authorAvatarUri?: string;
   /** แท็บหลักที่คลิปนี้โผล่ (โปรไฟล์ยังรวมทุกเลนของ handle เดียวกัน) */
   lane?: FeedLane;
   caption: string;
+  /** Server publish time; optional for legacy persisted rows. */
+  createdAt?: string;
   location: string;
   /** Optional GPS for Community Board matching (defaults to Chanthaburi on user posts). */
   gps?: { lat: number; lng: number };

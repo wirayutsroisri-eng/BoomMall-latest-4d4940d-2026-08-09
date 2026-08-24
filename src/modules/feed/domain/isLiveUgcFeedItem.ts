@@ -48,7 +48,6 @@ export function keepLiveUgcFeedItems(items: FeedItem[]): FeedItem[] {
 export function keepPersistedFeedItems(items: FeedItem[]): FeedItem[] {
   return items.filter((item) => {
     if (isDemoCatalogFeedItem(item)) return false;
-    if (item.lane === 'board') return true;
-    return isLiveUgcFeedItem(item);
+    return true;
   });
 }

@@ -15,6 +15,7 @@ export type SocialPostDto = {
   authorId: string;
   authorName?: string | null;
   authorHandle?: string | null;
+  authorAvatarUrl?: string | null;
   body: string;
   media: unknown;
   status: string;
@@ -234,9 +235,11 @@ export function socialPostToFeedItem(
     author,
     authorHandle: handle.startsWith('@') ? handle : `@${handle}`,
     authorId: post.authorId,
+    authorAvatarUri: isPortableServerMediaUri(post.authorAvatarUrl) ? post.authorAvatarUrl : undefined,
     lane,
     boardSide,
     caption: post.body || 'โพสต์จาก BoomMall',
+    createdAt: post.createdAt,
     location: post.locationLabel || 'จันทบุรี',
     gps:
       post.lat != null && post.lng != null
@@ -276,7 +279,7 @@ export function socialPostToFeedItem(
 export function mergeFeedItems(remote: FeedItem[], local: FeedItem[]): FeedItem[] {
   const byId = new Map<string, FeedItem>();
   for (const item of remote) {
-    if (isLiveUgcFeedItem(item)) byId.set(item.id, item);
+    if (!isDemoCatalogFeedItem(item)) byId.set(item.id, item);
   }
   for (const item of local) {
     if (isDemoCatalogFeedItem(item)) continue;

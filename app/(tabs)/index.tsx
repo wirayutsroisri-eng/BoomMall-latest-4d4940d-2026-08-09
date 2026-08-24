@@ -1,6 +1,6 @@
 import React from 'react';
-import { HomeFeedScreen } from '@/modules/feed/ui/HomeFeedScreen';
+import { MainChannelsScreen } from '@/modules/main-channels/ui/MainChannelsScreen';
 
 export default function HomeTab() {
-  return <HomeFeedScreen />;
+  return <MainChannelsScreen />;
 }

@@ -72,3 +72,6 @@ coverage/
 .npm
 .eslintcache
 .stylelintcache
+
+# ===== Backend local media (development/test only) =====
+backend/uploads/

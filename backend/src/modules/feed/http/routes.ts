@@ -41,7 +41,12 @@ feedAppRouter.get('/posts', async (req: UserAuthedRequest, res, next) => {
     const lat = req.query.lat != null ? Number(req.query.lat) : undefined;
     const lng = req.query.lng != null ? Number(req.query.lng) : undefined;
     const radiusKm = req.query.radiusKm != null ? Number(req.query.radiusKm) : 10;
+    const mine = String(req.query.mine ?? '') === '1';
     let authorIds: string[] | undefined;
+    if (mine) {
+      if (!req.user?.sub) throw new AppError('UNAUTHORIZED', 'Authentication required', 401);
+      authorIds = [req.user.sub];
+    }
     if (tab === 'following' && req.user?.sub) {
       const following = await listFollowing(req.user.sub);
       authorIds = following.map((f) => f.followingId);

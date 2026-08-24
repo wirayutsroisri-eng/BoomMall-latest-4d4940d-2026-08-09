@@ -11,6 +11,8 @@ import { bootstrapSellerPayoutFromEnv } from './modules/finance/services/PayoutG
 import { startPromotionExpiryJob } from './modules/ecommerce/ProductPromotionService';
 import { startEscrowAutoCompleteJob } from './modules/finance';
 import { ensureAppleReviewAccount, APPLE_REVIEW_EMAIL } from './modules/auth/appleReviewAccount';
+import { configuredMediaStorageKind } from './modules/media/storage';
+import { localMediaUploadDir } from './modules/media/storage/LocalMediaStorageProvider';
 
 async function main() {
   const env = loadEnv();
@@ -33,6 +35,9 @@ async function main() {
     console.log(`BoomMall API listening on ${env.hostBind}:${env.port}`);
     console.log(`Domains: auth-profile | ecommerce-merchant | chat-realtime | content-feed`);
     console.log(`Chat Socket.io path: ${chat.path}`);
+    if (configuredMediaStorageKind() === 'local') {
+      console.log(`Local media directory: ${localMediaUploadDir()}`);
+    }
     console.log(
       `DB pool connection_limit=${pool.connectionLimit} pool_timeout=${pool.poolTimeoutSec}s sslmode=${pool.sslMode}`,
     );

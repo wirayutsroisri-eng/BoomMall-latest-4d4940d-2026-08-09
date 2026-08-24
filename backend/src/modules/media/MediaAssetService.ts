@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import type { Request } from 'express';
 import { prisma } from '../../lib/prisma';
 import { AppError } from '../../lib/errors';
-import { UploadService } from '../chat/services/upload.service';
 import type { PublishedMediaAsset } from './mediaAssetContract';
+import { mediaStorageProvider } from './storage';
+import { LocalMediaStorageProvider } from './storage/LocalMediaStorageProvider';
 
 type AssetInput = {
   type: 'image' | 'video';
@@ -19,7 +21,9 @@ function positiveInteger(value: number | undefined) {
 }
 
 export function mediaAssetMaxBytes(type: 'image' | 'video') {
-  return type === 'image' ? 25 * 1024 * 1024 : 1024 * 1024 * 1024;
+  const fallback = type === 'image' ? 25 * 1024 * 1024 : 1024 * 1024 * 1024;
+  const configured = Number(process.env[type === 'image' ? 'MEDIA_IMAGE_MAX_BYTES' : 'MEDIA_VIDEO_MAX_BYTES']);
+  return Number.isSafeInteger(configured) && configured > 0 ? configured : fallback;
 }
 
 function validateInput(input: AssetInput) {
@@ -67,13 +71,13 @@ function dto(row: {
 export async function createMediaAssetUploadSession(ownerId: string, input: AssetInput) {
   const { mime, fileSize } = validateInput(input);
   const id = randomUUID();
-  const signed = await UploadService.generateMediaAssetUploadUrl(
+  const signed = await mediaStorageProvider().createUploadTarget({
     ownerId,
-    id,
-    input.filename,
-    mime,
+    assetId: id,
+    filename: input.filename,
+    mimeType: mime,
     fileSize,
-  );
+  });
   const row = await prisma.mediaAsset.create({
     data: {
       id,
@@ -98,7 +102,7 @@ export async function confirmMediaAsset(ownerId: string, assetId: string) {
   if (!existing || existing.ownerId !== ownerId) throw new AppError('MEDIA_ASSET_NOT_FOUND', 'media asset not found', 404);
   if (existing.status === 'READY') return dto(existing);
   try {
-    const uploaded = await UploadService.assertObjectUploaded(existing.storageKey);
+    const uploaded = await mediaStorageProvider().inspect(existing.storageKey);
     const actualSize = uploaded.contentLength;
     const expectedType = existing.mimeType.trim().toLowerCase();
     const actualType = uploaded.contentType?.split(';')[0]?.trim().toLowerCase();
@@ -127,6 +131,27 @@ export async function confirmMediaAsset(ownerId: string, assetId: string) {
       cause: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+export async function receiveLocalMediaAssetUpload(assetId: string, token: string, request: Request) {
+  const provider = mediaStorageProvider();
+  if (!(provider instanceof LocalMediaStorageProvider)) {
+    throw new AppError('LOCAL_MEDIA_STORAGE_DISABLED', 'Local media upload is disabled', 404);
+  }
+  const existing = await prisma.mediaAsset.findUnique({ where: { id: assetId } });
+  if (!existing || existing.status !== 'UPLOADING' || existing.fileSize == null) {
+    throw new AppError('MEDIA_ASSET_NOT_FOUND', 'Upload session was not found', 404);
+  }
+  const type = existing.type === 'VIDEO' ? 'video' : 'image';
+  await provider.receiveUpload({
+    request,
+    assetId,
+    storageKey: existing.storageKey,
+    mimeType: existing.mimeType,
+    fileSize: Number(existing.fileSize),
+    token,
+    maxBytes: mediaAssetMaxBytes(type),
+  });
 }
 
 export async function readyMediaAssetsForPublish(ownerId: string, ids: string[]) {

@@ -12,6 +12,8 @@ type Props = {
   mediaIds?: string[];
   overlays?: OverlayObject[];
   media?: EditorMedia[];
+  /** Feed-only adaptive option. Existing full-screen callers keep side-by-side by default. */
+  twoImageLayout?: 'side-by-side' | 'stacked';
 };
 
 type Tile = { index: number; style: object };
@@ -19,11 +21,17 @@ type Tile = { index: number; style: object };
 const GAP = 2;
 
 /** Facebook-style overview: at most four mounted images regardless of album size. */
-export const MultiImageGrid = memo(function MultiImageGrid({ uris, width, height, onPress, mediaIds, overlays = [], media }: Props) {
+export const MultiImageGrid = memo(function MultiImageGrid({ uris, width, height, onPress, mediaIds, overlays = [], media, twoImageLayout = 'side-by-side' }: Props) {
   const tiles = useMemo<Tile[]>(() => {
     const halfW = (width - GAP) / 2;
     const halfH = (height - GAP) / 2;
     if (uris.length === 2) {
+      if (twoImageLayout === 'stacked') {
+        return [
+          { index: 0, style: { left: 0, top: 0, width, height: halfH } },
+          { index: 1, style: { left: 0, top: halfH + GAP, width, height: halfH } },
+        ];
+      }
       return [
         { index: 0, style: { left: 0, top: 0, width: halfW, height } },
         { index: 1, style: { left: halfW + GAP, top: 0, width: halfW, height } },
@@ -45,7 +53,7 @@ export const MultiImageGrid = memo(function MultiImageGrid({ uris, width, height
         height: halfH,
       },
     }));
-  }, [height, uris, width]);
+  }, [height, twoImageLayout, uris, width]);
 
   const remaining = Math.max(0, uris.length - 4);
 

@@ -68,6 +68,9 @@ type Props = {
   pagerX: SharedValue<number>;
   onOpenProfile?: () => void;
   onCommitTabIndex?: (index: number) => void;
+  bottomMetaInset?: number;
+  bottomActionsInset?: number;
+  bottomSeekInset?: number;
 };
 
 /**
@@ -96,6 +99,9 @@ export function FeedReelCard({
   pagerX,
   onOpenProfile,
   onCommitTabIndex,
+  bottomMetaInset = 0,
+  bottomActionsInset = 0,
+  bottomSeekInset = 0,
 }: Props) {
   const gallery = useMemo(() => galleryOf(item), [item]);
   const multi = gallery.length > 1;
@@ -140,7 +146,8 @@ export function FeedReelCard({
   const authorName = item.isUserPost ? myProfile.displayName || item.author : item.author;
   const avatarUri = item.isUserPost
     ? myProfile.avatarUri
-    : `https://i.pravatar.cc/150?u=boommall-${authorKey.toLowerCase()}`;
+    : item.authorAvatarUri
+      ?? `https://i.pravatar.cc/150?u=boommall-${authorKey.toLowerCase()}`;
   const playFromFeedMusic = useMusicPlayerStore((s) => s.playFromFeedMusic);
   const musicPlaying = useMusicPlayerStore((s) => s.playing);
   const musicTrackTitle = useMusicPlayerStore((s) => s.track?.title);
@@ -448,6 +455,7 @@ export function FeedReelCard({
   };
 
   const horizontalSwipe = Gesture.Pan()
+    .enabled(enableProfileSwipe || enableTabSwipeLeft)
     // The pager gesture wraps the whole card, including the action buttons.
     // On iOS its native recognizer must not cancel a Pressable's touch stream.
     .cancelsTouchesInView(false)
@@ -576,7 +584,7 @@ export function FeedReelCard({
         </Animated.View>
 
         {!chromeHidden ? (
-          <View style={styles.meta} pointerEvents="box-none">
+          <View style={[styles.meta, { bottom: 28 + bottomMetaInset }]} pointerEvents="box-none">
             {item.isLive ? (
               <View style={styles.liveBadge}>
                 <View style={styles.liveDot} />
@@ -603,31 +611,40 @@ export function FeedReelCard({
               </Pressable>
             ) : null}
 
-            <Pressable
-              style={styles.authorRow}
-              onPress={onAvatar}
-              onLongPress={
-                onCall
-                  ? () => {
-                      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                      onCall();
-                    }
-                  : undefined
-              }
-              hitSlop={6}
-            >
-              <Avatar
-                uri={avatarUri}
-                initial={authorName.slice(0, 1)}
-                size={40}
-                radius={18}
-                borderColor="#fff"
-                borderWidth={1.5}
-              />
-              <Text style={styles.author} numberOfLines={1}>
-                {authorName}
-              </Text>
-            </Pressable>
+            <View style={styles.authorRow}>
+              <Pressable
+                onPress={onAvatar}
+                onLongPress={onCall ? () => {
+                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  onCall();
+                } : undefined}
+                accessibilityRole="button"
+                accessibilityLabel={`ดูโปรไฟล์ ${authorName}`}
+              >
+                <Avatar
+                  uri={avatarUri}
+                  initial={authorName.slice(0, 1)}
+                  size={40}
+                  radius={18}
+                  borderColor="#fff"
+                  borderWidth={1.5}
+                />
+              </Pressable>
+              <Pressable
+                onPress={onAvatar}
+                onLongPress={onCall ? () => {
+                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  onCall();
+                } : undefined}
+                style={styles.authorNameButton}
+                accessibilityRole="button"
+                accessibilityLabel={`ดูโปรไฟล์ ${authorName}`}
+              >
+                <Text style={styles.author} numberOfLines={1}>
+                  {authorName}
+                </Text>
+              </Pressable>
+            </View>
 
             <ExpandableCaption
               key={item.id}
@@ -669,6 +686,7 @@ export function FeedReelCard({
             likes={likes ?? item.likes}
             onMusic={openListenMode}
             musicActive={listeningNow}
+            bottomOffset={bottomActionsInset}
           />
         ) : null}
 
@@ -695,6 +713,7 @@ export function FeedReelCard({
           onSeek={handleSeek}
           onScrubStart={handleScrubStart}
           onScrubEnd={handleScrubEnd}
+          bottomOffset={bottomSeekInset}
         />
       ) : null}
     </View>
@@ -840,6 +859,9 @@ const styles = StyleSheet.create({
     fontSize: 18,
     textShadowColor: 'rgba(0,0,0,0.45)',
     textShadowRadius: 4,
+  },
+  authorNameButton: {
+    flexShrink: 1,
   },
   caption: {
     color: colors.text.onDark,

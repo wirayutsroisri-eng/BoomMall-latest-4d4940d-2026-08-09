@@ -80,6 +80,7 @@ export function ProfileScreen() {
         isSelf: true,
         ownerUserId: userId,
         displayName: profile.displayName,
+        requireMedia: false,
       }),
     [items, myHandle, profile.displayName, userId],
   );

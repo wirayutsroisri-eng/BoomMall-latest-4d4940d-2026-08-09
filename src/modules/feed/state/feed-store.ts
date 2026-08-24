@@ -10,7 +10,7 @@ import { fetchFeedPosts, publishSocialPost, syncFeedComment, fetchFeedComments, 
 import type { SocialCommentDto } from '@/modules/feed/data/feedEngageApi';
 import { mergeFeedItems, socialCommentToFeedComment, socialPostToFeedItem } from '@/modules/feed/data/mapSocialPost';
 import { sanitizeMusicTitle, stripFakeMusicCaption } from '@/modules/feed/domain/feedMusic';
-import { isLiveUgcFeedItem, keepPersistedFeedItems } from '@/modules/feed/domain/isLiveUgcFeedItem';
+import { isDemoCatalogFeedItem, isLiveUgcFeedItem, keepPersistedFeedItems } from '@/modules/feed/domain/isLiveUgcFeedItem';
 import { uploadFeedMedia } from '@/modules/feed/data/uploadFeedMedia';
 import { persistCreateMedia } from '@/modules/create/data/persistCreateMedia';
 import {
@@ -251,6 +251,7 @@ export const useFeedStore = create<FeedState>()(
       lane: isJobPost ? 'board' : 'foryou',
       boardSide,
       caption,
+      createdAt: new Date().toISOString(),
       location: 'จันทบุรี',
       gps,
       searchRadius,
@@ -814,8 +815,12 @@ export const useFeedStore = create<FeedState>()(
   closeCreatorProfile: () => set({ activeCreatorHandle: null, activeCreatorFeedId: null }),
   hydrateFromServer: async () => {
     if (!useFeedStore.persist.hasHydrated()) return;
-    const rows = await fetchFeedPosts();
     const auth = useAuthStore.getState().user;
+    const [feedRows, ownRows] = await Promise.all([
+      fetchFeedPosts(),
+      auth?.id ? fetchFeedPosts(undefined, undefined, { mine: true }) : Promise.resolve([]),
+    ]);
+    const rows = [...new Map([...feedRows, ...ownRows].map((row) => [row.id, row])).values()];
     const profileName = useLoyaltyStore.getState().profile.displayName.trim();
     const remote = rows
       .map((row) => {
@@ -826,7 +831,7 @@ export const useFeedStore = create<FeedState>()(
           author: item.isUserPost && profileName ? profileName : item.author,
         };
       })
-      .filter(isLiveUgcFeedItem);
+      .filter((item) => !isDemoCatalogFeedItem(item));
     const local = keepPersistedFeedItems(get().items);
     if (!remote.length && local.length === get().items.length) return;
     set({ items: mergeFeedItems(remote, local) });

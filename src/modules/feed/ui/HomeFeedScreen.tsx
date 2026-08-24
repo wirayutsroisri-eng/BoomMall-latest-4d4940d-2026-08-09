@@ -64,10 +64,19 @@ function openCreatorRoute(handle: string, feedId?: string) {
   router.push(`/creator/${encodeURIComponent(h)}${q}`);
 }
 
-export function HomeFeedScreen() {
+export function HomeFeedScreen({
+  channelEmbedded = false,
+  channelActive = true,
+  renderMediaViewer = true,
+}: {
+  channelEmbedded?: boolean;
+  channelActive?: boolean;
+  renderMediaViewer?: boolean;
+} = {}) {
   const { width: screenWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const feedFocused = useIsFocused();
+  const routeFocused = useIsFocused();
+  const feedFocused = routeFocused && channelActive;
   const tab = useFeedStore((s) => s.tab);
   const allItems = useFeedStore((s) => s.items);
   const followingMap = useFollowStore((s) => s.following);
@@ -93,7 +102,9 @@ export function HomeFeedScreen() {
   const [menuItem, setMenuItem] = useState<FeedItem | null>(null);
   const [shareItem, setShareItem] = useState<FeedItem | null>(null);
   const [loginOpen, setLoginOpen] = useState(false);
-  const onBoard = tab === 'board';
+  const laneOrder = useMemo<FeedTab[]>(() => channelEmbedded ? ['foryou'] : TAB_ORDER, [channelEmbedded]);
+  const effectiveTab: FeedTab = channelEmbedded ? 'foryou' : tab;
+  const onBoard = !channelEmbedded && tab === 'board';
   /** Persist scroll position per tab so switching tabs retains the active item. */
   const activeItemByTabRef = useRef<Partial<Record<FeedTab, string | null>>>({});
   const blockedUserIds = useModerationStore((s) => s.blockedUserIds);
@@ -114,8 +125,8 @@ export function HomeFeedScreen() {
   const commentsSheetRef = useRef<BottomSheetModal>(null);
   const activeIndexRef = useRef(0);
   const listRefs = useRef<Partial<Record<FeedTab, FlatList<FeedItem> | null>>>({});
-  const reelTab = onBoard ? 'foryou' : tab;
-  const tabIndex = Math.max(0, TAB_ORDER.indexOf(tab));
+  const reelTab = onBoard ? 'foryou' : effectiveTab;
+  const tabIndex = Math.max(0, laneOrder.indexOf(effectiveTab));
   const pagerX = useSharedValue(-tabIndex * screenWidth);
 
   const promotedMasters = useInventoryStore((s) => s.masters);
@@ -128,7 +139,7 @@ export function HomeFeedScreen() {
     const blocked = new Set(blockedUserIds.map((id) => id.toLowerCase()));
     const suppressed = new Set([...hiddenContentIds, ...removedContentIds]);
     const map = {} as Record<FeedTab, FeedItem[]>;
-    for (const t of TAB_ORDER) {
+    for (const t of laneOrder) {
       const lane = selectFeedByTab(allItems, t, followingMap, CHANTHABURI, 10, myHandle).filter((item) => {
         if (suppressed.has(item.id)) return false;
         const handle = item.authorHandle.replace(/^@/, '').toLowerCase();
@@ -137,7 +148,7 @@ export function HomeFeedScreen() {
       map[t] = t === 'foryou' ? pinPromotedFeedItems(lane, promotedIds) : lane;
     }
     return map;
-  }, [allItems, followingMap, myHandle, blockedUserIds, hiddenContentIds, removedContentIds, promotedIds]);
+  }, [allItems, followingMap, myHandle, blockedUserIds, hiddenContentIds, removedContentIds, promotedIds, laneOrder]);
 
   const items = feedsByTab[reelTab] ?? [];
   const boardItems = feedsByTab.board ?? [];
@@ -161,7 +172,7 @@ export function HomeFeedScreen() {
 
   const pagerStyle = useAnimatedStyle(() => ({
     flex: 1,
-    width: screenWidth * TAB_ORDER.length,
+    width: screenWidth * laneOrder.length,
     flexDirection: 'row',
     transform: [{ translateX: pagerX.value }],
   }));
@@ -178,37 +189,37 @@ export function HomeFeedScreen() {
 
   useEffect(() => {
     // Restore the previously active item for this tab (persisted across tab switches).
-    const restored = activeItemByTabRef.current[tab];
+    const restored = activeItemByTabRef.current[effectiveTab];
     const candidate = restored && items.find((i) => i.id === restored) ? restored : items[0]?.id ?? null;
     setActiveItemId(candidate);
     activeIndexRef.current = candidate ? items.findIndex((i) => i.id === candidate) : 0;
-  }, [tab, items]);
+  }, [effectiveTab, items]);
 
   // Save the active item whenever it changes, so we can restore it on tab switch.
   useEffect(() => {
     if (activeItemId) {
-      activeItemByTabRef.current[tab] = activeItemId;
+      activeItemByTabRef.current[effectiveTab] = activeItemId;
     }
-  }, [activeItemId, tab]);
+  }, [activeItemId, effectiveTab]);
 
   // Synchronize playbackTab and playbackActiveItemId immediately when tab or activeItemId changes (Zero-Delay Playback)
   useEffect(() => {
-    setPlaybackTab(tab);
+    setPlaybackTab(effectiveTab);
     setPlaybackActiveItemId(activeItemId);
-  }, [tab, activeItemId]);
+  }, [effectiveTab, activeItemId]);
 
   useEffect(() => {
-    const i = Math.max(0, TAB_ORDER.indexOf(tab));
+    const i = Math.max(0, laneOrder.indexOf(effectiveTab));
     pagerX.value = -i * screenWidth;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- width sync only
-  }, [screenWidth]);
+  }, [screenWidth, effectiveTab, laneOrder, pagerX]);
 
-  const activeTabRef = useRef(tab);
-  activeTabRef.current = tab;
+  const activeTabRef = useRef(effectiveTab);
+  activeTabRef.current = effectiveTab;
 
   const onViewableItemsChangedByLane = useMemo(() => {
     const handlers = {} as Record<FeedTab, (info: { viewableItems: ViewToken[] }) => void>;
-    for (const laneTab of TAB_ORDER) {
+    for (const laneTab of laneOrder) {
       if (laneTab === 'board') continue;
       handlers[laneTab] = ({ viewableItems }) => {
         if (activeTabRef.current !== laneTab) return;
@@ -220,7 +231,7 @@ export function HomeFeedScreen() {
       };
     }
     return handlers;
-  }, []);
+  }, [laneOrder]);
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 80 }).current;
 
@@ -271,12 +282,12 @@ export function HomeFeedScreen() {
 
   const commitTabIndex = useCallback(
     (index: number) => {
-      const next = TAB_ORDER[index];
+      const next = laneOrder[index];
       if (!next || next === tab) return;
       void Haptics.selectionAsync();
       setTab(next);
     },
-    [setTab, tab],
+    [laneOrder, setTab, tab],
   );
 
   useEffect(() => {
@@ -328,18 +339,22 @@ export function HomeFeedScreen() {
               }
             : undefined
         }
-        enableProfileSwipe={laneTab === 'foryou' && !item.isUserPost}
-        enableTabSwipeLeft={laneTab !== 'foryou'}
+        enableProfileSwipe={!channelEmbedded && laneTab === 'foryou' && !item.isUserPost}
+        enableTabSwipeLeft={!channelEmbedded && laneTab !== 'foryou'}
         screenWidth={screenWidth}
-        tabCount={TAB_ORDER.length}
+        tabCount={laneOrder.length}
         pagerX={pagerX}
         onOpenProfile={() => openProfile(item)}
         onCommitTabIndex={commitTabIndex}
+        bottomMetaInset={channelEmbedded ? 40 : 0}
+        bottomActionsInset={channelEmbedded ? 40 : 0}
+        bottomSeekInset={channelEmbedded ? 35 : 0}
       />
     ),
     [
       playbackActiveItemId,
       playbackTab,
+      channelEmbedded,
       commitTabIndex,
       likeClip,
       openAuthor,
@@ -348,6 +363,7 @@ export function HomeFeedScreen() {
       openProduct,
       openProfile,
       pagerX,
+      laneOrder.length,
       promotedMasters,
       screenWidth,
       setActive,
@@ -357,11 +373,14 @@ export function HomeFeedScreen() {
   );
 
   return (
-    <View style={[styles.root, onBoard && styles.rootBoard]} onLayout={onLayout}>
+    <View
+      style={[styles.root, channelEmbedded && styles.rootEmbedded, onBoard && styles.rootBoard]}
+      onLayout={onLayout}
+    >
       <StatusBar style={onBoard ? 'dark' : 'light'} />
       <View style={[styles.feedClip, onBoard && styles.feedClipBoard]}>
         <Animated.View style={pagerStyle}>
-          {TAB_ORDER.map((laneTab) => {
+          {laneOrder.map((laneTab) => {
             if (laneTab === 'board') {
               return (
                 <View key={laneTab} style={{ width: screenWidth, flex: 1 }}>
@@ -372,7 +391,7 @@ export function HomeFeedScreen() {
                       onOpenPost={openCommentsSheet}
                       pagerX={pagerX}
                       screenWidth={screenWidth}
-                      tabCount={TAB_ORDER.length}
+                      tabCount={laneOrder.length}
                       onCommitTabIndex={commitTabIndex}
                     />
                   ) : null}
@@ -424,11 +443,11 @@ export function HomeFeedScreen() {
           })}
         </Animated.View>
 
-        {(!chromeHidden || onBoard) ? (
+        {!channelEmbedded && (!chromeHidden || onBoard) ? (
           <FeedHeader
             tab={tab}
             onChangeTab={(next) => {
-              const i = TAB_ORDER.indexOf(next);
+              const i = laneOrder.indexOf(next);
               if (i < 0 || next === tab) return;
               // Header taps follow the same rule as swipes: animate the pure
               // viewport first, then commit active/focus state after 100% snap.
@@ -553,7 +572,7 @@ export function HomeFeedScreen() {
 
       <MatchingNotifyBanner />
       <SellerNotifyBanner />
-      <MediaViewer />
+      {renderMediaViewer ? <MediaViewer /> : null}
     </View>
   );
 }
@@ -566,6 +585,9 @@ const styles = StyleSheet.create({
   },
   rootBoard: {
     backgroundColor: colors.surface.canvas,
+  },
+  rootEmbedded: {
+    transform: [{ translateY: -40 }],
   },
   feedClip: {
     flex: 1,

@@ -83,6 +83,7 @@ export function ProfileFeedScreen({ handle, startId }: Props) {
       isSelf,
       ownerUserId: isSelf ? userId : undefined,
       displayName: isSelf ? profile.displayName : undefined,
+      requireMedia: false,
     }).filter((item) => !suppressed.has(item.id));
     if (!isSelf || !profile.displayName.trim()) return built;
     /** ให้ชื่อบนคลิปตรงกับชื่อโปรไฟล์เสมอ */
