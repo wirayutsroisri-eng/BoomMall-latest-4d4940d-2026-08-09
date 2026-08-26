@@ -21,14 +21,32 @@ function optInt(name: string, fallback: number): number {
   return Math.trunc(n);
 }
 
+export function snowflakeNodeId(): number {
+  const raw = process.env.SNOWFLAKE_NODE_ID?.trim();
+  if (!raw) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('Missing required env: SNOWFLAKE_NODE_ID');
+    }
+    return 0;
+  }
+  if (!/^\d+$/.test(raw)) {
+    throw new Error(`Invalid SNOWFLAKE_NODE_ID=${raw}; expected an integer from 0 to 1023`);
+  }
+  const nodeId = Number(raw);
+  if (!Number.isSafeInteger(nodeId) || nodeId < 0 || nodeId > 1023) {
+    throw new Error(`Invalid SNOWFLAKE_NODE_ID=${raw}; expected an integer from 0 to 1023`);
+  }
+  return nodeId;
+}
+
 export type AppEnv = {
   port: number;
   /** Listen address — 0.0.0.0 so a physical iPhone on LAN can reach the API */
   hostBind: string;
   adminApiKey: string;
   corsOrigin: string[];
-  initialTreasuryMint: bigint;
   databaseUrl: string;
+  snowflakeNodeId: number;
   redisUrl: string | null;
   chatFlushIntervalMs: number;
   chatSocketPath: string;
@@ -65,6 +83,7 @@ export function buildDatabaseUrl(): string {
 
 function enrichDatabaseUrl(url: string): string {
   const u = new URL(url);
+  const nodeId = snowflakeNodeId();
 
   const connectionLimit = String(optInt('DATABASE_POOL_SIZE', optInt('PRISMA_CONNECTION_LIMIT', 10)));
   const poolTimeout = String(optInt('DATABASE_POOL_TIMEOUT', 20));
@@ -83,6 +102,14 @@ function enrichDatabaseUrl(url: string): string {
   if (!u.searchParams.has('sslmode')) {
     u.searchParams.set('sslmode', sslMode);
   }
+
+  // Pass the Node.js setting into every PostgreSQL session opened by Prisma.
+  const existingOptions = u.searchParams.get('options')?.trim();
+  const snowflakeOption = `-c app.snowflake_node_id=${nodeId}`;
+  u.searchParams.set(
+    'options',
+    existingOptions ? `${existingOptions} ${snowflakeOption}` : snowflakeOption,
+  );
 
   const rootCert = process.env.DATABASE_SSL_ROOT_CERT;
   if (rootCert && !u.searchParams.has('sslrootcert')) {
@@ -117,8 +144,8 @@ export function loadEnv(): AppEnv {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
-    initialTreasuryMint: BigInt(process.env.INITIAL_TREASURY_MINT ?? '100000'),
     databaseUrl,
+    snowflakeNodeId: snowflakeNodeId(),
     redisUrl: process.env.REDIS_URL?.trim() || null,
     chatFlushIntervalMs: optInt('CHAT_FLUSH_INTERVAL_MS', 2000),
     chatSocketPath: process.env.CHAT_SOCKET_PATH?.trim() || '/socket.io/chat',

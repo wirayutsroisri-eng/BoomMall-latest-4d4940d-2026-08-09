@@ -10,9 +10,13 @@ import { prisma } from '../../lib/prisma';
 import { AppError } from '../../lib/errors';
 import { attachMediaAssetsToPost, readyMediaAssetsForPublish } from '../media/MediaAssetService';
 import { assertPublishMediaContract, buildCanonicalPostMedia } from '../media/mediaAssetContract';
+import { mediaStorageProvider } from '../media/storage';
+import { currentMediaUrl, rewriteMediaUrls } from '../media/publicMediaUrl';
+import { snowflakeIdForApi } from '../../config/snowflake';
 
 export type SocialPostDto = {
   id: string;
+  snowflakeId?: string;
   authorId: string;
   authorName?: string | null;
   authorHandle?: string | null;
@@ -32,7 +36,26 @@ export type SocialPostDto = {
   lane: string;
   createdAt: string;
   liked?: boolean;
+  saved?: boolean;
 };
+
+export type SecondhandListingStatus = 'ACTIVE' | 'RESERVED' | 'SOLD' | 'HIDDEN' | 'REMOVED' | 'EXPIRED';
+
+export async function updateSecondhandListingStatus(postId: string, authorId: string, status: SecondhandListingStatus) {
+  const allowed: SecondhandListingStatus[] = ['ACTIVE', 'RESERVED', 'SOLD', 'HIDDEN', 'REMOVED', 'EXPIRED'];
+  if (!allowed.includes(status)) throw new AppError('VALIDATION', 'invalid listing status', 400);
+  if (await prismaReady()) {
+    const existing = await prisma.socialPost.findUnique({ where: { id: postId } });
+    if (!existing || existing.authorId !== authorId) return null;
+    return mapPost(await prisma.socialPost.update({ where: { id: postId }, data: { status } }));
+  }
+  const store = readStore();
+  const index = store.posts.findIndex((post) => post.id === postId && post.authorId === authorId);
+  if (index < 0) return null;
+  store.posts[index] = { ...store.posts[index]!, status };
+  writeStore(store);
+  return store.posts[index]!;
+}
 
 type Store = { posts: SocialPostDto[] };
 const DATA_FILE = path.join(process.cwd(), 'data', 'social-posts.json');
@@ -237,6 +260,26 @@ export async function deleteSocialPost(postId: string, authorId: string): Promis
       where: { id },
       data: { status: 'REMOVED' },
     });
+    const assets = (await prisma.mediaAsset?.findMany({
+      where: { postId: id, storyId: null },
+      select: { id: true, storageKey: true },
+    })) ?? [];
+    const removedAssetIds: string[] = [];
+    for (const asset of assets) {
+      try {
+        await mediaStorageProvider().remove(asset.storageKey);
+        removedAssetIds.push(asset.id);
+      } catch (error) {
+        console.error('[MEDIA_CLEANUP_ERROR]', {
+          postId: id,
+          storageKey: asset.storageKey,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    if (removedAssetIds.length) {
+      await prisma.mediaAsset?.deleteMany({ where: { id: { in: removedAssetIds }, postId: id, storyId: null } });
+    }
     return true;
   }
 
@@ -270,10 +313,16 @@ export async function listSocialPosts(
     nearby?: { lat: number; lng: number; radiusKm?: number };
     lane?: string;
     viewerId?: string;
+    excludeIds?: string[];
   },
 ): Promise<SocialPostDto[]> {
   const take = Math.min(limit, 100);
   let likedIds = new Set<string>();
+  let savedIds = new Set<string>();
+  let hiddenIds = new Set<string>();
+  let blockedCreatorIds = new Set<string>();
+  const tagInterest = new Map<string, number>();
+  const creatorInterest = new Map<string, number>();
   if (opts?.viewerId && (await prismaReady())) {
     try {
       const likes = await prisma.socialLike.findMany({
@@ -285,6 +334,78 @@ export async function listSocialPosts(
     } catch {
       likedIds = new Set();
     }
+    try {
+      const actions = await prisma.analyticsEvent.findMany({
+        where: {
+          userId: opts.viewerId,
+          entityType: 'POST',
+          name: { in: ['CONTENT_SAVE', 'CONTENT_UNSAVE', 'CONTENT_HIDE', 'CONTENT_UNHIDE'] },
+        },
+        select: { name: true, entityId: true },
+        orderBy: { createdAt: 'desc' },
+        take: 1000,
+      });
+      const saveState = new Map<string, boolean>();
+      const hideState = new Map<string, boolean>();
+      for (const action of actions) {
+        if (!action.entityId) continue;
+        if ((action.name === 'CONTENT_SAVE' || action.name === 'CONTENT_UNSAVE') && !saveState.has(action.entityId)) {
+          saveState.set(action.entityId, action.name === 'CONTENT_SAVE');
+        }
+        if ((action.name === 'CONTENT_HIDE' || action.name === 'CONTENT_UNHIDE') && !hideState.has(action.entityId)) {
+          hideState.set(action.entityId, action.name === 'CONTENT_HIDE');
+        }
+      }
+      savedIds = new Set([...saveState].filter(([, saved]) => saved).map(([id]) => id));
+      hiddenIds = new Set([...hideState].filter(([, hidden]) => hidden).map(([id]) => id));
+    } catch {
+      savedIds = new Set();
+      hiddenIds = new Set();
+    }
+    try {
+      const blocks = await prisma.analyticsEvent.findMany({
+        where: {
+          userId: opts.viewerId,
+          entityType: 'USER',
+          name: { in: ['CONTENT_BLOCK_USER', 'CONTENT_UNBLOCK_USER'] },
+        },
+        select: { name: true, entityId: true },
+        orderBy: { createdAt: 'desc' },
+        take: 500,
+      });
+      const state = new Map<string, boolean>();
+      for (const action of blocks) {
+        if (!action.entityId || state.has(action.entityId)) continue;
+        state.set(action.entityId, action.name === 'CONTENT_BLOCK_USER');
+      }
+      blockedCreatorIds = new Set([...state].filter(([, blocked]) => blocked).map(([id]) => id));
+    } catch {
+      blockedCreatorIds = new Set();
+    }
+    try {
+      const preferences = await prisma.analyticsEvent.findMany({
+        where: {
+          userId: opts.viewerId,
+          name: { in: ['CONTENT_INTERESTED', 'CONTENT_NOT_INTERESTED'] },
+          entityType: 'POST',
+        },
+        select: { name: true, payloadJson: true },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+      });
+      for (const event of preferences) {
+        const payload = event.payloadJson && typeof event.payloadJson === 'object' && !Array.isArray(event.payloadJson)
+          ? event.payloadJson as Record<string, unknown>
+          : {};
+        const delta = event.name === 'CONTENT_INTERESTED' ? 1 : -1;
+        const creator = typeof payload.creator === 'string' ? payload.creator : '';
+        if (creator) creatorInterest.set(creator, (creatorInterest.get(creator) ?? 0) + delta);
+        const tags = Array.isArray(payload.tags) ? payload.tags.filter((tag): tag is string => typeof tag === 'string') : [];
+        for (const tag of tags) tagInterest.set(tag, (tagInterest.get(tag) ?? 0) + delta);
+      }
+    } catch {
+      // Chronological ordering remains the fallback when analytics is offline.
+    }
   }
 
   if (await prismaReady()) {
@@ -293,11 +414,14 @@ export async function listSocialPosts(
         ...(opts?.includeHidden ? {} : { status: 'ACTIVE' }),
         ...(opts?.authorIds?.length ? { authorId: { in: opts.authorIds } } : {}),
         ...(opts?.lane ? { lane: opts.lane } : {}),
+        ...(opts?.excludeIds?.length ? { id: { notIn: opts.excludeIds } } : {}),
       },
       orderBy: { createdAt: 'desc' },
       take: opts?.nearby ? Math.min(take * 4, 200) : take,
     });
-    let mapped = rows.map((row) => ({ ...mapPost(row), liked: likedIds.has(row.id) }));
+    let mapped = rows
+      .filter((row) => !hiddenIds.has(row.id) && !blockedCreatorIds.has(row.authorId))
+      .map((row) => ({ ...mapPost(row), liked: likedIds.has(row.id), saved: savedIds.has(row.id) }));
     try {
       const authorIds = [...new Set(mapped.map((p) => p.authorId))];
       const profiles = await prisma.userProfile.findMany({
@@ -311,11 +435,22 @@ export async function listSocialPosts(
           ...p,
           authorName: profile?.displayName ?? p.authorName,
           authorHandle: profile?.handle ?? p.authorHandle,
-          authorAvatarUrl: profile?.avatarUrl ?? p.authorAvatarUrl,
+          authorAvatarUrl: currentMediaUrl(profile?.avatarUrl ?? p.authorAvatarUrl),
         };
       });
     } catch {
       /* author snapshot in mediaJson is enough */
+    }
+    if (tagInterest.size || creatorInterest.size) {
+      mapped = mapped
+        .map((post, index) => ({
+          post,
+          index,
+          score: (creatorInterest.get(post.authorId) ?? 0)
+            + post.tags.reduce((sum, tag) => sum + (tagInterest.get(tag) ?? 0), 0),
+        }))
+        .sort((a, b) => b.score - a.score || a.index - b.index)
+        .map(({ post }) => post);
     }
     if (opts?.nearby) {
       const radius = opts.nearby.radiusKm ?? 10;
@@ -327,14 +462,31 @@ export async function listSocialPosts(
     return mapped;
   }
 
-  return readStore()
+  const fallbackRows = readStore()
     .posts.filter((p) => (opts?.includeHidden ? true : p.status === 'ACTIVE'))
     .filter((p) => (opts?.authorIds?.length ? opts.authorIds.includes(p.authorId) : true))
     .filter((p) => (opts?.lane ? p.lane === opts.lane : true))
+    .filter((p) => (opts?.excludeIds?.length ? !opts.excludeIds.includes(p.id) : true))
     .filter((p) => {
       if (!opts?.nearby || p.lat == null || p.lng == null) return !opts?.nearby;
       return haversineKm(opts.nearby, { lat: p.lat, lng: p.lng }) <= (opts.nearby.radiusKm ?? 10);
-    })
+    });
+  if (!opts?.viewerId) return fallbackRows.slice(0, take);
+  const latest = new Map<string, SignalKind>();
+  const blockedFallback = new Map<string, boolean>();
+  for (const signal of readSignals().signals) {
+    if (signal.userId !== opts.viewerId) continue;
+    if ((signal.kind === 'block_user' || signal.kind === 'unblock_user') && !blockedFallback.has(signal.contentId)) {
+      blockedFallback.set(signal.contentId, signal.kind === 'block_user');
+      continue;
+    }
+    if (latest.has(signal.contentId)) continue;
+    if (['save', 'unsave', 'hide', 'unhide'].includes(signal.kind)) latest.set(signal.contentId, signal.kind);
+  }
+  return fallbackRows
+    .filter((post) => blockedFallback.get(post.authorId) !== true)
+    .filter((post) => latest.get(post.id) !== 'hide')
+    .map((post) => ({ ...post, saved: latest.get(post.id) === 'save' }))
     .slice(0, take);
 }
 
@@ -443,8 +595,8 @@ export async function bumpSocialPostReport(id: string): Promise<void> {
   writeStore(store);
 }
 
-type SignalKind = 'like' | 'unlike' | 'not_interested' | 'share';
-type SignalStore = { signals: Array<{ id: string; kind: SignalKind; contentId: string; at: string }> };
+type SignalKind = 'like' | 'unlike' | 'interested' | 'not_interested' | 'share' | 'save' | 'unsave' | 'hide' | 'unhide' | 'block_user' | 'unblock_user';
+type SignalStore = { signals: Array<{ id: string; kind: SignalKind; contentId: string; userId?: string; at: string }> };
 const SIGNAL_FILE = path.join(process.cwd(), 'data', 'feed-signals.json');
 
 function readSignals(): SignalStore {
@@ -463,14 +615,51 @@ export async function recordFeedSignal(input: {
 }) {
   const contentId = input.contentId.trim();
   if (!contentId) throw new AppError('VALIDATION', 'contentId required', 400);
-  if (!['like', 'unlike', 'not_interested', 'share'].includes(input.kind)) {
-    throw new AppError('VALIDATION', 'kind must be like | unlike | not_interested | share', 400);
+  if (!['like', 'unlike', 'interested', 'not_interested', 'share', 'save', 'unsave', 'hide', 'unhide', 'block_user', 'unblock_user'].includes(input.kind)) {
+    throw new AppError('VALIDATION', 'unsupported feed signal kind', 400);
+  }
+  if (input.userId && (await prismaReady())) {
+    try {
+      const isUserAction = input.kind === 'block_user' || input.kind === 'unblock_user';
+      const post = isUserAction ? null : await prisma.socialPost.findUnique({
+        where: { id: contentId },
+        select: { authorId: true, tagsJson: true, lane: true },
+      });
+      await prisma.analyticsEvent.create({
+        data: {
+          userId: input.userId,
+          name: `CONTENT_${input.kind.toUpperCase()}`,
+          entityType: isUserAction ? 'USER' : 'POST',
+          entityId: contentId,
+          payloadJson: {
+            creator: post?.authorId ?? null,
+            category: post?.lane ?? 'feed',
+            tags: post?.tagsJson ?? [],
+          },
+        },
+      });
+      const behaviorType: Partial<Record<SignalKind, string>> = {
+        like: 'CONTENT_LIKED', interested: 'CONTENT_LIKED', share: 'CONTENT_SHARED', save: 'LISTING_SAVED',
+        not_interested: 'CONTENT_HIDDEN', hide: 'CONTENT_HIDDEN', block_user: 'CREATOR_BLOCKED',
+      };
+      const eventType = behaviorType[input.kind];
+      if (eventType) {
+        const { recordBehaviorEvent } = await import('../recommendation/BehaviorEventService');
+        await recordBehaviorEvent(input.userId, {
+          eventType, contentId, contentType: 'CONTENT', tags: post?.tagsJson ?? [],
+          metadata: { creatorId: post?.authorId, lane: post?.lane },
+        });
+      }
+    } catch {
+      // The durable local signal log remains the development fallback.
+    }
   }
   const store = readSignals();
   store.signals.unshift({
     id: randomUUID(),
     kind: input.kind,
     contentId,
+    userId: input.userId,
     at: new Date().toISOString(),
   });
   store.signals = store.signals.slice(0, 2000);
@@ -482,6 +671,7 @@ export async function recordFeedSignal(input: {
 
 function mapPost(row: {
   id: string;
+  snowflakeId?: bigint | null;
   authorId: string;
   body: string;
   mediaJson: unknown;
@@ -502,11 +692,12 @@ function mapPost(row: {
   const blob = media && typeof media === 'object' && !Array.isArray(media) ? (media as Record<string, unknown>) : {};
   return {
     id: row.id,
+    snowflakeId: snowflakeIdForApi(row.snowflakeId),
     authorId: row.authorId,
     authorName: typeof blob.authorName === 'string' ? blob.authorName : null,
     authorHandle: typeof blob.authorHandle === 'string' ? blob.authorHandle : null,
     body: row.body,
-    media: row.mediaJson,
+    media: rewriteMediaUrls(row.mediaJson),
     status: row.status,
     likeCount: row.likeCount,
     reportCount: row.reportCount,

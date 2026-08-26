@@ -11,6 +11,7 @@ import {
   type ReportTargetKind,
 } from '@/modules/safety/state/moderation-store';
 import { useAuthStore } from '@/modules/auth/state/auth-store';
+import { syncFeedBlockUser } from '@/modules/feed/data/feedEngageApi';
 
 type Props = {
   visible: boolean;
@@ -33,6 +34,7 @@ export function ReportBlockSheet({
   const insets = useSafeAreaInsets();
   const submitReport = useModerationStore((s) => s.submitReport);
   const blockUser = useModerationStore((s) => s.blockUser);
+  const hideContent = useModerationStore((s) => s.hideContent);
   const authUser = useAuthStore((s) => s.user);
   const [otherOpen, setOtherOpen] = useState(false);
   const [details, setDetails] = useState('');
@@ -44,24 +46,25 @@ export function ReportBlockSheet({
     }
   }, [visible]);
 
-  const finishSubmit = (reason: string, extra?: string) => {
-    submitReport({
+  const finishSubmit = async (reason: string, extra?: string) => {
+    const { submitReportToServer } = await import('@/modules/safety/syncModerationContentBlocks');
+    const serverResult = await submitReportToServer({
       kind,
       targetId,
       targetLabel,
       reason,
       details: extra?.trim() || undefined,
+      reporterRef: authUser?.id,
+      targetOwnerId: blockUserId,
     });
-    void import('@/modules/safety/syncModerationContentBlocks').then(({ submitReportToServer }) =>
-      submitReportToServer({
-        kind,
-        targetId,
-        targetLabel,
-        reason,
-        details: extra?.trim() || undefined,
-        reporterRef: authUser?.id ?? 'mobile-anon',
-      }),
-    );
+    if (!serverResult.ok) {
+      Alert.alert(
+        serverResult.duplicate ? 'รายงานนี้ถูกส่งแล้ว' : 'ส่งรายงานไม่สำเร็จ',
+        serverResult.duplicate ? 'คุณได้รายงานโพสต์นี้แล้ว ทีมงานกำลังตรวจสอบ' : 'กรุณาตรวจสอบการเชื่อมต่อแล้วลองใหม่',
+      );
+      return;
+    }
+    submitReport({ kind, targetId, targetLabel, reason, details: extra?.trim() || undefined });
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
     const finish = () => {
@@ -70,14 +73,22 @@ export function ReportBlockSheet({
       onClose();
     };
 
-    if (blockUserId) {
-      Alert.alert('ส่งรายงานแล้ว', 'ทีม moderation จะตรวจสอบตามคิว', [
+    if (blockUserId && kind === 'content') {
+      Alert.alert('ได้รับรายงานแล้ว', 'ทีม moderation จะตรวจสอบตามคิว โพสต์จะไม่ถูกลบทันที', [
         { text: 'ปิด', style: 'cancel', onPress: finish },
         {
-          text: 'บล็อกผู้ใช้นี้',
+          text: 'ซ่อนโพสต์นี้',
+          onPress: () => {
+            hideContent(targetId);
+            finish();
+          },
+        },
+        {
+          text: 'บล็อกบัญชีนี้',
           style: 'destructive',
           onPress: () => {
             blockUser(blockUserId);
+            void syncFeedBlockUser(blockUserId, true);
             Alert.alert('บล็อกแล้ว', 'จะไม่แสดงคอนเทนต์จากผู้ใช้นี้');
             finish();
           },
@@ -93,19 +104,19 @@ export function ReportBlockSheet({
 
   const pickReason = (reason: string) => {
     void Haptics.selectionAsync();
-    if (reason === 'อื่นๆ') {
+    if (reason === 'อื่น ๆ') {
       setOtherOpen(true);
       return;
     }
-    finishSubmit(reason);
+    void finishSubmit(reason);
   };
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
-      <DragDownDismiss onDismiss={onClose} showDim rootInModal rootStyle={styles.dismissRoot}>
+      <DragDownDismiss onDismiss={onClose} showDim animateIn rootInModal rootStyle={styles.dismissRoot}>
         <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
           <View style={styles.handle} />
-          <Text style={styles.navTitle}>รายงาน</Text>
+          <Text style={styles.navTitle}>รายงานโพสต์</Text>
           {otherOpen ? (
             <>
               <Pressable style={styles.backRow} onPress={() => setOtherOpen(false)} hitSlop={8}>
@@ -124,7 +135,7 @@ export function ReportBlockSheet({
                 placeholderTextColor={colors.text.muted}
                 multiline
               />
-              <Pressable style={styles.submit} onPress={() => finishSubmit('อื่นๆ', details)}>
+              <Pressable style={styles.submit} onPress={() => void finishSubmit('อื่น ๆ', details)}>
                 <Text style={styles.submitText}>ส่งรายงาน</Text>
               </Pressable>
             </>
@@ -132,7 +143,7 @@ export function ReportBlockSheet({
             <>
               <Text style={styles.heading}>
                 {kind === 'content'
-                  ? 'เหตุใดคุณจึงรายงานรูปภาพนี้'
+                  ? 'มีปัญหาอะไรกับโพสต์นี้?'
                   : kind === 'comment'
                     ? 'เหตุใดคุณจึงรายงานความคิดเห็นนี้'
                     : 'เหตุใดคุณจึงรายงานเนื้อหานี้'}

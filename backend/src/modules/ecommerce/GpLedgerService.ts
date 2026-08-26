@@ -381,7 +381,7 @@ export async function listMarketplaceAudit(limit = 50): Promise<MarketplaceAudit
 
 /**
  * Settle marketplace order: quote GP → PSP capture → audit trail.
- * Ledger coin mint is separate (Boom Coin closed loop); THB must go through PSP.
+ * THB settlement must go through the configured payment service provider.
  */
 export async function settleMarketplaceOrder(input: {
   orderId: string;

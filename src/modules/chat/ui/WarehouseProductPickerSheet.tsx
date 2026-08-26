@@ -14,7 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useSharedValue } from 'react-native-reanimated';
 import { useInventoryStore } from '@/modules/commerce/state/inventory-store';
-import { MY_SHOP_ID } from '@/modules/warehouse/state/warehouse-store';
+import { useAuthStore } from '@/modules/auth/state/auth-store';
 import type { ProductCard } from '@/modules/chat/domain/types';
 import { fetchChatCatalog } from '@/modules/chat/data/chatRealtimeApi';
 import { formatTHB, variantImageUri } from '@/modules/shop/domain/product-display';
@@ -72,6 +72,7 @@ export function WarehouseProductPickerSheet({
   onSend,
 }: Props) {
   const insets = useSafeAreaInsets();
+  const myShopId = useAuthStore((s) => s.user?.shopId ?? '');
   const scrollY = useSharedValue(0);
   const [query, setQuery] = useState('');
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -80,7 +81,7 @@ export function WarehouseProductPickerSheet({
   const masters = useInventoryStore((s) => s.masters);
   const variants = useInventoryStore((s) => s.variants);
   const totalAvailable = useInventoryStore((s) => s.totalAvailable);
-  const preferredShop = shopId?.trim() || MY_SHOP_ID;
+  const preferredShop = shopId?.trim() || myShopId;
   const sellerMode = inboxRole !== 'buyer';
 
   useEffect(() => {
@@ -120,7 +121,7 @@ export function WarehouseProductPickerSheet({
 
   const localRows = useMemo<CatalogRow[]>(() => {
     const owned = masters.filter((m) => ownsProduct(m.ownerShopId, preferredShop));
-    const source = owned.length ? owned : masters.filter((m) => ownsProduct(m.ownerShopId, MY_SHOP_ID));
+    const source = owned.length ? owned : masters.filter((m) => ownsProduct(m.ownerShopId, myShopId));
     return source.flatMap((master) => {
       const options = variants.filter((v) => v.masterSkuId === master.id && v.status !== 'hidden');
       return options.map((variant) => ({
@@ -137,7 +138,7 @@ export function WarehouseProductPickerSheet({
         shopId: master.ownerShopId,
       }));
     });
-  }, [masters, preferredShop, totalAvailable, variants]);
+  }, [masters, myShopId, preferredShop, totalAvailable, variants]);
 
   const rows = remoteRows?.length ? remoteRows : localRows;
 

@@ -5,6 +5,9 @@
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../../lib/prisma';
 import { AppError } from '../../lib/errors';
+import { currentMediaUrl } from '../media/publicMediaUrl';
+import { validateUsername } from './UsernamePolicy';
+import { snowflakeIdForApi } from '../../config/snowflake';
 
 export const EULA_CHAT_C4 = 'APP_STORE_C4_CHAT';
 export const EULA_MARKETPLACE = 'MARKETPLACE_TERMS';
@@ -19,6 +22,7 @@ export type ProfilePrivacy = {
 
 export type ProfileDto = {
   userId: string;
+  snowflakeId?: string;
   displayName?: string | null;
   handle?: string | null;
   role: string;
@@ -36,6 +40,9 @@ async function database<T>(operation: () => Promise<T>): Promise<T> {
     return await operation();
   } catch (error) {
     if (error instanceof AppError) throw error;
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') {
+      throw new AppError('CONFLICT', 'ชื่อผู้ใช้หรืออีเมลนี้ถูกใช้แล้ว', 409);
+    }
     throw new AppError(
       'DATABASE_UNAVAILABLE',
       'ไม่สามารถเชื่อมต่อฐานข้อมูลบัญชีได้ กรุณาลองใหม่อีกครั้ง',
@@ -79,6 +86,7 @@ function asPrivacy(value: unknown): ProfilePrivacy {
 
 function mapProfile(row: {
   userId: string;
+  snowflakeId?: bigint | null;
   displayName: string | null;
   handle: string | null;
   role: string;
@@ -92,13 +100,14 @@ function mapProfile(row: {
 }): ProfileDto {
   return {
     userId: row.userId,
+    snowflakeId: snowflakeIdForApi(row.snowflakeId),
     displayName: row.displayName,
     handle: row.handle,
     role: row.role,
     shopId: row.shopId,
     bio: row.bio ?? null,
-    avatarUrl: row.avatarUrl ?? null,
-    coverUrl: row.coverUrl ?? null,
+    avatarUrl: currentMediaUrl(row.avatarUrl) ?? null,
+    coverUrl: currentMediaUrl(row.coverUrl) ?? null,
     email: row.email ?? null,
     privacy: asPrivacy(row.privacyJson),
     updatedAt: row.updatedAt.toISOString(),
@@ -120,9 +129,9 @@ export async function upsertProfile(input: {
 }): Promise<ProfileDto> {
   if (!input.userId.trim()) throw new AppError('VALIDATION', 'userId required', 400);
   optionalText(input.displayName, 'displayName', 60);
-  optionalText(input.handle, 'handle', 32);
-  if (input.handle && !/^@?[a-zA-Z0-9_.]+$/.test(input.handle.trim())) {
-    throw new AppError('VALIDATION', 'handle ใช้ได้เฉพาะตัวอักษร ตัวเลข จุด และขีดล่าง', 400);
+  const handle = input.handle == null ? undefined : validateUsername(input.handle);
+  if (input.handle != null && !handle) {
+    throw new AppError('VALIDATION', 'ชื่อผู้ใช้ต้องมี 3–24 ตัว และใช้ได้เฉพาะ a-z ตัวเลข จุด และขีดล่าง', 400);
   }
   if (input.bio != null && input.bio.length > 160) {
     throw new AppError('VALIDATION', 'bio ยาวเกิน 160 ตัวอักษร', 400);
@@ -132,16 +141,25 @@ export async function upsertProfile(input: {
 
   return database(async () => {
     const existing = await prisma.userProfile.findUnique({ where: { userId: input.userId } });
+    if (handle) {
+      const owner = await prisma.userProfile.findFirst({
+        where: {
+          handle: { equals: handle, mode: 'insensitive' },
+          userId: { not: input.userId },
+        },
+        select: { userId: true },
+      });
+      if (owner) throw new AppError('CONFLICT', 'ชื่อผู้ใช้นี้ถูกใช้แล้ว', 409);
+    }
     const privacyJson = input.privacy
       ? { ...asPrivacy(existing?.privacyJson), ...input.privacy }
       : existing?.privacyJson ?? {};
     const row = await prisma.userProfile.upsert({
       where: { userId: input.userId },
       create: {
-        id: randomUUID(),
         userId: input.userId,
         displayName: input.displayName,
-        handle: input.handle,
+        handle,
         role: input.role ?? 'BUYER',
         shopId: input.shopId,
         bio: input.bio,
@@ -153,7 +171,7 @@ export async function upsertProfile(input: {
       },
       update: {
         displayName: input.displayName,
-        handle: input.handle,
+        handle,
         role: input.role,
         shopId: input.shopId,
         bio: input.bio,
@@ -174,6 +192,47 @@ export async function getProfile(userId: string): Promise<ProfileDto | null> {
     if (!row) return null;
     return mapProfile(row);
   });
+}
+
+/**
+ * Every authenticated account owns one stable shop id. Existing accounts created
+ * before shop ids became mandatory are upgraded once and keep the same UUID.
+ */
+export async function ensureProfileShopId(
+  userId: string,
+): Promise<ProfileDto & { shopId: string }> {
+  if (!userId.trim()) throw new AppError('VALIDATION', 'userId required', 400);
+  return database(async () => {
+    const existing = await prisma.userProfile.findUnique({ where: { userId } });
+    if (!existing) {
+      throw new AppError('ACCOUNT_DATA_MISSING', 'ไม่พบข้อมูลโปรไฟล์ของบัญชี', 409);
+    }
+    if (existing.shopId) {
+      await migrateLegacyMerchantIds(userId, existing.shopId);
+      return { ...mapProfile(existing), shopId: existing.shopId };
+    }
+
+    // updateMany makes concurrent logins safe: only the first request fills it.
+    await prisma.userProfile.updateMany({
+      where: { userId, shopId: null },
+      data: { shopId: randomUUID() },
+    });
+    const updated = await prisma.userProfile.findUnique({ where: { userId } });
+    if (!updated?.shopId) {
+      throw new AppError('DATABASE_UNAVAILABLE', 'ไม่สามารถสร้างรหัสร้านค้าได้', 503);
+    }
+    await migrateLegacyMerchantIds(userId, updated.shopId);
+    return { ...mapProfile(updated), shopId: updated.shopId };
+  });
+}
+
+async function migrateLegacyMerchantIds(userId: string, shopId: string) {
+  if (userId === shopId) return;
+  await prisma.$transaction([
+    prisma.commerceProduct.updateMany({ where: { merchantId: userId }, data: { merchantId: shopId } }),
+    prisma.commerceOrder.updateMany({ where: { merchantId: userId }, data: { merchantId: shopId } }),
+    prisma.catalogItem.updateMany({ where: { merchantId: userId }, data: { merchantId: shopId } }),
+  ]);
 }
 
 export async function getProfileByEmail(email: string): Promise<(ProfileDto & { passwordHash?: string }) | null> {

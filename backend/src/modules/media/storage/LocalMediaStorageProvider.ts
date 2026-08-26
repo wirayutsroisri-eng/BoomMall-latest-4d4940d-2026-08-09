@@ -142,6 +142,10 @@ export class LocalMediaStorageProvider implements MediaStorageProvider {
     return { contentLength: stat.size, contentType };
   }
 
+  async remove(storageKey: string) {
+    await fs.promises.rm(safePath(storageKey), { force: true });
+  }
+
   readiness() {
     let publicBaseConfigured = true;
     let publicBase: string | undefined;

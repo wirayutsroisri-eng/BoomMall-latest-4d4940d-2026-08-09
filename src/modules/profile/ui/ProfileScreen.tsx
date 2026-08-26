@@ -3,7 +3,7 @@ import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'rea
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
@@ -71,7 +71,14 @@ export function ProfileScreen() {
   const profile = useLoyaltyStore((s) => s.profile);
   const userId = useAuthStore((s) => s.user?.id);
   const items = useFeedStore((s) => s.items);
+  const refreshFeed = useFeedStore((s) => s.refreshFromServer);
   const [tab, setTab] = useState<ProfileTab>('videos');
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshFeed();
+    }, [refreshFeed]),
+  );
 
   const myHandle = normalizeAuthorHandle(profile.handle);
   const myContent = useMemo(
@@ -80,7 +87,6 @@ export function ProfileScreen() {
         isSelf: true,
         ownerUserId: userId,
         displayName: profile.displayName,
-        requireMedia: false,
       }),
     [items, myHandle, profile.displayName, userId],
   );
@@ -359,7 +365,7 @@ export function ProfileScreen() {
           tone="bright"
           items={savedItems}
           emptyIcon="bookmark-outline"
-          emptyText="แตะปุ่มบันทึกในคลิปที่อยากดูทีหลัง แล้วคอนเทนต์จะมาโชว์ตรงนี้"
+          emptyText="แตะบันทึกโพสต์หรือคลิปที่อยากดูภายหลัง แล้วคอนเทนต์จะมาแสดงตรงนี้"
           onPressItem={(item) =>
             openOwnerFeed(normalizeAuthorHandle(item.authorHandle), item)
           }

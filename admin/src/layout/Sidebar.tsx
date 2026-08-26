@@ -64,7 +64,6 @@ const GROUPS: NavGroupDef[] = [
       { to: '/finance?focus=escrow', label: 'Escrow', icon: IconAnalytics, nav: 'finance' },
       { to: '/finance?focus=payout', label: 'Payout', icon: IconAnalytics, nav: 'finance' },
       { to: '/finance?focus=refund', label: 'Refund', icon: IconAnalytics, nav: 'finance' },
-      { to: '/coins', label: 'Boom Coin', icon: IconAnalytics, nav: 'finance' },
       { to: '/finance?focus=recon', label: 'Reconciliation', icon: IconAnalytics, nav: 'finance' },
     ],
   },

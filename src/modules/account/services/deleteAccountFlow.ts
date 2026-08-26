@@ -1,5 +1,4 @@
 import { Alert } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { apiDeleteAccount } from '@/modules/social/data/socialApi';
@@ -11,9 +10,11 @@ import { useMusicLibraryStore } from '@/modules/music/state/music-library-store'
 import { useShopActivityStore } from '@/modules/shop/state/shop-activity-store';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
 import { useFollowStore } from '@/modules/social/state/follow-store';
+import { purgeLocalAccountData } from './purgeLocalAccountData';
 
 async function runDeleteAccount() {
   await apiDeleteAccount();
+  await purgeLocalAccountData();
   useFeedStore.getState().switchAccount(null);
   useFollowStore.getState().reset();
   await useAuthStore.getState().clearSession();
@@ -27,7 +28,6 @@ async function runDeleteAccount() {
   useActivityStore.getState().clearAll();
   useMusicLibraryStore.getState().clearWatchHistory();
   useShopActivityStore.getState().clearBrowsable();
-  await AsyncStorage.multiRemove(['boommall-apple-user-id', 'boommall-moderation-v1']);
   void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
   Alert.alert('ลบบัญชีแล้ว', 'บัญชีและข้อมูลที่เกี่ยวข้องถูกลบจากเซิร์ฟเวอร์และเครื่องนี้แล้ว');
   router.replace('/(tabs)/profile');

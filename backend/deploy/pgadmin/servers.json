@@ -1,7 +1,7 @@
 {
   "Servers": {
     "1": {
-      "Name": "BoomMall Boom Coin (internal)",
+      "Name": "BoomMall PostgreSQL (internal)",
       "Group": "Servers",
       "Host": "postgres",
       "Port": 5432,

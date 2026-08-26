@@ -1,5 +1,8 @@
 import { router, type Href } from 'expo-router';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
+import { useBoardUiStore } from '@/modules/matching/state/board-ui-store';
+import { useMainTabBarStore } from '@/shared/state/main-tab-bar-store';
+import { useSecondhandUiStore } from '@/modules/secondhand/state/secondhand-ui-store';
 
 /**
  * Prevents double-tap from stacking screens (esp. fullScreenModal /listen).
@@ -140,10 +143,17 @@ export function openBoardCreate(side: 'demand' | 'supply', locked = true): boole
   });
 }
 
-/** แท็บกล้อง: หน้าหางาน = รับงาน, ที่อื่น = กล้อง */
+/** Contextual create button: current jobs side creates that listing; elsewhere opens camera. */
 export function openCreateFromTab(): boolean {
-  if (useFeedStore.getState().tab === 'board') {
-    return openBoardCreate('supply');
+  if (useMainTabBarStore.getState().activeMainChannelId === 'secondhand') {
+    useSecondhandUiStore.getState().requestCreateSheet();
+    return true;
+  }
+  if (
+    useMainTabBarStore.getState().activeMainChannelId === 'jobs'
+    || useFeedStore.getState().tab === 'board'
+  ) {
+    return openBoardCreate(useBoardUiStore.getState().side);
   }
   return openCreateCamera();
 }

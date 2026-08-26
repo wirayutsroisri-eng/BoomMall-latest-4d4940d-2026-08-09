@@ -33,7 +33,7 @@ export function SystemHealthPage() {
       <PageHeader
         eyebrow="ระบบ"
         title="สุขภาพระบบ"
-        description="ตรวจว่าบัญชีเงินตรงกัน และข้อความส่งได้ปกติ — ไม่ใช่หน้าจำลองสถานะ"
+        description="ตรวจสถานะข้อมูลหลักและระบบข้อความจากบริการจริง"
         helpKey="health"
         actions={
           <button type="button" className="btn-secondary" onClick={() => void refresh()}>
@@ -47,15 +47,15 @@ export function SystemHealthPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           <article className="surface-panel p-5">
-            <p className="text-xs font-bold text-[var(--ink-tertiary)]">บัญชีเงิน / เหรียญ</p>
+            <p className="text-xs font-bold text-[var(--ink-tertiary)]">ข้อมูลแพลตฟอร์ม</p>
             <p className="font-display mt-2 text-2xl font-extrabold">
-              {stats.ledgerHealthy ? 'ตรงกัน' : 'ยังไม่ตรง'}
+              ผู้ใช้ {stats.userCount ?? 0} · โพสต์ {stats.postCount ?? 0}
             </p>
             <p className="mt-2 text-sm text-[var(--ink-secondary)]">
-              ส่วนต่าง {stats.reconcile.delta} · อัปเดต {new Date(stats.generatedAt).toLocaleString('th-TH')}
+              อัปเดต {new Date(stats.generatedAt).toLocaleString('th-TH')}
             </p>
-            <Link to="/finance?focus=recon" className="mt-4 inline-flex text-sm font-bold text-[var(--accent-strong)]">
-              เปิดการกระทบยอด
+            <Link to="/analytics" className="mt-4 inline-flex text-sm font-bold text-[var(--accent-strong)]">
+              เปิด Analytics
             </Link>
           </article>
           <article className="surface-panel p-5">

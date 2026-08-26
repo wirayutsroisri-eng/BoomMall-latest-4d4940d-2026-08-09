@@ -39,6 +39,7 @@ describe('buyerIdOf', () => {
 
 describe('snapshotOfOrder', () => {
   it('builds a compact order card for chat', () => {
+    const shopId = '6ac8c9c0-f988-4d70-9471-3005b20e8acd';
     const snap = snapshotOfOrder(
       order({
         id: 'io-1',
@@ -49,10 +50,11 @@ describe('snapshotOfOrder', () => {
           { title: 'CNC Front Brake Master', option: 'เงิน', qty: 2, unitPrice: 1190 },
         ],
       }),
+      shopId,
     );
     expect(snap.orderId).toBe('io-1');
     expect(snap.buyerId).toBe('buyer-weerayut');
-    expect(snap.shopId).toBe('shop-boom-ev');
+    expect(snap.shopId).toBe(shopId);
     expect(snap.title).toBe('60V 32Ah Smart BMS Pack');
     expect(snap.option).toBe('สีดำ · 60V/32Ah');
     expect(snap.qty).toBe(1);

@@ -28,5 +28,6 @@ export interface MediaStorageProvider {
   readonly kind: MediaStorageKind;
   createUploadTarget(input: CreateMediaUploadInput): Promise<MediaUploadTarget>;
   inspect(storageKey: string): Promise<StoredMediaObject>;
+  remove(storageKey: string): Promise<void>;
   readiness(): Record<string, unknown>;
 }

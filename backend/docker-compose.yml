@@ -1,8 +1,8 @@
-# BoomMall Boom Coin — On-Premise / Private Server stack
+# BoomMall — local/on-premise development stack
 #
 # Security defaults:
 #   - PostgreSQL is NOT published on 0.0.0.0 (no public DB port)
-#   - Ledger DB traffic stays on Docker network `boom_internal`
+#   - Database traffic stays on Docker network `boom_internal`
 #   - Optional loopback-only DB port + PgAdmin via profile `host-tools`
 #   - Optional API container via profile `api` (same internal network + TLS)
 #
@@ -13,7 +13,7 @@
 #   docker compose --profile host-tools up -d          # 127.0.0.1:5432 + PgAdmin
 #   docker compose --profile api --profile host-tools up -d --build
 
-name: boommall-boom-coin
+name: boommall
 
 x-logging: &default-logging
   driver: json-file
@@ -31,8 +31,52 @@ networks:
 volumes:
   pgdata:
   pgadmin_data:
+  minio_data:
 
 services:
+  # Local S3-compatible object storage for MacBook development.
+  minio:
+    image: minio/minio:latest
+    container_name: boommall-local-s3
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:-boommall-local}
+      MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:-boommall-local-secret}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "0.0.0.0:${MINIO_API_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+    networks:
+      - boom_internal
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging: *default-logging
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: boommall-local-s3-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: >-
+      "mc alias set local http://minio:9000 $${AWS_ACCESS_KEY_ID:-boommall-local}
+      $${AWS_SECRET_ACCESS_KEY:-boommall-local-secret} &&
+      mc mb --ignore-existing local/$${AWS_S3_BUCKET:-boommall-media-local} &&
+      mc anonymous set download local/$${AWS_S3_BUCKET:-boommall-media-local}"
+    environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-boommall-local}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-boommall-local-secret}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-boommall-media-local}
+    networks:
+      - boom_internal
+    restart: "no"
+
   postgres:
     build:
       context: ./deploy/postgres
@@ -116,6 +160,7 @@ services:
       DATABASE_PORT: "5432"
       DATABASE_SSL_MODE: ${DATABASE_SSL_MODE:-require}
       DATABASE_SSL_ROOT_CERT: /app/deploy/certs/ca.crt
+      SNOWFLAKE_NODE_ID: ${SNOWFLAKE_NODE_ID:-0}
       NODE_EXTRA_CA_CERTS: /app/deploy/certs/ca.crt
       TZ: Asia/Bangkok
     volumes:

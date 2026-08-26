@@ -23,7 +23,7 @@
         "CFBundleAllowMixedLocalizations": true,
         "CFBundleLocalizations": ["th", "en"],
         "NSFaceIDUsageDescription": "BoomMall ใช้ Face ID เพื่อปลดล็อก Boom Vault และยืนยันตัวตนอย่างปลอดภัย",
-        "NSCameraUsageDescription": "BoomMall ใช้กล้องเพื่อถ่ายรูปสินค้า สแกนบาร์โค้ดคลัง โพสต์คอนเทนต์ และแนบรูปในแชต",
+        "NSCameraUsageDescription": "BoomMall ใช้กล้องเพื่อถ่ายรูปสินค้า สแกน QR เพิ่มเพื่อนและบาร์โค้ดคลัง โพสต์คอนเทนต์ และแนบรูปในแชต",
         "NSMicrophoneUsageDescription": "BoomMall ใช้ไมโครโฟนเพื่อบันทึกวอยซ์โน้ตในแชตและคลิปเสียงประกอบคอนเทนต์",
         "NSPhotoLibraryUsageDescription": "BoomMall ใช้คลังภาพเพื่อแนบรูปและวิดีโอสินค้า โพสต์คอนเทนต์ และแนบสื่อในแชต",
         "NSPhotoLibraryAddUsageDescription": "BoomMall บันทึกรูปที่คุณเลือกหรือสร้างลงคลังภาพเมื่อคุณอนุญาต",
@@ -133,7 +133,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "BoomMall ใช้กล้องเพื่อถ่ายรูปสินค้า โพสต์คอนเทนต์ และแนบรูปในแชต",
+          "cameraPermission": "BoomMall ใช้กล้องเพื่อถ่ายรูปสินค้า สแกน QR เพิ่มเพื่อน โพสต์คอนเทนต์ และแนบรูปในแชต",
           "microphonePermission": "BoomMall ใช้ไมโครโฟนเพื่อบันทึกวอยซ์โน้ตในแชตและคลิปเสียงประกอบคอนเทนต์",
           "recordAudioAndroid": true,
           "barcodeScannerEnabled": false
@@ -143,7 +143,7 @@
         "expo-image-picker",
         {
           "photosPermission": "BoomMall ใช้คลังภาพเพื่อแนบรูปในแชต โพสต์คอนเทนต์ และเลือกรูปสินค้า",
-          "cameraPermission": "BoomMall ใช้กล้องเพื่อถ่ายรูปสินค้า โพสต์คอนเทนต์ และแนบรูปในแชต"
+          "cameraPermission": "BoomMall ใช้กล้องเพื่อถ่ายรูปสินค้า สแกน QR เพิ่มเพื่อน โพสต์คอนเทนต์ และแนบรูปในแชต"
         }
       ],
       [

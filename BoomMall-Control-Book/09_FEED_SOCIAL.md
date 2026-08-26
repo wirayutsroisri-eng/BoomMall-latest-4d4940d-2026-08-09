@@ -4,7 +4,7 @@
 - Post
 - Image/Video
 - Caption
-- Like/Reaction/Boom Coin interaction
+- Like/Reaction interaction
 - Comment
 - Share
 - Follow

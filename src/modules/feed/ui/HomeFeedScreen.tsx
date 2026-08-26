@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
+  RefreshControl,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -23,6 +24,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
+import { ContentRefreshOverlay } from '@/shared/components/ContentRefreshOverlay';
+import { withMinimumDuration } from '@/shared/utils/minimumDuration';
 import { useCallStore } from '@/modules/chat/state/call-store';
 import type { FeedItem, FeedTab } from '@/modules/feed/domain/types';
 import { selectFeedByTab, pinPromotedFeedItems } from '@/modules/feed/domain/selectFeedByTab';
@@ -102,6 +105,8 @@ export function HomeFeedScreen({
   const [menuItem, setMenuItem] = useState<FeedItem | null>(null);
   const [shareItem, setShareItem] = useState<FeedItem | null>(null);
   const [loginOpen, setLoginOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshFeed = useFeedStore((s) => s.refreshFromServer);
   const laneOrder = useMemo<FeedTab[]>(() => channelEmbedded ? ['foryou'] : TAB_ORDER, [channelEmbedded]);
   const effectiveTab: FeedTab = channelEmbedded ? 'foryou' : tab;
   const onBoard = !channelEmbedded && tab === 'board';
@@ -418,7 +423,8 @@ export function HomeFeedScreen({
                     pagingEnabled
                     scrollEnabled={laneTab === tab && !mediaZoomed}
                     decelerationRate="fast"
-                    bounces={false}
+                    bounces
+                    alwaysBounceVertical
                     overScrollMode="never"
                     showsVerticalScrollIndicator={false}
                     snapToInterval={viewportHeight}
@@ -428,6 +434,16 @@ export function HomeFeedScreen({
                     maxToRenderPerBatch={1}
                     initialNumToRender={1}
                     removeClippedSubviews
+                    refreshControl={(
+                      <RefreshControl
+                        refreshing={refreshing}
+                        tintColor={channelEmbedded ? '#FFFFFF' : colors.brand.primaryDark}
+                        onRefresh={() => {
+                          setRefreshing(true);
+                          void withMinimumDuration(refreshFeed()).finally(() => setRefreshing(false));
+                        }}
+                      />
+                    )}
                     getItemLayout={(_, index) => ({
                       length: viewportHeight,
                       offset: viewportHeight * index,
@@ -573,6 +589,7 @@ export function HomeFeedScreen({
       <MatchingNotifyBanner />
       <SellerNotifyBanner />
       {renderMediaViewer ? <MediaViewer /> : null}
+      <ContentRefreshOverlay visible={refreshing} dark />
     </View>
   );
 }

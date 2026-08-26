@@ -155,7 +155,7 @@ export function ModerationPage() {
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="surface-panel p-5">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-lg font-extrabold text-[var(--ink)]">รายงานจากผู้ใช้</h3>
+            <h3 className="text-lg font-extrabold text-[var(--ink)]">Secondhand Reports และรายงานจากผู้ใช้</h3>
             <div className="flex flex-wrap gap-1">
               {(['open', 'actioned', 'dismissed', 'all'] as const).map((s) => (
                 <button
@@ -186,7 +186,9 @@ export function ModerationPage() {
                     <span className="text-[10px] uppercase text-[var(--accent)]">{r.status}</span>
                   </p>
                   <p className="text-xs text-[var(--ink-tertiary)]">
-                    {r.kind} · {r.targetLabel ?? r.targetId}
+                    {r.kind === 'secondhand_listing' ? 'ประกาศมือสอง' : r.kind} · {r.targetLabel ?? r.targetId}
+                    {r.uniqueReporterCount ? ` · ${r.uniqueReporterCount} ผู้รายงานไม่ซ้ำ` : ''}
+                    {r.sellerUserId ? ` · ผู้ขาย ${r.sellerUserId}` : ''}
                   </p>
                   {r.status === 'open' ? (
                     <div className="mt-2 flex flex-wrap gap-1.5">

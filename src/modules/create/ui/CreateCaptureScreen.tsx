@@ -443,9 +443,10 @@ export function CreateCaptureScreen() {
     !simulator && !hasLiveCamera && !!cameraFallbackHint && !permissionDenied;
 
   return (
-    <DragDownDismiss onDismiss={dismiss} enabled={!recording && !textEditing} style={styles.root}>
-      <StatusBar style="light" />
-      <View style={styles.root}>
+    <View style={styles.transitionRoot}>
+      <DragDownDismiss onDismiss={dismiss} enabled={!recording && !textEditing} style={styles.root}>
+        <StatusBar style="light" />
+        <View style={styles.root}>
         <View style={styles.previewStage}>
           <View style={[styles.previewFrame, previewLayout]}>
             {hasLiveCamera && liveModule && !simulator ? (
@@ -712,12 +713,14 @@ export function CreateCaptureScreen() {
             ))}
           </ScrollView>
         </LinearGradient>
-      </View>
-    </DragDownDismiss>
+        </View>
+      </DragDownDismiss>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  transitionRoot: { flex: 1, backgroundColor: 'transparent' },
   root: { flex: 1, backgroundColor: '#000' },
   previewStage: {
     ...StyleSheet.absoluteFill,

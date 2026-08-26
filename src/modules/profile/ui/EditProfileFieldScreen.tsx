@@ -108,10 +108,9 @@ export function EditProfileFieldScreen() {
       }
     }
 
-    // ส่งค่ากลับไปยัง EditProfileScreen
-    router.setParams({ field, value: trimmed });
+    // Replace the field route with the parent so the parent receives the edit.
+    router.replace({ pathname: '/profile/edit', params: { field, value: trimmed } });
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    close();
   };
 
   return (

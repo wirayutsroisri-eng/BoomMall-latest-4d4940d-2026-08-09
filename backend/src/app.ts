@@ -6,11 +6,11 @@ import morgan from 'morgan';
 import { loadEnv } from './config/env';
 import { getPrismaPoolInfo } from './lib/prisma';
 import { adminRouter } from './routes/admin';
-import { ledgerRouter } from './routes/ledger';
 import { moderationAdminRouter, moderationPublicRouter } from './routes/moderation';
 import { chatAdminRouter, chatIngestRouter } from './routes/chatAdmin';
 import { trustSafetyRouter } from './routes/trustSafety';
 import { feedPersonalizationRouter } from './routes/feedPersonalization';
+import { recommendationAdminRouter, recommendationAppRouter } from './modules/recommendation/http/routes';
 import { chatAppRouter, chatDomainRouter } from './modules/chat/http/routes';
 import { authDomainRouter } from './modules/auth/http/routes';
 import { ecommerceDomainRouter } from './modules/ecommerce/http/routes';
@@ -30,6 +30,8 @@ import { legalPublicRouter } from './modules/legal/routes';
 import { mediaAssetRouter } from './modules/media/http/routes';
 import { ensureLocalMediaUploadDirectories, localMediaUploadDir } from './modules/media/storage/LocalMediaStorageProvider';
 import { configuredMediaStorageKind } from './modules/media/storage';
+import { storyRouter } from './modules/story/http/routes';
+import { friendRouter } from './modules/friends/http/routes';
 
 export function createApp() {
   const env = loadEnv();
@@ -100,6 +102,8 @@ export function createApp() {
   app.use('/api/v1/admin/safety', trustSafetyRouter);
   app.use('/api/v1/admin/feed-config', feedPersonalizationRouter);
   app.use('/api/v1/admin/feed', feedPersonalizationRouter);
+  app.use('/api/v1/admin/recommendation-config', recommendationAdminRouter);
+  app.use('/api/v1', recommendationAppRouter);
 
   /** Domain services */
   app.use('/api/v1/auth', authDomainRouter);
@@ -112,6 +116,8 @@ export function createApp() {
   app.use('/api/v1/chat-domain', chatAppRouter);
   app.use('/api/v1/feed', feedAppRouter);
   app.use('/api/v1/media-assets', mediaAssetRouter);
+  app.use('/api/v1/stories', storyRouter);
+  app.use('/api/v1/friends', friendRouter);
   app.use('/api/v1/admin/feed-domain', feedDomainRouter);
   app.use('/api/v1/board', boardAppRouter);
   app.use('/api/v1/admin/board', boardAdminRouter);
@@ -126,8 +132,6 @@ export function createApp() {
 
   app.use('/api/v1/chat', chatIngestRouter);
   app.use('/api/v1/moderation', moderationPublicRouter);
-  app.use('/api/v1/ledger', ledgerRouter);
-
   app.use(errorHandler);
   return app;
 }

@@ -1,4 +1,4 @@
-import { getApiBase } from '@/modules/auth/state/auth-store';
+import { authHeaders, getApiBase } from '@/modules/auth/state/auth-store';
 import { useModerationStore } from '@/modules/safety/state/moderation-store';
 
 /**
@@ -40,22 +40,25 @@ export async function submitReportToServer(input: {
   reason: string;
   details?: string;
   reporterRef?: string;
+  targetOwnerId?: string;
+  subReason?: string;
 }) {
   const base = getApiBase();
-  if (!base) return null;
+  if (!base) return { ok: false };
   try {
     const res = await fetch(`${base}/api/v1/moderation/reports`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders(),
       body: JSON.stringify(input),
     });
-    if (!res.ok) return null;
+    if (res.status === 409) return { ok: false, duplicate: true };
+    if (!res.ok) return { ok: false };
     const json = await res.json();
     // If server auto-hid, sync blocks immediately
     void syncModerationContentBlocks();
-    return json;
+    return { ok: true, data: json };
   } catch {
-    return null;
+    return { ok: false };
   }
 }
 

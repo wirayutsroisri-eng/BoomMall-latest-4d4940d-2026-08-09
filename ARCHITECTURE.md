@@ -104,7 +104,7 @@
 | Profile | `src/modules/profile/`, `src/modules/loyalty/state/loyalty-store.ts`, `app/profile/*` |
 | Seller / Store / Warehouse / Finance UI | `src/modules/store/`, `src/modules/warehouse/`, `src/modules/commerce/` (domain + state), `app/store/*`, `app/products/*` |
 | Auth / Session (client) | `src/modules/auth/state/auth-store.ts` (+ `src/shared/api/apiBase.ts`, `app/register.tsx`) |
-| Vault / Wallet (client) | `src/modules/vault/`, `src/modules/wallet/`, `src/modules/loyalty/` |
+| Vault / saved items (client) | `src/modules/vault/`, `src/modules/loyalty/` |
 | Safety / Moderation (client) | `src/modules/safety/` — `state/moderation-store.ts`, `syncModerationContentBlocks.ts` |
 | Search / Matching / Music / Knowledge / Social | `src/modules/search/`, `matching/`, `music/`, `knowledge/`, `social/`, `account/` |
 | Shared infra | `src/shared/` — api, components (DragDownDismiss), media, native probe, theme, notifications, providers |
@@ -191,7 +191,6 @@ React Native (TypeScript)
 | Overlay / composition state | Client — `OverlayObject[]` ใน draft store แล้วส่งต่อ (JSON) ไปยัง publish/feed | `src/modules/create/domain/editorComposition.ts`, `src/modules/create/state/create-draft-store.ts` |
 | Profile (displayName, handle, avatar…) | Client-first: `useLoyaltyStore` (AsyncStorage persist) + `hydrateOwnProfileFromServer` | `src/modules/loyalty/state/loyalty-store.ts`, `src/modules/profile/data/syncOwnProfile.ts`; server DTO: `backend/src/modules/auth/ProfileService.ts` (`ProfileDto`) |
 | Product catalog / inventory / stock | Client: `useInventoryStore` (Zustand + AsyncStorage) sync กับ server catalog API | `src/modules/commerce/state/inventory-store.ts`, `src/modules/commerce/data/commerceSync.ts`, `backend/src/modules/ecommerce/` |
-| Boom Coin wallet / ledger | Server: PostgreSQL double-entry ledger (balance = projection, ต้องผ่าน ledger entries) + client mirror | `backend/prisma/schema.prisma` (Wallet/LedgerEntry), `src/modules/wallet/`, `src/modules/wallet/services/WalletDomain.ts` |
 | Moderation / safety policy | Server (Prisma `ModerationPolicy`, `ModerationState`) + client block list sync | `backend/src/services/trustSafety/`, `src/modules/safety/` |
 | Compliance gates (App Store) | Client compile-time flags | `src/shared/compliance/appStoreGates.ts` |
 
@@ -378,8 +377,7 @@ BoomMall/
 | ADR-002 | Native iOS (Swift) มีอยู่เฉพาะ `BoomMallNativeMediaEditor` และเป็น **experimental/feature-flagged** (default off) — ไม่ใช่ active path | `src/modules/create/native/nativeMediaEditor.ts` (`EXPO_PUBLIC_NATIVE_MEDIA_EDITOR_ENABLED`), `expo-module.config.json` |
 | ADR-003 | `OverlayObject`/`EditorMedia` contract อยู่ที่ `src/modules/create/domain/editorComposition.ts` และเป็น canonical ระหว่าง TS กับ Swift (JSON bridge) | `editorComposition.ts`, `EditorModels.swift` |
 | ADR-004 | Chat ใช้ Socket.io สำหรับ realtime แต่ **persist ผ่าน Chat API → PostgreSQL** (ไม่ใช่ source of truth ใน memory) | `backend/src/realtime/socket.gateway.ts` (header comment), `backend/src/modules/chat/services/ChatService.ts` |
-| ADR-005 | Boom Coin เป็น closed-loop utility: balance เป็น projection จาก double-entry ledger เท่านั้น (ห้ามแก้ balance ตรง) | `backend/prisma/schema.prisma` (header comment), `BOOM_COIN_OPS.md`, `src/modules/wallet/domain/boom-coin.ts` |
-| ADR-006 | App Store compliance ควบคุมด้วย compile-time flags (`STORE_COMPLIANCE_MODE = true`) — Boom Coin purchase UI, calls, music upload, fake checkout ถูกตัดออกจาก iOS build | `src/shared/compliance/appStoreGates.ts`, `.cursor/rules/app-store-compliance.mdc` |
+| ADR-006 | App Store compliance ควบคุมด้วย compile-time flags (`STORE_COMPLIANCE_MODE = true`) — calls, music upload และ fake checkout ถูกตัดออกจาก iOS build | `src/shared/compliance/appStoreGates.ts`, `.cursor/rules/app-store-compliance.mdc` |
 | ADR-007 | UI ทุกตัวที่ปิดได้ต้องปิดด้วย drag-down (ไม่ใช่แค่ X) — `DragDownDismiss` / `dismissibleModalOptions` | `src/shared/components/DragDownDismiss.tsx`, `app/_layout.tsx`, `.cursor/rules/drag-down-dismiss.mdc` |
 | ADR-008 | การลบข้อมูลผู้ใช้ต้องยืนยันก่อน (`Alert.alert` ยกเลิก + ลบ) — ห้ามลบใน tap แรก | `.cursor/rules/confirm-before-delete.mdc` (เห็นใน chat/feed delete flows) |
 

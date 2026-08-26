@@ -71,12 +71,14 @@ export async function hydrateOwnProfileFromServer() {
   }
   const remoteAvatar = asHttp(remote.avatarUrl);
   const remoteCover = asHttp(remote.coverUrl);
+  const current = useLoyaltyStore.getState().profile;
   useLoyaltyStore.getState().updateProfile({
     displayName: remote.displayName.trim(),
     handle: remote.handle?.trim() || '',
     bio: remote.bio ?? '',
-    avatarUri: remoteAvatar || null,
-    coverUri: remoteCover || null,
+    // A partial/legacy backend profile must not erase a valid local photo.
+    avatarUri: remoteAvatar || current.avatarUri || null,
+    coverUri: remoteCover || current.coverUri || null,
   });
 }
 
@@ -87,7 +89,6 @@ export async function syncLocalProfilePhotosIfNeeded() {
     const uploaded = await uploadFeedMedia({ imageUris: [profile.avatarUri] });
     const url = uploaded.imageUris[0];
     if (url && isRemoteMediaUrl(url)) {
-      useLoyaltyStore.getState().updateProfile({ avatarUri: url });
       patch.avatarUrl = url;
     }
   } else if (asHttp(profile.avatarUri)) {
@@ -97,13 +98,16 @@ export async function syncLocalProfilePhotosIfNeeded() {
     const uploaded = await uploadFeedMedia({ imageUris: [profile.coverUri] });
     const url = uploaded.imageUris[0];
     if (url && isRemoteMediaUrl(url)) {
-      useLoyaltyStore.getState().updateProfile({ coverUri: url });
       patch.coverUrl = url;
     }
   } else if (asHttp(profile.coverUri)) {
     patch.coverUrl = asHttp(profile.coverUri);
   }
   if (patch.avatarUrl || patch.coverUrl) {
-    void apiUpsertProfile(patch);
+    await apiUpsertProfile(patch);
+    useLoyaltyStore.getState().updateProfile({
+      ...(patch.avatarUrl ? { avatarUri: patch.avatarUrl } : {}),
+      ...(patch.coverUrl ? { coverUri: patch.coverUrl } : {}),
+    });
   }
 }

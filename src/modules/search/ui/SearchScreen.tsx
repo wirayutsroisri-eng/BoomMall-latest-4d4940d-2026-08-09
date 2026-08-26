@@ -1,16 +1,14 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { useChatStore } from '@/modules/chat/state/chat-store';
-import { jumpToChatThread } from '@/shared/navigation/safeNavigate';
 import { Avatar } from '@/shared/components/Avatar';
 import { colors } from '@/shared/theme/colors';
 import { useRecordSearch } from '@/modules/account/ui/useRecordSearch';
-import { searchDirectory } from '@/modules/search/data/mockSearchDirectory';
 import type { SearchResult } from '@/modules/search/domain/types';
+import { searchFriendProfiles, sendFriendRequest } from '@/modules/search/data/friendApi';
 
 function normalizeHandle(h: string) {
   return h.trim().toLowerCase().replace(/^@/, '');
@@ -25,38 +23,40 @@ export function SearchScreen() {
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
   useRecordSearch(query, 'ผู้ใช้');
-  const conversations = useChatStore((s) => s.conversations);
-  const addFriend = useChatStore((s) => s.addFriend);
-
   const [sendingId, setSendingId] = useState<string | null>(null);
-  const [addedConvByResultId, setAddedConvByResultId] = useState<Record<string, string>>({});
+  const [sentIds, setSentIds] = useState<Record<string, true>>({});
+  const [results, setResults] = useState<SearchResult[]>([]);
 
-  const results = useMemo(() => searchDirectory(query), [query]);
+  useEffect(() => {
+    const value = query.trim();
+    if (value.length < 3) { setResults([]); return; }
+    const timer = setTimeout(() => {
+      void searchFriendProfiles(value).then((rows) => setResults(rows.map((row) => ({
+        id: row.userId,
+        userId: row.userId,
+        friendCode: row.friendCode,
+        handle: row.handle ?? row.friendCode,
+        displayName: row.displayName,
+        subtitle: row.friendCode,
+        avatarColor: colors.brand.primary,
+        avatarUrl: row.avatarUrl,
+        kind: 'friend',
+      })))).catch(() => setResults([]));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query]);
 
-  const conversationForHandle = (handle: string) =>
-    conversations.find((c) => normalizeHandle(c.peerHandle) === normalizeHandle(handle));
-
-  const openChat = (conversationId: string) => {
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    jumpToChatThread(conversationId);
-  };
-
-  const sendFriendRequest = (result: SearchResult) => {
+  const submitFriendRequest = (result: SearchResult) => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setSendingId(result.id);
-    // Mock network round-trip so the UX genuinely feels like "ส่งคำขอ" → "ตอบรับ" (Facebook-style).
-    setTimeout(() => {
-      const conversationId = addFriend(result.displayName, result.handle);
+    void sendFriendRequest(result.userId ?? result.id).then(() => {
       setSendingId(null);
-      setAddedConvByResultId((prev) => ({ ...prev, [result.id]: conversationId }));
+      setSentIds((prev) => ({ ...prev, [result.id]: true }));
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    }, 650);
+    }).catch(() => setSendingId(null));
   };
 
   const renderItem = ({ item }: { item: SearchResult }) => {
-    const existing = conversationForHandle(item.handle);
-    const justAddedConvId = addedConvByResultId[item.id];
-    const conversationId = existing?.id ?? justAddedConvId;
     const isSending = sendingId === item.id;
 
     return (
@@ -76,17 +76,14 @@ export function SearchScreen() {
           <Text style={styles.subtitle} numberOfLines={1}>@{item.handle} · {item.subtitle}</Text>
         </View>
 
-        {conversationId ? (
-          <Pressable style={styles.chatBtn} onPress={() => openChat(conversationId)}>
-            <Ionicons name="chatbubble-ellipses" size={14} color={colors.brand.ink} />
-            <Text style={styles.chatBtnText}>ส่งข้อความ</Text>
-          </Pressable>
+        {sentIds[item.id] ? (
+          <View style={styles.sendingBtn}><Text style={styles.sendingBtnText}>ส่งคำขอแล้ว</Text></View>
         ) : isSending ? (
           <View style={styles.sendingBtn}>
             <Text style={styles.sendingBtnText}>กำลังส่งคำขอ...</Text>
           </View>
         ) : (
-          <Pressable style={styles.addBtn} onPress={() => sendFriendRequest(item)}>
+          <Pressable style={styles.addBtn} onPress={() => submitFriendRequest(item)}>
             <Ionicons name="person-add" size={14} color={colors.text.primary} />
             <Text style={styles.addBtnText}>เพิ่มเพื่อน</Text>
           </Pressable>
@@ -139,7 +136,7 @@ export function SearchScreen() {
       </View>
 
       <Text style={styles.sectionLabel}>
-        {query ? `ผลการค้นหา (${results.length})` : 'ผู้ติดต่อแนะนำ'}
+        {query.length >= 3 ? `ผลการค้นหา (${results.length})` : 'ค้นหาด้วย @username หรือ Friend Code'}
       </Text>
 
       <FlatList

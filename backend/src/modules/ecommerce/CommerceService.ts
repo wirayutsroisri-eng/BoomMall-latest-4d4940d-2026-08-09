@@ -94,6 +94,7 @@ function availableOf(row: { onHand: number; reserved: number }) {
 
 function toBundle(row: {
   id: string;
+  merchantId: string;
   payloadJson: unknown;
   variants: Array<{
     id: string;
@@ -101,7 +102,7 @@ function toBundle(row: {
     stock: Array<{ skuId: string; warehouseId: string; onHand: number; reserved: number; revision: number }>;
   }>;
 }): CatalogBundle {
-  const product = { ...asRecord(row.payloadJson), id: row.id };
+  const product = { ...asRecord(row.payloadJson), id: row.id, ownerShopId: row.merchantId };
   const variants = row.variants.map((v) => ({ ...asRecord(v.payloadJson), id: v.id }));
   const stock: StockRow[] = row.variants.flatMap((v) =>
     v.stock.map((s) => ({
@@ -115,13 +116,18 @@ function toBundle(row: {
   return { product, variants, stock };
 }
 
-export async function upsertCatalogBundle(input: CatalogBundle): Promise<CatalogBundle> {
+export async function upsertCatalogBundle(
+  input: CatalogBundle,
+  owner?: { userId: string; shopId: string },
+): Promise<CatalogBundle> {
   const product = asRecord(input.product);
   const id = String(product.id ?? '').trim();
   if (!id) throw new AppError('VALIDATION', 'product.id required', 400);
   const title = String(product.title ?? '').trim();
   if (!title) throw new AppError('VALIDATION', 'product.title required', 400);
-  const merchantId = String(product.ownerShopId ?? product.shopName ?? 'shop').trim();
+  const merchantId = owner?.shopId ?? String(product.ownerShopId ?? product.shopName ?? 'shop').trim();
+  const ownerUserId = owner?.userId?.trim();
+  if (!ownerUserId) throw new AppError('OWNER_REQUIRED', 'authenticated product owner required', 401);
   const shopName = String(product.shopName ?? merchantId);
   const variants = Array.isArray(input.variants) ? input.variants : [];
   if (!variants.length) throw new AppError('VALIDATION', 'at least one SKU required', 400);
@@ -135,10 +141,18 @@ export async function upsertCatalogBundle(input: CatalogBundle): Promise<Catalog
   }
 
   await prisma.$transaction(async (tx) => {
+    const existingProduct = await tx.commerceProduct.findUnique({
+      where: { id },
+      select: { ownerUserId: true },
+    });
+    if (existingProduct && existingProduct.ownerUserId !== ownerUserId) {
+      throw new AppError('PRODUCT_FORBIDDEN', 'product belongs to another account', 403);
+    }
     await tx.commerceProduct.upsert({
       where: { id },
       create: {
         id,
+        ownerUserId,
         merchantId,
         shopName,
         title,
@@ -151,6 +165,7 @@ export async function upsertCatalogBundle(input: CatalogBundle): Promise<Catalog
         payloadJson: product as Prisma.InputJsonValue,
       },
       update: {
+        // Ownership is immutable. Never move a product between accounts.
         merchantId,
         shopName,
         title,
@@ -169,6 +184,13 @@ export async function upsertCatalogBundle(input: CatalogBundle): Promise<Catalog
       const variant = asRecord(raw);
       const variantId = String(variant.id ?? '').trim();
       if (!variantId) continue;
+      const existingSku = await tx.commerceSku.findUnique({
+        where: { id: variantId },
+        select: { product: { select: { ownerUserId: true } } },
+      });
+      if (existingSku && existingSku.product.ownerUserId !== ownerUserId) {
+        throw new AppError('SKU_FORBIDDEN', 'SKU belongs to another account', 403);
+      }
       keepIds.add(variantId);
       await tx.commerceSku.upsert({
         where: { id: variantId },
@@ -227,15 +249,19 @@ export async function upsertCatalogBundle(input: CatalogBundle): Promise<Catalog
   return saved;
 }
 
-export async function syncCatalogBundles(bundles: CatalogBundle[]) {
+export async function syncCatalogBundles(
+  bundles: CatalogBundle[],
+  owner: { userId: string; shopId: string },
+) {
   const out: CatalogBundle[] = [];
   for (const bundle of bundles) {
-    out.push(await upsertCatalogBundle(bundle));
+    out.push(await upsertCatalogBundle(bundle, owner));
   }
   return out;
 }
 
 export async function listCatalogBundles(opts?: {
+  ownerUserId?: string;
   merchantId?: string;
   includeHidden?: boolean;
   limit?: number;
@@ -243,6 +269,7 @@ export async function listCatalogBundles(opts?: {
   const limit = Math.min(opts?.limit ?? 200, 500);
   const rows = await prisma.commerceProduct.findMany({
     where: {
+      ...(opts?.ownerUserId ? { ownerUserId: opts.ownerUserId } : {}),
       ...(opts?.merchantId ? { merchantId: opts.merchantId } : {}),
       ...(opts?.includeHidden ? {} : { status: 'ACTIVE' }),
     },
@@ -261,11 +288,12 @@ export async function getCatalogBundle(id: string) {
   return row ? toBundle(row) : null;
 }
 
-export async function deleteCatalogProduct(id: string) {
-  await prisma.commerceProduct.update({
-    where: { id },
+export async function deleteCatalogProduct(id: string, ownerUserId: string) {
+  const result = await prisma.commerceProduct.updateMany({
+    where: { id, ownerUserId },
     data: { status: 'HIDDEN' },
   });
+  if (!result.count) throw new AppError('PRODUCT_NOT_FOUND', 'product not found or forbidden', 404);
   return { ok: true as const, id };
 }
 

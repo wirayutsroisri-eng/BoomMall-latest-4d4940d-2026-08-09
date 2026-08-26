@@ -12,6 +12,7 @@ import { useMusicLibraryStore } from '@/modules/music/state/music-library-store'
 import { useFeedStore } from '@/modules/feed/state/feed-store';
 import { useFollowStore } from '@/modules/social/state/follow-store';
 import { confirmDeleteAccount } from '@/modules/account/services/deleteAccountFlow';
+import { purgeLocalAccountData } from '@/modules/account/services/purgeLocalAccountData';
 import { openLegalDocument } from '@/shared/legal/openLegal';
 import { colors } from '@/shared/theme/colors';
 import { SettingsRow, SettingsSection } from './SettingsPrimitives';
@@ -53,6 +54,7 @@ export function AccountSettingsScreen() {
         style: 'destructive',
         onPress: () => {
           void (async () => {
+            await purgeLocalAccountData();
             useFeedStore.getState().switchAccount(null);
             useFollowStore.getState().reset();
             await useAuthStore.getState().clearSession();

@@ -30,7 +30,8 @@ import { parseInventoryCsv } from '@/modules/store/domain/inventory-csv';
 import { coverKindOf, listingThumbUri } from '@/modules/commerce/domain/product-media';
 import { useCategoriesStore } from '@/modules/store/state/categories-store';
 import { useStockAlertsStore } from '@/modules/store/state/stock-alerts-store';
-import { useWarehouseStore, MY_SHOP_ID } from '@/modules/warehouse/state/warehouse-store';
+import { useWarehouseStore } from '@/modules/warehouse/state/warehouse-store';
+import { useAuthStore } from '@/modules/auth/state/auth-store';
 import type { Listing } from '@/modules/warehouse/domain/types';
 import { ProductQuickPreviewSheet } from '@/modules/store/ui/warehouse/ProductQuickPreviewSheet';
 import { PromoteProductSheet } from '@/modules/store/ui/PromoteProductSheet';
@@ -46,8 +47,6 @@ import { colors } from '@/shared/theme/colors';
 const H_PAD = 14;
 const ITEM_GAP = 10;
 const ITEM_H = INVENTORY_CARD_H + ITEM_GAP;
-const MY_WAREHOUSE_ID = 'wh-boom-ev';
-
 type ToneFilter = 'all' | StockStatus;
 
 function optionLinesOf(variants: SkuVariant[]): string[] {
@@ -123,6 +122,7 @@ type GridItem = {
 
 export function StoreDashboardScreen() {
   const insets = useSafeAreaInsets();
+  const myShopId = useAuthStore((s) => s.user?.shopId ?? '');
   const [tab, setTab] = useState<'mine' | 'shared'>('mine');
   const [category, setCategory] = useState<string>('all');
   const [query, setQuery] = useState('');
@@ -158,7 +158,7 @@ export function StoreDashboardScreen() {
   const createMasterWithVariants = useInventoryStore((s) => s.createMasterWithVariants);
 
   const pendingRequests = requests.filter(
-    (r) => r.status === 'pending' && warehousesShared.some((w) => w.id === r.warehouseId && w.ownerShopId === MY_SHOP_ID),
+    (r) => r.status === 'pending' && warehousesShared.some((w) => w.id === r.warehouseId && w.ownerShopId === myShopId),
   ).length;
 
   // ----- Derived stock maps (reactive to stockByKey) -----
@@ -191,13 +191,13 @@ export function StoreDashboardScreen() {
   const mastersById = useMemo(() => new Map(masters.map((m) => [m.id, m])), [masters]);
 
   const myMasters = useMemo(
-    () => masters.filter((m) => !m.ownerShopId || m.ownerShopId === MY_SHOP_ID),
-    [masters],
+    () => masters.filter((m) => m.ownerShopId === myShopId),
+    [masters, myShopId],
   );
 
   const myListings = useMemo(
-    () => listings.filter((l) => l.shopId === MY_SHOP_ID),
-    [listings],
+    () => listings.filter((l) => l.shopId === myShopId),
+    [listings, myShopId],
   );
 
   const stockOfMaster = useMemo(() => {
@@ -509,6 +509,7 @@ export function StoreDashboardScreen() {
           basePrice,
           tags: [cat?.label ?? 'Custom', 'Import'],
           customFields: [],
+          ownerShopId: myShopId,
           description: product.description,
           categoryKey: cat?.key,
           variants: product.variants.map((v, vi) => ({
@@ -516,11 +517,12 @@ export function StoreDashboardScreen() {
             sku: v.sku?.trim() || `${sku}-V${vi + 1}`,
             price: v.price,
             attrs: {},
-            warehouseId: 'WH-CTI-MAIN',
+            warehouseId: 'PRIMARY',
             onHand: v.stock,
           })),
         });
-        onNewProductCreated(MY_WAREHOUSE_ID, masterId, cat?.key);
+        const ownedWarehouse = warehousesShared.find((row) => row.ownerShopId === myShopId);
+        if (ownedWarehouse) onNewProductCreated(ownedWarehouse.id, masterId, cat?.key);
       });
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert('นำเข้าเรียบร้อย', `สร้างสินค้าใหม่ ${parsed.products.length} รายการจากไฟล์`);

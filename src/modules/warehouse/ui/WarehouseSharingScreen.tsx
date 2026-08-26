@@ -13,19 +13,20 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { useWarehouseStore, MY_SHOP_ID } from '@/modules/warehouse/state/warehouse-store';
+import { useWarehouseStore } from '@/modules/warehouse/state/warehouse-store';
+import { useAuthStore } from '@/modules/auth/state/auth-store';
 import { ROLE_LABEL } from '@/modules/warehouse/domain/warehouse-core';
 import type { WarehouseRole } from '@/modules/warehouse/domain/types';
 import { useInventoryStore } from '@/modules/commerce/state/inventory-store';
 import { BASE_CATEGORIES } from '@/modules/store/state/categories-store';
 import { colors } from '@/shared/theme/colors';
-import { ENABLE_FAKE_LIVE_AND_DEMO_ACCEPT } from '@/shared/compliance/appStoreGates';
 import { promptText } from '@/shared/components/AppPrompt';
 
 const ASSIGNABLE_ROLES: WarehouseRole[] = ['ADMIN', 'INVENTORY_MANAGER', 'SELLER', 'VIEWER'];
 
 export function WarehouseSharingScreen() {
   const insets = useSafeAreaInsets();
+  const myShopId = useAuthStore((s) => s.user?.shopId ?? '');
   const [inviteQuery, setInviteQuery] = useState('');
 
   const warehouses = useWarehouseStore((s) => s.warehouses);
@@ -37,7 +38,6 @@ export function WarehouseSharingScreen() {
   const profiles = useWarehouseStore((s) => s.profiles);
   const profileOf = useWarehouseStore((s) => s.profileOf);
   const invite = useWarehouseStore((s) => s.invite);
-  const respondToInvitation = useWarehouseStore((s) => s.respondToInvitation);
   const sendAccessRequest = useWarehouseStore((s) => s.sendAccessRequest);
   const respondToRequest = useWarehouseStore((s) => s.respondToRequest);
   const changeMemberRole = useWarehouseStore((s) => s.changeMemberRole);
@@ -47,20 +47,20 @@ export function WarehouseSharingScreen() {
 
   const masters = useInventoryStore((s) => s.masters);
 
-  const myWarehouse = warehouses.find((w) => w.ownerShopId === MY_SHOP_ID);
+  const myWarehouse = warehouses.find((w) => w.ownerShopId === myShopId);
   const sharedWithMe = warehouses.filter(
     (w) =>
-      w.ownerShopId !== MY_SHOP_ID &&
-      members.some((m) => m.warehouseId === w.id && m.shopId === MY_SHOP_ID),
+      w.ownerShopId !== myShopId &&
+      members.some((m) => m.warehouseId === w.id && m.shopId === myShopId),
   );
   const requestable = warehouses.filter(
     (w) =>
-      w.ownerShopId !== MY_SHOP_ID &&
-      !members.some((m) => m.warehouseId === w.id && m.shopId === MY_SHOP_ID),
+      w.ownerShopId !== myShopId &&
+      !members.some((m) => m.warehouseId === w.id && m.shopId === myShopId),
   );
 
   const myMembers = members.filter(
-    (m) => m.warehouseId === myWarehouse?.id && m.shopId !== MY_SHOP_ID,
+    (m) => m.warehouseId === myWarehouse?.id && m.shopId !== myShopId,
   );
   const myPendingInvites = invitations.filter(
     (i) => i.warehouseId === myWarehouse?.id && i.status === 'pending',
@@ -73,23 +73,23 @@ export function WarehouseSharingScreen() {
   const productCountByOwner = useMemo(() => {
     const map = new Map<string, number>();
     for (const m of masters) {
-      const owner = m.ownerShopId ?? MY_SHOP_ID;
+      const owner = m.ownerShopId ?? myShopId;
       map.set(owner, (map.get(owner) ?? 0) + 1);
     }
     return map;
-  }, [masters]);
+  }, [masters, myShopId]);
 
   const inviteCandidates = useMemo(() => {
     const q = inviteQuery.trim().toLowerCase();
     if (!q) return [];
     return profiles.filter(
       (p) =>
-        p.id !== MY_SHOP_ID &&
+        p.id !== myShopId &&
         (p.name.toLowerCase().includes(q) ||
           p.handle.toLowerCase().includes(q) ||
           p.email?.toLowerCase().includes(q)),
     );
-  }, [profiles, inviteQuery]);
+  }, [profiles, inviteQuery, myShopId]);
 
   const feedback = (result: { ok: boolean; message: string }) => {
     void Haptics.notificationAsync(
@@ -199,7 +199,7 @@ export function WarehouseSharingScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.warehouseName}>{myWarehouse.name}</Text>
                 <Text style={styles.meta}>
-                  {(productCountByOwner.get(MY_SHOP_ID) ?? 0).toLocaleString('th-TH')} สินค้า ·
+                  {(productCountByOwner.get(myShopId) ?? 0).toLocaleString('th-TH')} สินค้า ·
                   สมาชิก {myMembers.length + 1} บัญชี · OWNER
                 </Text>
               </View>
@@ -299,32 +299,6 @@ export function WarehouseSharingScreen() {
                         <Text style={styles.personName}>{profile?.name ?? inv.toShopId}</Text>
                         <Text style={styles.meta}>เชิญเป็น {ROLE_LABEL[inv.role]}</Text>
                       </View>
-                      {ENABLE_FAKE_LIVE_AND_DEMO_ACCEPT ? (
-                        <Pressable
-                          style={styles.demoBtn}
-                          onPress={() =>
-                            Alert.alert(
-                              'จำลองฝั่งผู้รับ (เดโม)',
-                              `${profile?.name} จะตอบคำเชิญอย่างไร?`,
-                              [
-                                {
-                                  text: 'ตอบรับ',
-                                  onPress: () =>
-                                    feedback(respondToInvitation(inv.id, inv.toShopId, true)),
-                                },
-                                {
-                                  text: 'ปฏิเสธ',
-                                  onPress: () =>
-                                    feedback(respondToInvitation(inv.id, inv.toShopId, false)),
-                                },
-                                { text: 'ยกเลิก', style: 'cancel' },
-                              ],
-                            )
-                          }
-                        >
-                          <Text style={styles.demoBtnText}>จำลองการตอบรับ</Text>
-                        </Pressable>
-                      ) : null}
                     </View>
                   );
                 })}
@@ -402,10 +376,10 @@ export function WarehouseSharingScreen() {
       ) : (
         sharedWithMe.map((w) => {
           const membership = members.find(
-            (m) => m.warehouseId === w.id && m.shopId === MY_SHOP_ID,
+            (m) => m.warehouseId === w.id && m.shopId === myShopId,
           );
           const installed = listings.filter(
-            (l) => l.warehouseId === w.id && l.shopId === MY_SHOP_ID,
+            (l) => l.warehouseId === w.id && l.shopId === myShopId,
           );
           const activeInstalled = installed.filter((l) => l.status === 'active');
           const productCount = productCountByOwner.get(w.ownerShopId) ?? 0;
@@ -473,7 +447,7 @@ export function WarehouseSharingScreen() {
         requestable.map((w) => {
           const owner = profileOf(w.ownerShopId);
           const pending = requests.some(
-            (r) => r.warehouseId === w.id && r.fromShopId === MY_SHOP_ID && r.status === 'pending',
+            (r) => r.warehouseId === w.id && r.fromShopId === myShopId && r.status === 'pending',
           );
           return (
             <View key={w.id} style={styles.warehouseCard}>
@@ -593,15 +567,6 @@ const styles = StyleSheet.create({
     borderColor: colors.border.strong,
   },
   rejectBtnText: { color: colors.text.secondary, fontSize: 11, fontWeight: '800' },
-  demoBtn: {
-    backgroundColor: '#EAF3FF',
-    borderRadius: 9,
-    paddingHorizontal: 9,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(46,140,255,0.3)',
-  },
-  demoBtnText: { color: '#1D5FAE', fontSize: 10, fontWeight: '800' },
   searchBox: {
     flexDirection: 'row',
     alignItems: 'center',

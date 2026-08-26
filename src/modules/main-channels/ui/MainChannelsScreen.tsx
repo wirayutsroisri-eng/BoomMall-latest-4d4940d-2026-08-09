@@ -21,6 +21,10 @@ import { enabledMainChannels } from '../config/mainChannels';
 import type { MainChannel } from '../domain/types';
 import { MediaViewer } from '@/modules/feed/ui/MediaViewer';
 import { useMainTabBarStore } from '@/shared/state/main-tab-bar-store';
+import { useFeedStore } from '@/modules/feed/state/feed-store';
+import { pullCommerceCatalog } from '@/modules/commerce/data/commerceSync';
+import { ContentRefreshOverlay } from '@/shared/components/ContentRefreshOverlay';
+import { withMinimumDuration } from '@/shared/utils/minimumDuration';
 
 const INITIAL_CHANNEL_ID = 'feed';
 const CHANNEL_TAB_WIDTH = 54;
@@ -28,6 +32,8 @@ const SEARCH_BUTTON_WIDTH = 54;
 const INDICATOR_REVEAL_RATIO = 0.05;
 const INDICATOR_HOLD_MS = 1800;
 const VERTICAL_HIDE_DELTA = 1;
+const VERTICAL_REVEAL_SPEED_PX_PER_MS = 1.25;
+const VERTICAL_REVEAL_DISTANCE = 72;
 
 function channelViewPosition(index: number, count: number) {
   // Keep the next channel readable (especially "คลิป" beside the fixed search button).
@@ -41,12 +47,15 @@ export function MainChannelsScreen() {
   const initialIndex = Math.max(0, channels.findIndex((channel) => channel.id === INITIAL_CHANNEL_ID));
   const [activeIndex, setActiveIndex] = useState(initialIndex);
   const feedHeaderActive = channels[activeIndex]?.id === 'feed';
+  const clipsActive = channels[activeIndex]?.id === 'clips';
   const pagerRef = useRef<FlatList<MainChannel>>(null);
   const headerRef = useRef<FlatList<MainChannel>>(null);
   const indicatorOpacity = useRef(new Animated.Value(0)).current;
   const headerTranslateY = useRef(new Animated.Value(0)).current;
   const headerHidden = useRef(false);
   const lastVerticalOffset = useRef(0);
+  const lastVerticalTime = useRef(Date.now());
+  const fastDownDistance = useRef(0);
   const indicatorHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dragStartX = useRef(0);
   const draggingHorizontally = useRef(false);
@@ -54,6 +63,15 @@ export function MainChannelsScreen() {
   const indicatorRevealed = useRef(false);
   const [indicatorMounted, setIndicatorMounted] = useState(false);
   const setBottomBarHidden = useMainTabBarStore((state) => state.setHidden);
+  const setActiveMainChannelId = useMainTabBarStore((state) => state.setActiveMainChannelId);
+  const homeRefreshNonce = useMainTabBarStore((state) => state.homeRefreshNonce);
+  const refreshFeed = useFeedStore((state) => state.refreshFromServer);
+  const [homeRefreshing, setHomeRefreshing] = useState(false);
+  const handledHomeRefreshNonce = useRef(homeRefreshNonce);
+
+  useEffect(() => {
+    setActiveMainChannelId(channels[activeIndex]?.id ?? INITIAL_CHANNEL_ID);
+  }, [activeIndex, channels, setActiveMainChannelId]);
 
   const clearIndicatorTimer = useCallback(() => {
     if (indicatorHideTimer.current) {
@@ -105,21 +123,47 @@ export function MainChannelsScreen() {
     }).start();
   }, [headerTranslateY, insets.top]);
 
+  useEffect(() => {
+    if (homeRefreshNonce === handledHomeRefreshNonce.current) return;
+    handledHomeRefreshNonce.current = homeRefreshNonce;
+    const activeChannelId = channels[activeIndex]?.id ?? INITIAL_CHANNEL_ID;
+    const request = activeChannelId === 'shop' ? pullCommerceCatalog() : refreshFeed();
+    setHeaderHidden(false);
+    setBottomBarHidden(false);
+    setHomeRefreshing(true);
+    void withMinimumDuration(request).finally(() => setHomeRefreshing(false));
+  }, [activeIndex, channels, homeRefreshNonce, refreshFeed, setBottomBarHidden, setHeaderHidden]);
+
   const handleVerticalScroll = useCallback((offsetY: number) => {
     const y = Math.max(0, offsetY);
+    const now = Date.now();
     const delta = y - lastVerticalOffset.current;
+    const elapsed = Math.max(1, now - lastVerticalTime.current);
+    const downwardSpeed = delta < 0 ? -delta / elapsed : 0;
     lastVerticalOffset.current = y;
+    lastVerticalTime.current = now;
     if (y <= 4) {
+      fastDownDistance.current = 0;
       setHeaderHidden(false);
       setBottomBarHidden(false);
       return;
     }
     if (delta > VERTICAL_HIDE_DELTA && y > 2) {
+      fastDownDistance.current = 0;
       setHeaderHidden(true);
       setBottomBarHidden(true);
     } else if (delta < -VERTICAL_HIDE_DELTA) {
-      setHeaderHidden(false);
-      setBottomBarHidden(false);
+      if (downwardSpeed >= VERTICAL_REVEAL_SPEED_PX_PER_MS) {
+        fastDownDistance.current += -delta;
+        if (fastDownDistance.current >= VERTICAL_REVEAL_DISTANCE) {
+          fastDownDistance.current = 0;
+          setHeaderHidden(false);
+          setBottomBarHidden(false);
+        }
+      } else {
+        // A slow downward read/adjust gesture must not bring navigation back.
+        fastDownDistance.current = 0;
+      }
     }
   }, [setBottomBarHidden, setHeaderHidden]);
 
@@ -137,6 +181,8 @@ export function MainChannelsScreen() {
     headerRef.current?.scrollToIndex({ index: next, animated: true, viewPosition: channelViewPosition(next, channels.length) });
     if (changed) void Haptics.selectionAsync();
     lastVerticalOffset.current = 0;
+    lastVerticalTime.current = Date.now();
+    fastDownDistance.current = 0;
     setHeaderHidden(false);
     setBottomBarHidden(false);
     draggingHorizontally.current = false;
@@ -163,15 +209,17 @@ export function MainChannelsScreen() {
 
   return (
     <View style={styles.root}>
-      <StatusBar style="light" />
+      <StatusBar style={clipsActive ? 'light' : 'dark'} />
       <Animated.View
         pointerEvents="box-none"
         style={[
           styles.header,
           {
             paddingTop: insets.top,
-            backgroundColor: feedHeaderActive ? '#070A08' : 'transparent',
-            transform: [{ translateY: feedHeaderActive ? headerTranslateY : 0 }],
+            backgroundColor: feedHeaderActive ? '#F4F5F3' : 'transparent',
+            // Feed, Jobs, Secondhand and Shop share the same hide/reveal chrome.
+            // Clips stays pinned so its full-screen media viewport never shifts.
+            transform: [{ translateY: clipsActive ? 0 : headerTranslateY }],
           },
         ]}
       >
@@ -223,22 +271,30 @@ export function MainChannelsScreen() {
                     accessibilityRole="tab"
                     accessibilityState={{ selected }}
                   >
-                    <Text numberOfLines={1} style={[styles.tabText, selected && styles.tabTextActive]}>{item.title}</Text>
-                    {selected ? <View style={styles.indicator} /> : null}
+                    <Text numberOfLines={1} style={[
+                      styles.tabText,
+                      clipsActive && styles.tabTextDark,
+                      selected && styles.tabTextActive,
+                      selected && clipsActive && styles.tabTextActiveDark,
+                    ]}>{item.title}</Text>
+                    {selected ? <View style={[styles.indicator, clipsActive && styles.indicatorDark]} /> : null}
                   </Pressable>
                 );
               }}
             />
           </Animated.View>
           <Pressable
-            style={styles.searchButton}
-            hitSlop={8}
-            onPress={() => router.push('/search')}
-            accessibilityRole="button"
-            accessibilityLabel="ค้นหา"
-          >
-            <Ionicons name="search" size={27} color="#FFFFFF" style={styles.searchIcon} />
-          </Pressable>
+              style={styles.searchButton}
+              hitSlop={8}
+              onPress={() => router.push({
+                pathname: '/channel-search',
+                params: { scope: channels[activeIndex]?.id ?? INITIAL_CHANNEL_ID },
+              })}
+              accessibilityRole="button"
+              accessibilityLabel={`ค้นหาใน${channels[activeIndex]?.title ?? 'BoomMall'}`}
+            >
+              <Ionicons name="search" size={27} color={clipsActive ? '#fff' : '#26312C'} style={styles.searchIcon} />
+            </Pressable>
         </View>
       </Animated.View>
 
@@ -282,6 +338,7 @@ export function MainChannelsScreen() {
         }}
       />
       <MediaViewer />
+      <ContentRefreshOverlay visible={homeRefreshing} dark={clipsActive} />
     </View>
   );
 }
@@ -295,7 +352,7 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 30,
     elevation: 30,
-    backgroundColor: 'transparent',
+    backgroundColor: '#F4F5F3',
   },
   headerRow: { height: 50, flexDirection: 'row', alignItems: 'stretch' },
   channelList: { flex: 1 },
@@ -311,15 +368,18 @@ const styles = StyleSheet.create({
   channelContent: { paddingLeft: 10, paddingRight: 0 },
   tab: { width: CHANNEL_TAB_WIDTH, height: 50, alignItems: 'center', justifyContent: 'center' },
   tabText: {
-    color: 'rgba(255,255,255,0.62)',
+    color: '#68736D',
     fontSize: 14,
     fontWeight: '800',
-    textShadowColor: 'rgba(0,0,0,0.9)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
+    textShadowColor: 'transparent',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 0,
   },
-  tabTextActive: { color: '#FFFFFF', fontSize: 15, fontWeight: '900' },
-  indicator: { position: 'absolute', bottom: 3, width: 24, height: 3, borderRadius: 2, backgroundColor: '#FFFFFF' },
+  tabTextActive: { color: '#168BFF', fontSize: 15, fontWeight: '900' },
+  tabTextDark: { color: 'rgba(255,255,255,0.58)' },
+  tabTextActiveDark: { color: '#fff' },
+  indicator: { position: 'absolute', bottom: 3, width: 24, height: 3, borderRadius: 2, backgroundColor: '#168BFF' },
+  indicatorDark: { backgroundColor: '#fff' },
   searchButton: {
     width: SEARCH_BUTTON_WIDTH,
     height: 50,
@@ -328,8 +388,8 @@ const styles = StyleSheet.create({
     paddingRight: 8,
   },
   searchIcon: {
-    textShadowColor: 'rgba(0,0,0,0.9)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
+    textShadowColor: 'transparent',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 0,
   },
 });

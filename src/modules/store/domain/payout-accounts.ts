@@ -1,6 +1,6 @@
 import type { ComponentProps } from 'react';
 import type { Ionicons } from '@expo/vector-icons';
-export type SellerPayoutKind = 'promptpay' | 'bank_account' | 'boommall_pay' | 'cod';
+export type SellerPayoutKind = 'promptpay' | 'bank_account' | 'cod';
 
 export type SellerPayoutAccount = {
   id: string;
@@ -34,12 +34,6 @@ export const PAYOUT_KIND_META: Record<
     hint: 'บัญชีถอนยอดสุทธิจากแพลตฟอร์มหลังหัก GP',
     icon: 'business-outline',
     needsDetails: true,
-  },
-  boommall_pay: {
-    title: 'BoomMall Pay',
-    hint: 'รับผ่านยอดในแพลตฟอร์ม',
-    icon: 'wallet-outline',
-    needsDetails: false,
   },
   cod: {
     title: 'เก็บเงินปลายทาง',
@@ -86,4 +80,3 @@ export function validatePayout(input: {
   }
   return null;
 }
-

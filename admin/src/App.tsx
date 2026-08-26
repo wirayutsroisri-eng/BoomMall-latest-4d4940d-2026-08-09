@@ -16,7 +16,6 @@ import { ShopChatPage } from './pages/ShopChatPage';
 import { DomainsPage } from './pages/DomainsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { OrdersPage } from './pages/OrdersPage';
-import { BoomCoinPage } from './pages/BoomCoinPage';
 import { AlertsPage } from './pages/AlertsPage';
 import { SystemHealthPage } from './pages/SystemHealthPage';
 import { SafetyLayout } from './pages/safety/SafetyLayout';
@@ -106,14 +105,12 @@ export default function App() {
             <Route path="sellers" element={<SellersPage />} />
             <Route path="orders" element={<OrdersPage />} />
             <Route path="finance" element={<PlatformFinancePage />} />
-            <Route path="coins" element={<BoomCoinPage />} />
             <Route path="cases" element={<Navigate to="/safety/cases" replace />} />
             <Route path="shop-chat" element={<ShopChatPage />} />
             <Route path="domains" element={<DomainsPage />} />
             <Route path="analytics" element={<AnalyticsPage />} />
             <Route path="ai" element={<AiControlPage />} />
             <Route path="settings" element={<SettingsPage />} />
-            <Route path="handbook" element={<Navigate to="/finance" replace />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

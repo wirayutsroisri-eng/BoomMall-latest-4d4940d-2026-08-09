@@ -16,7 +16,6 @@ import { colors } from '@/shared/theme/colors';
 const ORANGE = '#EE4D2D';
 
 const ICONS: Record<PaymentMethodId, keyof typeof Ionicons.glyphMap> = {
-  boommall_pay: 'wallet-outline',
   bank_account: 'business-outline',
   card: 'card-outline',
   promptpay: 'qr-code-outline',
@@ -31,7 +30,6 @@ const KIND_BY_METHOD: Partial<Record<PaymentMethodId, BuyerPaymentKind>> = {
   bank_account: 'bank_account',
   mobile_banking: 'bank_account',
   card: 'card',
-  boommall_pay: 'boommall_pay',
 };
 
 function enrollKind(id: PaymentMethodId): BuyerPaymentKind | undefined {

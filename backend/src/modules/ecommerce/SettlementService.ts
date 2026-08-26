@@ -1,5 +1,5 @@
 /**
- * Marketplace THB settlement — platform books, not Boom Coin.
+ * Marketplace THB settlement and platform accounting books.
  *
  * Buyer pays PSP → platform cash + GP revenue + merchant held.
  * After delivered + buyer/seller OK + no return → holdDays (default 7).

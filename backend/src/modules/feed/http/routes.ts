@@ -7,7 +7,7 @@ import { requireAdmin, adminHasPermission } from '../../../middleware/adminAuth'
 import type { AuthedRequest } from '../../../middleware/adminAuth';
 import { requireUserOrDevHeader } from '../../../middleware/userAuth';
 import type { UserAuthedRequest } from '../../../middleware/userAuth';
-import { createSocialPost, listSocialPosts, socialFeedDomainExtras, toggleSocialPostLike, recordFeedSignal, bumpShareCount, updateSocialPost, deleteSocialPost } from '../SocialPostService';
+import { createSocialPost, listSocialPosts, socialFeedDomainExtras, toggleSocialPostLike, recordFeedSignal, bumpShareCount, updateSocialPost, deleteSocialPost, updateSecondhandListingStatus } from '../SocialPostService';
 import { addComment, listComments, toggleCommentLike } from '../CommentService';
 import { contentFeedDomainStatus } from '../ContentFeedService';
 import { listFollowing } from '../../auth/FollowService';
@@ -42,6 +42,12 @@ feedAppRouter.get('/posts', async (req: UserAuthedRequest, res, next) => {
     const lng = req.query.lng != null ? Number(req.query.lng) : undefined;
     const radiusKm = req.query.radiusKm != null ? Number(req.query.radiusKm) : 10;
     const mine = String(req.query.mine ?? '') === '1';
+    const refresh = String(req.query.refresh ?? '') === '1';
+    const excludeIds = String(req.query.excludeIds ?? '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean)
+      .slice(0, 80);
     let authorIds: string[] | undefined;
     if (mine) {
       if (!req.user?.sub) throw new AppError('UNAUTHORIZED', 'Authentication required', 401);
@@ -52,20 +58,42 @@ feedAppRouter.get('/posts', async (req: UserAuthedRequest, res, next) => {
       authorIds = following.map((f) => f.followingId);
       if (!authorIds.length) authorIds = ['__none__'];
     }
+    const listOptions = {
+      authorIds,
+      nearby: tab === 'nearby' && lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)
+        ? { lat, lng, radiusKm: Number.isFinite(radiusKm) ? radiusKm : 10 }
+        : undefined,
+      lane: tab === 'board' ? 'board' : undefined,
+      viewerId: req.user?.sub,
+      includeHidden: mine,
+    };
+    let data = await listSocialPosts(40, {
+      ...listOptions,
+      excludeIds: refresh && !mine ? excludeIds : undefined,
+    });
+    // A refresh asks for unseen records first. Small development datasets may
+    // have no unseen rows, so fall back to the latest real records instead of
+    // returning an empty feed or manufacturing content.
+    if (refresh && !mine && excludeIds.length && !data.length) {
+      data = await listSocialPosts(40, listOptions);
+    }
+    res.setHeader('Cache-Control', 'no-store');
     res.json({
       ok: true,
-      data: await listSocialPosts(40, {
-        authorIds,
-        nearby: tab === 'nearby' && lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)
-          ? { lat, lng, radiusKm: Number.isFinite(radiusKm) ? radiusKm : 10 }
-          : undefined,
-        lane: tab === 'board' ? 'board' : undefined,
-        viewerId: req.user?.sub,
-      }),
+      data,
     });
   } catch (e) {
     next(e);
   }
+});
+
+feedAppRouter.patch('/posts/:id/secondhand-status', requireUserOrDevHeader, async (req: UserAuthedRequest, res, next) => {
+  try {
+    const id = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
+    const updated = await updateSecondhandListingStatus(id, req.user!.sub, String(req.body?.status ?? '') as Parameters<typeof updateSecondhandListingStatus>[2]);
+    if (!updated) throw new AppError('NOT_FOUND', 'listing not found or forbidden', 404);
+    res.json({ ok: true, data: updated });
+  } catch (error) { next(error); }
 });
 
 feedAppRouter.post('/posts', requireUserOrDevHeader, async (req: UserAuthedRequest, res, next) => {
@@ -191,7 +219,7 @@ feedAppRouter.post(
 
 feedAppRouter.post('/signals', requireUserOrDevHeader, async (req: UserAuthedRequest, res, next) => {
   try {
-    const kind = String(req.body?.kind ?? '') as 'like' | 'unlike' | 'not_interested' | 'share';
+    const kind = String(req.body?.kind ?? '') as Parameters<typeof recordFeedSignal>[0]['kind'];
     const contentId = String(req.body?.contentId ?? req.body?.content_id ?? '');
     if (kind === 'share' && contentId) await bumpShareCount(contentId);
     res.json({

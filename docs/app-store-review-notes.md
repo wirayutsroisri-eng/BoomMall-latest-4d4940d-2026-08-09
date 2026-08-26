@@ -6,7 +6,7 @@ Copy into App Store Connect → App Review Information → Notes.
 
 BoomMall is a social marketplace: feed, chat, shop listings, and seller warehouse tools.
 Physical-goods checkout is visible but **does not claim payment success** until a PSP is live.
-Boom Coin wallet, tips, top-up, voice/video calls, music upload, and LIVE are **not shipped** in this build.
+Digital currency, tips, top-up, voice/video calls, music upload, and LIVE are **not shipped** in this build.
 
 ## Demo account (required)
 

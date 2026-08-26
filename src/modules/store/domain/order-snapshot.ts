@@ -1,8 +1,6 @@
 import type { OrderSnapshotCard } from '@/modules/chat/domain/types';
 import { ORDER_STATUS_LABEL, type IncomingOrder, type OrderStatus } from './types';
 
-const MY_SHOP_ID = 'shop-boom-ev';
-
 const SHIP_LABEL: Record<OrderStatus, string> = {
   pending: 'รอชำระเงิน / Unpaid',
   paid: 'รอจัดส่ง / To Ship',
@@ -25,11 +23,12 @@ export function buyerIdOf(order: IncomingOrder): string {
   return `buyer-${slug || order.id}`;
 }
 
-export function snapshotOfOrder(order: IncomingOrder): OrderSnapshotCard {
+export function snapshotOfOrder(order: IncomingOrder, shopId: string): OrderSnapshotCard {
+  if (!shopId.trim()) throw new Error('shopId required');
   return {
     orderId: order.id,
     buyerId: buyerIdOf(order),
-    shopId: MY_SHOP_ID,
+    shopId,
     title: order.productTitle,
     option: order.variantLabel,
     qty: order.qty,

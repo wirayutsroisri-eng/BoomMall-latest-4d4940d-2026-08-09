@@ -1,15 +1,8 @@
 /**
- * E-Commerce & Merchant Service — Boom Coin + GP ledger/audit + Catalog + Ads billing + PSP.
+ * E-Commerce & Merchant Service — THB settlement + Catalog + Ads billing + PSP.
  */
 
-export {
-  approveSellerTopUp,
-  createTopUpRequest,
-  listTopUps,
-} from '../../services/topup';
 export { getDashboardStats } from '../../services/dashboard';
-export { reconcileLedger } from '../../services/reconcile';
-export { bootstrapSystem } from '../../services/bootstrap';
 export {
   quoteGp,
   quoteOrderGp,

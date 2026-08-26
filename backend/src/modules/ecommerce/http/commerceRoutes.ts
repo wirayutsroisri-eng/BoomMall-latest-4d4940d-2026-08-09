@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { requireAdmin, requirePermission, adminHasPermission } from '../../../middleware/adminAuth';
 import { AppError } from '../../../lib/errors';
 import type { AuthedRequest } from '../../../middleware/adminAuth';
-import { requireUserOrDevHeader } from '../../../middleware/userAuth';
+import { authedUserId, requireUserOrDevHeader } from '../../../middleware/userAuth';
+import { prisma } from '../../../lib/prisma';
 import type { UserAuthedRequest } from '../../../middleware/userAuth';
 import {
   applyStockSale,
@@ -66,6 +67,17 @@ import {
 export const commerceAppRouter = Router();
 export const commerceAdminRouter = Router();
 
+async function commerceOwner(req: UserAuthedRequest) {
+  const userId = authedUserId(req);
+  const profile = await prisma.userProfile.findUnique({
+    where: { userId },
+    select: { shopId: true },
+  });
+  const shopId = profile?.shopId?.trim();
+  if (!shopId) throw new AppError('SHOP_ID_REQUIRED', 'บัญชีนี้ยังไม่มีรหัสร้านค้า กรุณาเข้าสู่ระบบใหม่', 409);
+  return { userId, shopId };
+}
+
 function asBundle(body: unknown): CatalogBundle {
   const raw = (body ?? {}) as Record<string, unknown>;
   const nested = raw.product && typeof raw.product === 'object' ? (raw as CatalogBundle) : null;
@@ -83,10 +95,10 @@ function asBundle(body: unknown): CatalogBundle {
   };
 }
 
-commerceAppRouter.get('/catalog', async (req, res, next) => {
+commerceAppRouter.get('/catalog', requireUserOrDevHeader, async (req: UserAuthedRequest, res, next) => {
   try {
-    const merchantId = req.query.merchantId ? String(req.query.merchantId) : undefined;
-    res.json({ ok: true, data: await listCatalogBundles({ merchantId }) });
+    const owner = await commerceOwner(req);
+    res.json({ ok: true, data: await listCatalogBundles({ ownerUserId: owner.userId }) });
   } catch (e) {
     next(e);
   }
@@ -109,10 +121,9 @@ commerceAppRouter.get('/catalog/:id', async (req, res, next) => {
 commerceAppRouter.put('/catalog', requireUserOrDevHeader, async (req: UserAuthedRequest, res, next) => {
   try {
     const bundle = asBundle(req.body);
-    if (req.user?.sub && !bundle.product.ownerShopId) {
-      bundle.product = { ...bundle.product, ownerShopId: req.user.sub };
-    }
-    const data = await upsertCatalogBundle(bundle);
+    const owner = await commerceOwner(req);
+    bundle.product = { ...bundle.product, ownerShopId: owner.shopId };
+    const data = await upsertCatalogBundle(bundle, owner);
     await recordAnalyticsEvent({
       userId: req.user?.sub,
       name: 'catalog_upsert',
@@ -132,17 +143,23 @@ commerceAppRouter.post('/catalog/sync', requireUserOrDevHeader, async (req: User
       : Array.isArray(req.body)
         ? (req.body as CatalogBundle[])
         : [];
-    const data = await syncCatalogBundles(bundles.map(asBundle));
+    const owner = await commerceOwner(req);
+    const owned = bundles.map(asBundle).map((bundle) => ({
+      ...bundle,
+      product: { ...bundle.product, ownerShopId: owner.shopId },
+    }));
+    const data = await syncCatalogBundles(owned, owner);
     res.json({ ok: true, data });
   } catch (e) {
     next(e);
   }
 });
 
-commerceAppRouter.delete('/catalog/:id', requireUserOrDevHeader, async (req, res, next) => {
+commerceAppRouter.delete('/catalog/:id', requireUserOrDevHeader, async (req: UserAuthedRequest, res, next) => {
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    res.json({ ok: true, data: await deleteCatalogProduct(String(id)) });
+    const owner = await commerceOwner(req);
+    res.json({ ok: true, data: await deleteCatalogProduct(String(id), owner.userId) });
   } catch (e) {
     next(e);
   }
@@ -233,15 +250,21 @@ commerceAppRouter.patch(
 commerceAppRouter.post('/events', requireUserOrDevHeader, async (req: UserAuthedRequest, res, next) => {
   try {
     const body = req.body ?? {};
+    const result = await recordAnalyticsEvent({
+      userId: req.user?.sub,
+      name: String(body.name ?? ''),
+      entityType: body.entityType ? String(body.entityType) : undefined,
+      entityId: body.entityId ? String(body.entityId) : undefined,
+      payload: body.payload,
+    });
+    const interestEvent = ({ product_view: 'PRODUCT_VIEWED', product_purchase: 'PRODUCT_PURCHASED', catalog_upsert: 'PRODUCT_LISTED' } as Record<string, string>)[String(body.name ?? '').toLowerCase()];
+    if (interestEvent && req.user?.sub) {
+      const { recordBehaviorEvent } = await import('../../recommendation/BehaviorEventService');
+      await recordBehaviorEvent(req.user.sub, { eventType: interestEvent, contentId: body.entityId, contentType: 'PRODUCT', tags: body.payload?.tags ?? [], metadata: body.payload ?? {} });
+    }
     res.json({
       ok: true,
-      data: await recordAnalyticsEvent({
-        userId: req.user?.sub,
-        name: String(body.name ?? ''),
-        entityType: body.entityType ? String(body.entityType) : undefined,
-        entityId: body.entityId ? String(body.entityId) : undefined,
-        payload: body.payload,
-      }),
+      data: result,
     });
   } catch (e) {
     next(e);
@@ -352,7 +375,7 @@ commerceAppRouter.post(
 
 commerceAppRouter.get('/merchant/orders', requireUserOrDevHeader, async (req: UserAuthedRequest, res, next) => {
   try {
-    const merchantId = req.query.merchantId ? String(req.query.merchantId) : req.user?.sub;
+    const merchantId = req.user?.shopId ?? (req.query.merchantId ? String(req.query.merchantId) : undefined);
     if (!merchantId) {
       res.status(400).json({ ok: false, error: { code: 'VALIDATION', message: 'merchantId required' } });
       return;
@@ -372,7 +395,7 @@ commerceAppRouter.get('/merchant/orders', requireUserOrDevHeader, async (req: Us
 
 commerceAppRouter.get('/shipping/labels/preview', requireUserOrDevHeader, async (req: UserAuthedRequest, res, next) => {
   try {
-    const merchantId = req.query.merchantId ? String(req.query.merchantId) : req.user?.sub;
+    const merchantId = req.user?.shopId ?? (req.query.merchantId ? String(req.query.merchantId) : undefined);
     if (!merchantId) {
       res.status(400).json({ ok: false, error: { code: 'VALIDATION', message: 'merchantId required' } });
       return;
@@ -391,7 +414,7 @@ commerceAppRouter.get('/shipping/labels/preview', requireUserOrDevHeader, async 
 
 commerceAppRouter.get('/shipping/labels/html', requireUserOrDevHeader, async (req: UserAuthedRequest, res, next) => {
   try {
-    const merchantId = req.query.merchantId ? String(req.query.merchantId) : req.user?.sub;
+    const merchantId = req.user?.shopId ?? (req.query.merchantId ? String(req.query.merchantId) : undefined);
     if (!merchantId) {
       res.status(400).json({ ok: false, error: { code: 'VALIDATION', message: 'merchantId required' } });
       return;
@@ -418,7 +441,7 @@ commerceAppRouter.get('/shipping/labels/html', requireUserOrDevHeader, async (re
 commerceAppRouter.post('/shipping/labels/print', requireUserOrDevHeader, async (req: UserAuthedRequest, res, next) => {
   try {
     const body = req.body ?? {};
-    const merchantId = body.merchantId ? String(body.merchantId) : req.user?.sub;
+    const merchantId = req.user?.shopId ?? (body.merchantId ? String(body.merchantId) : undefined);
     if (!merchantId) {
       res.status(400).json({ ok: false, error: { code: 'VALIDATION', message: 'merchantId required' } });
       return;
@@ -461,7 +484,7 @@ commerceAppRouter.post('/shipping/labels/print', requireUserOrDevHeader, async (
 commerceAppRouter.post('/shipping/pick-list/print', requireUserOrDevHeader, async (req: UserAuthedRequest, res, next) => {
   try {
     const body = req.body ?? {};
-    const merchantId = body.merchantId ? String(body.merchantId) : req.user?.sub;
+    const merchantId = req.user?.shopId ?? (body.merchantId ? String(body.merchantId) : undefined);
     if (!merchantId) {
       res.status(400).json({ ok: false, error: { code: 'VALIDATION', message: 'merchantId required' } });
       return;
@@ -559,7 +582,7 @@ commerceAppRouter.get('/shipping/tracking/:trackingNumber', requireUserOrDevHead
 
 commerceAppRouter.get('/merchant/ledger', requireUserOrDevHeader, async (req: UserAuthedRequest, res, next) => {
   try {
-    const merchantId = req.query.merchantId ? String(req.query.merchantId) : req.user?.sub;
+    const merchantId = req.user?.shopId ?? (req.query.merchantId ? String(req.query.merchantId) : undefined);
     if (!merchantId) {
       res.status(400).json({ ok: false, error: { code: 'VALIDATION', message: 'merchantId required' } });
       return;
@@ -572,7 +595,7 @@ commerceAppRouter.get('/merchant/ledger', requireUserOrDevHeader, async (req: Us
 
 commerceAppRouter.get('/gp/rate', requireUserOrDevHeader, async (req: UserAuthedRequest, res, next) => {
   try {
-    const merchantId = req.query.merchantId ? String(req.query.merchantId) : req.user?.sub;
+    const merchantId = req.user?.shopId ?? (req.query.merchantId ? String(req.query.merchantId) : undefined);
     const channel = req.query.channel ? String(req.query.channel) : undefined;
     const amountThb = req.query.amountThb != null ? Number(req.query.amountThb) : 1000;
     const gpBps = await resolveGpBps({ merchantId, channel, amountThb });

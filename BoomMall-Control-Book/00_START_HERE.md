@@ -19,7 +19,6 @@
 | โทร | Voice/Video Call | โทรเสียง/วิดีโอ | ตรวจ WebRTC stack |
 | Feed | Feed | โพสต์และการเสิร์ฟคอนเทนต์ | ระบบ BoomMall |
 | ร้านค้า | Commerce | ร้าน/สินค้า/SKU/ออเดอร์ | ระบบ BoomMall |
-| Boom Coin | Internal Coin | Utility ภายในแพลตฟอร์ม | อยู่ระหว่างพัฒนา |
 | Admin | Admin Console | จัดการระบบ/ผู้ใช้/คอนเทนต์ | ระบบ BoomMall |
 
 ## Environment

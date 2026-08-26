@@ -4,16 +4,15 @@ import {
   Dimensions,
   Image,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { masterContentImage } from '@/modules/commerce/data/catalog';
 import { fromLegacyImages } from '@/modules/commerce/domain/product-media';
@@ -26,6 +25,9 @@ import {
   ENABLE_PAYLATER_AND_CREDIT_UI,
 } from '@/shared/compliance/appStoreGates';
 import { ProductCardMediaCarousel } from '@/modules/shop/ui/product/ProductCardMediaCarousel';
+import { pullCommerceCatalog } from '@/modules/commerce/data/commerceSync';
+import { ContentRefreshOverlay } from '@/shared/components/ContentRefreshOverlay';
+import { withMinimumDuration } from '@/shared/utils/minimumDuration';
 
 const SCREEN_W = Dimensions.get('window').width;
 const H_PAD = 12;
@@ -35,18 +37,15 @@ const COL_W = (SCREEN_W - H_PAD * 2 - GRID_GAP) / 2;
 type CategoryKey =
   | 'all'
   | 'mall'
-  | 'new'
   | 'electronics'
-  | 'used'
   | 'wholesale'
   | 'battery'
   | 'parts'
   | 'b2b';
 
 const CATEGORIES: Array<{ key: CategoryKey; label: string }> = [
-  { key: 'all', label: 'ทั้งหมด' },
-  { key: 'new', label: 'มือหนึ่ง' },
-  { key: 'used', label: 'มือสอง' },
+  { key: 'all', label: 'แนะนำ' },
+  { key: 'mall', label: 'ร้านทางการ' },
   { key: 'battery', label: 'แบตเตอรี่' },
   { key: 'parts', label: 'อะไหล่' },
   { key: 'electronics', label: 'อิเล็กทรอนิกส์' },
@@ -68,34 +67,11 @@ const QUICK_TOOLS_ALL: Array<{
   { key: 'returns', label: 'คืนสินค้า', icon: 'return-down-back-outline' },
 ];
 
-const FEATURE_CHIPS_ALL: Array<{
-  key: string;
-  label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  colors: [string, string];
-}> = [
-  { key: 'shipping', label: 'คูปองส่ง', icon: 'car-outline', colors: ['#2E8CFF', '#5BB0FF'] },
-  { key: 'live', label: 'Live ช้อป', icon: 'play', colors: ['#FE2C55', '#FF6B8A'] },
-  { key: 'mall', label: 'Boom Mall', icon: 'storefront', colors: ['#1A1A1A', '#3A3A3A'] },
-  { key: 'following', label: 'กำลังติดตาม', icon: 'heart', colors: ['#FF3B4A', '#FF7A84'] },
-  { key: 'flash', label: 'Flash Sale', icon: 'flash', colors: ['#FF8A00', '#FFB347'] },
-];
-
 const QUICK_TOOLS = QUICK_TOOLS_ALL.filter((t) => {
   if (t.key === 'paylater' && !ENABLE_PAYLATER_AND_CREDIT_UI) return false;
   if (
     !ENABLE_COMING_SOON_SHOP_CHROME &&
     (t.key === 'coupons' || t.key === 'bonus' || t.key === 'returns' || t.key === 'paylater')
-  ) {
-    return false;
-  }
-  return true;
-});
-
-const FEATURE_CHIPS = FEATURE_CHIPS_ALL.filter((c) => {
-  if (
-    !ENABLE_COMING_SOON_SHOP_CHROME &&
-    (c.key === 'shipping' || c.key === 'live' || c.key === 'flash' || c.key === 'following')
   ) {
     return false;
   }
@@ -110,23 +86,19 @@ function matchesCategory(m: MasterSku, cat: CategoryKey) {
   if (cat === 'all') return true;
   if (cat === 'b2b' || cat === 'wholesale') return m.channel === 'B2B';
   if (cat === 'mall') return m.channel === 'B2C' || m.channel === 'B2B';
-  if (cat === 'used') {
-    return (
-      m.channel === 'C2C' ||
-      m.tags.some((t) => /used|มือสอง|second|pre-?loved|c2c/i.test(t)) ||
-      /มือสอง|used|สภาพดี|มือ 2/.test(m.title)
-    );
-  }
-  if (cat === 'new') {
-    if (m.tags.some((t) => /มือสอง|used|c2c/i.test(t))) return false;
-    if (m.tags.some((t) => /มือหนึ่ง|new|ใหม่|แบรนด์แท้/i.test(t))) return true;
-    return m.channel !== 'C2C';
-  }
   const hay = `${m.title} ${m.tags.join(' ')} ${m.categoryKey ?? ''}`.toLowerCase();
   if (cat === 'battery') return /battery|lifepo4|แบต|pack|bms/.test(hay);
   if (cat === 'parts') return /brake|cnc|rim|shock|อะไหล่|parts|controller|motor/.test(hay);
   if (cat === 'electronics') return /charger|display|gps|controller|converter|อิเล็กทรอนิกส์/.test(hay);
   return true;
+}
+
+function isSecondhandListing(m: MasterSku) {
+  return (
+    m.channel === 'C2C' ||
+    m.tags.some((t) => /used|มือสอง|second|pre-?loved|c2c/i.test(t)) ||
+    /มือสอง|used|สภาพดี|มือ 2/i.test(m.title)
+  );
 }
 
 function discountOf(master: MasterSku) {
@@ -152,9 +124,9 @@ export function ShopScreen({
   onVerticalScroll?: (offsetY: number) => void;
 } = {}) {
   const insets = useSafeAreaInsets();
-  const [query, setQuery] = useState('');
   const [category, setCategory] = useState<CategoryKey>('all');
   const [flashLeft, setFlashLeft] = useState(2 * 3600 + 14 * 60 + 37);
+  const [refreshing, setRefreshing] = useState(false);
 
   const masters = useInventoryStore((s) => s.masters);
   const variants = useInventoryStore((s) => s.variants);
@@ -182,19 +154,13 @@ export function ShopScreen({
   }, [variants]);
 
   const products = useMemo(() => {
-    const q = query.trim().toLowerCase();
     return masters.filter((m) => {
+      // C2C listings belong to the dedicated Secondhand channel, never the Shop catalog.
+      if (isSecondhandListing(m)) return false;
       if (!matchesCategory(m, category)) return false;
-      if (!q) return true;
-      const vs = variantsByMaster.get(m.id) ?? [];
-      return (
-        m.title.toLowerCase().includes(q) ||
-        m.masterSku.toLowerCase().includes(q) ||
-        m.tags.some((t) => t.toLowerCase().includes(q)) ||
-        vs.some((v) => v.sku.toLowerCase().includes(q) || v.label.toLowerCase().includes(q))
-      );
+      return true;
     });
-  }, [masters, category, query, variantsByMaster]);
+  }, [masters, category]);
 
   const dealProducts = useMemo(() => products.slice(0, 4), [products]);
   const flashProducts = useMemo(() => products.slice(2, 6), [products]);
@@ -215,47 +181,61 @@ export function ShopScreen({
   };
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top + (embedded ? 10 : 6) }]}>
-      {/* Search + Cart */}
-      <View style={styles.searchRow}>
-        <Pressable style={styles.searchBox} onPress={() => router.push('/search')}>
-          <Ionicons name="search" size={16} color={colors.text.muted} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="ค้นหาสินค้า, SKU, แบรนด์"
-            placeholderTextColor={colors.text.muted}
-            value={query}
-            onChangeText={setQuery}
-            returnKeyType="search"
-          />
-          <Pressable hitSlop={8} onPress={() => router.push('/shop/image-search')}>
-            <Ionicons name="camera-outline" size={18} color={colors.text.secondary} />
-          </Pressable>
+    <View style={[styles.root, { paddingTop: embedded ? 0 : insets.top + 8 }]}>
+      {!embedded ? (
+        <View style={styles.standaloneSearchRow}>
           <Pressable
-            style={styles.searchBtn}
-            onPress={() => {
-              void Haptics.selectionAsync();
-            }}
+            style={styles.standaloneSearchButton}
+            onPress={() => router.push({ pathname: '/channel-search', params: { scope: 'shop' } })}
+            accessibilityRole="button"
+            accessibilityLabel="ค้นหาสินค้า"
           >
-            <Text style={styles.searchBtnText}>ค้นหา</Text>
+            <Ionicons name="search" size={27} color={colors.text.primary} />
           </Pressable>
-        </Pressable>
-        <Pressable style={styles.cartBtn} onPress={openCart} hitSlop={6}>
-          <Ionicons name="cart-outline" size={26} color={colors.text.primary} />
-          {lineCount > 0 ? (
-            <View style={styles.cartBadge}>
-              <Text style={styles.cartBadgeText}>{lineCount > 99 ? '99+' : lineCount}</Text>
-            </View>
-          ) : null}
-        </Pressable>
-      </View>
-
+        </View>
+      ) : null}
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 110 }}
+        contentContainerStyle={{
+          paddingTop: embedded ? insets.top + 56 : 0,
+          paddingBottom: insets.bottom + 110,
+        }}
         onScroll={(event) => onVerticalScroll?.(event.nativeEvent.contentOffset.y)}
         scrollEventThrottle={16}
+        alwaysBounceVertical
+        refreshControl={(
+          <RefreshControl
+            refreshing={refreshing}
+            tintColor={colors.brand.primaryDark}
+            onRefresh={() => {
+              setRefreshing(true);
+              void withMinimumDuration(pullCommerceCatalog()).finally(() => setRefreshing(false));
+            }}
+          />
+        )}
       >
+        <View style={styles.shopSummary}>
+          <View style={styles.shopSummaryIcon}>
+            <Ionicons name="storefront" size={22} color="#fff" />
+          </View>
+          <View style={styles.shopSummaryCopy}>
+            <Text style={styles.shopSummaryTitle}>BoomMall ร้านค้า</Text>
+            <Text style={styles.shopSummarySubtitle}>สินค้าใหม่จากร้านค้าและแบรนด์</Text>
+          </View>
+          <Pressable style={styles.shopSummaryAction} onPress={() => setCategory('mall')}>
+            <Text style={styles.shopSummaryActionText}>ดูร้านทางการ</Text>
+            <Ionicons name="chevron-forward" size={14} color={colors.brand.primaryDark} />
+          </Pressable>
+          <Pressable style={styles.cartBtn} onPress={openCart} hitSlop={6}>
+            <Ionicons name="cart-outline" size={25} color={colors.text.primary} />
+            {lineCount > 0 ? (
+              <View style={styles.cartBadge}>
+                <Text style={styles.cartBadgeText}>{lineCount > 99 ? '99+' : lineCount}</Text>
+              </View>
+            ) : null}
+          </Pressable>
+        </View>
+
         {/* Quick tools */}
         <ScrollView
           horizontal
@@ -294,30 +274,28 @@ export function ShopScreen({
           ))}
         </ScrollView>
 
-        {/* Feature chips */}
+        {/* Shop-only categories. Secondhand has its own dedicated channel. */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.featureRow}
+          contentContainerStyle={styles.catRow}
         >
-          {FEATURE_CHIPS.map((chip) => (
-            <Pressable
-              key={chip.key}
-              style={styles.featureItem}
-              onPress={() => {
-                if (chip.key === 'flash') setCategory('all');
-                else if (chip.key === 'mall') setCategory('mall');
-                else notifySoon(chip.label);
-              }}
-            >
-              <LinearGradient colors={chip.colors} style={styles.featureCircle}>
-                <Ionicons name={chip.icon} size={18} color="#fff" />
-              </LinearGradient>
-              <Text style={styles.featureLabel} numberOfLines={1}>
-                {chip.label}
-              </Text>
-            </Pressable>
-          ))}
+          {CATEGORIES.map((c) => {
+            const active = category === c.key;
+            return (
+              <Pressable
+                key={c.key}
+                style={styles.catItem}
+                onPress={() => {
+                  void Haptics.selectionAsync();
+                  setCategory(c.key);
+                }}
+              >
+                <Text style={[styles.catText, active && styles.catTextActive]}>{c.label}</Text>
+                {active ? <View style={styles.catUnderline} /> : null}
+              </Pressable>
+            );
+          })}
         </ScrollView>
 
         {/* Promo split */}
@@ -382,30 +360,6 @@ export function ShopScreen({
             </View>
           </View>
         </View>
-
-        {/* Categories */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.catRow}
-        >
-          {CATEGORIES.map((c) => {
-            const active = category === c.key;
-            return (
-              <Pressable
-                key={c.key}
-                style={styles.catItem}
-                onPress={() => {
-                  void Haptics.selectionAsync();
-                  setCategory(c.key);
-                }}
-              >
-                <Text style={[styles.catText, active && styles.catTextActive]}>{c.label}</Text>
-                {active ? <View style={styles.catUnderline} /> : null}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
 
         {/* Product grid */}
         <View style={styles.grid}>
@@ -493,6 +447,7 @@ export function ShopScreen({
           <Text style={styles.empty}>ไม่พบสินค้าที่ตรงกับตัวกรอง</Text>
         ) : null}
       </ScrollView>
+      <ContentRefreshOverlay visible={refreshing} />
     </View>
   );
 }
@@ -502,42 +457,17 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F5F5F5',
   },
-  searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  standaloneSearchRow: {
+    height: 48,
     paddingHorizontal: H_PAD,
-    marginBottom: 10,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
   },
-  searchBox: {
-    flex: 1,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#fff',
-    borderWidth: 1.5,
-    borderColor: colors.brand.primary,
-    flexDirection: 'row',
+  standaloneSearchButton: {
+    width: 44,
+    height: 44,
     alignItems: 'center',
-    paddingLeft: 12,
-    paddingRight: 4,
-    gap: 6,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 13,
-    color: colors.text.primary,
-    paddingVertical: 0,
-  },
-  searchBtn: {
-    backgroundColor: colors.accent.live,
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  searchBtnText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '900',
+    justifyContent: 'center',
   },
   cartBtn: {
     width: 40,
@@ -563,6 +493,55 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 9,
     fontWeight: '900',
+  },
+  shopSummary: {
+    marginHorizontal: H_PAD,
+    marginBottom: 12,
+    minHeight: 64,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 16,
+    backgroundColor: '#fff',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,0,0,0.07)',
+  },
+  shopSummaryIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: colors.brand.ink,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shopSummaryCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  shopSummaryTitle: {
+    color: colors.text.primary,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  shopSummarySubtitle: {
+    color: colors.text.muted,
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  shopSummaryAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 1,
+    paddingVertical: 8,
+    paddingLeft: 8,
+  },
+  shopSummaryActionText: {
+    color: colors.brand.primaryDark,
+    fontSize: 10,
+    fontWeight: '800',
   },
   toolsRow: {
     paddingHorizontal: H_PAD,
@@ -608,28 +587,6 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   toolLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.text.secondary,
-  },
-  featureRow: {
-    paddingHorizontal: H_PAD,
-    gap: 14,
-    paddingBottom: 14,
-  },
-  featureItem: {
-    width: 64,
-    alignItems: 'center',
-    gap: 5,
-  },
-  featureCircle: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  featureLabel: {
     fontSize: 10,
     fontWeight: '700',
     color: colors.text.secondary,
@@ -752,8 +709,8 @@ const styles = StyleSheet.create({
   catRow: {
     paddingHorizontal: H_PAD,
     gap: 16,
-    paddingTop: 4,
-    paddingBottom: 10,
+    paddingTop: 2,
+    paddingBottom: 12,
     alignItems: 'flex-end',
   },
   catItem: {

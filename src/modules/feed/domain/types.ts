@@ -108,6 +108,9 @@ export type FeedItem = {
   }>;
   /** true when created via the in-app Camera/Creator Studio during this session */
   isUserPost?: boolean;
+  /** C2C sale lifecycle; separate from moderation state. */
+  listingStatus?: 'ACTIVE' | 'RESERVED' | 'SOLD' | 'HIDDEN' | 'REMOVED' | 'EXPIRED';
+  moderationStatus?: 'CLEAN' | 'REPORTED' | 'UNDER_REVIEW' | 'ACTIONED';
 };
 
 

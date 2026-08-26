@@ -3,16 +3,18 @@ import { HomeFeedScreen } from '@/modules/feed/ui/HomeFeedScreen';
 import { ShopScreen } from '@/modules/shop/ui/ShopScreen';
 import { SocialChannelScreen } from '../ui/SocialChannelScreen';
 import { JobsChannelScreen } from '../ui/JobsChannelScreen';
+import { SecondhandChannelScreen } from '@/modules/secondhand/ui/SecondhandChannelScreen';
+import { NearbyFriendsScreen } from '../ui/NearbyFriendsScreen';
 import type { MainChannel, MainChannelScreenProps } from '../domain/types';
 
 function NearbyChannel({ active, onVerticalScroll }: MainChannelScreenProps) {
-  return <SocialChannelScreen kind="nearby" active={active} onVerticalScroll={onVerticalScroll} />;
+  return <NearbyFriendsScreen active={active} onVerticalScroll={onVerticalScroll} />;
 }
 function JobsChannel({ active, onVerticalScroll }: MainChannelScreenProps) {
   return <JobsChannelScreen active={active} onVerticalScroll={onVerticalScroll} />;
 }
 function SecondhandChannel({ active, onVerticalScroll }: MainChannelScreenProps) {
-  return <SocialChannelScreen kind="secondhand" active={active} onVerticalScroll={onVerticalScroll} />;
+  return <SecondhandChannelScreen active={active} onVerticalScroll={onVerticalScroll} />;
 }
 function ShopChannel({ onVerticalScroll }: MainChannelScreenProps) {
   return <ShopScreen embedded onVerticalScroll={onVerticalScroll} />;
@@ -26,7 +28,7 @@ function ClipsChannel({ active }: MainChannelScreenProps) {
 
 /** Extensible registry: add/reorder main content without touching Bottom Tabs. */
 export const MAIN_CHANNELS: MainChannel[] = [
-  { id: 'nearby', title: 'ใกล้คุณ', enabled: true, order: 10, component: NearbyChannel },
+  { id: 'nearby', title: 'เพื่อน', enabled: false, order: 10, component: NearbyChannel },
   { id: 'jobs', title: 'หางาน', enabled: true, order: 20, component: JobsChannel },
   { id: 'secondhand', title: 'มือสอง', enabled: true, order: 30, component: SecondhandChannel },
   { id: 'shop', title: 'ร้านค้า', enabled: true, order: 40, component: ShopChannel },

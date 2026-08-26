@@ -23,7 +23,7 @@ import {
 import { useBuyerPaymentStore } from '../state/buyer-payment-store';
 import { colors } from '@/shared/theme/colors';
 
-const KINDS: BuyerPaymentKind[] = ['truemoney', 'promptpay', 'bank_account', 'card', 'boommall_pay'];
+const KINDS: BuyerPaymentKind[] = ['truemoney', 'promptpay', 'bank_account', 'card'];
 
 export function BuyerPaymentMethodsScreen() {
   const insets = useSafeAreaInsets();

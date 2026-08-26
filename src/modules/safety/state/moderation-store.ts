@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export type ReportTargetKind = 'user' | 'content' | 'message' | 'comment';
+export type ReportTargetKind = 'user' | 'content' | 'message' | 'comment' | 'product' | 'secondhand_listing' | 'job';
 
 export type ContentReport = {
   id: string;
@@ -47,13 +47,18 @@ type ModerationState = {
 };
 
 export const REPORT_REASONS = [
-  'ปัญหาเกี่ยวกับเด็กอายุต่ำกว่า 18 ปี',
-  'การกลั่นแกล้ง',
-  'การทำร้ายตนเอง',
-  'สแปมหรือหลอกลวง',
   'เนื้อหาไม่เหมาะสม',
-  'ละเมิดลิขสิทธิ์',
-  'อื่นๆ',
+  'ภาพโป๊เปลือยหรือเนื้อหาทางเพศ',
+  'ความรุนแรงหรือเนื้อหาน่ากลัว',
+  'การคุกคามหรือกลั่นแกล้ง',
+  'Hate / การโจมตีบุคคลหรือกลุ่ม',
+  'หลอกลวง / Scam',
+  'Spam',
+  'ขายสินค้าหรือบริการต้องห้าม',
+  'ข้อมูลเท็จหรือทำให้เข้าใจผิด',
+  'ละเมิดทรัพย์สินทางปัญญา',
+  'แอบอ้างเป็นบุคคลอื่น',
+  'อื่น ๆ',
 ] as const;
 
 function uniqPush(list: string[], id: string) {

@@ -1,10 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
+import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -12,30 +13,26 @@ import Animated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
-import { useChatStore } from '@/modules/chat/state/chat-store';
-import { SEARCH_DIRECTORY } from '@/modules/search/data/mockSearchDirectory';
 import { colors } from '@/shared/theme/colors';
-import { ENABLE_SIMULATED_CAMERA_TOOLS } from '@/shared/compliance/appStoreGates';
+import { resolveFriendInvite, sendFriendRequest } from '@/modules/search/data/friendApi';
+import { DragDownDismiss } from '@/shared/components/DragDownDismiss';
 
 const FRAME_SIZE = 240;
 
-function normalizeHandle(h: string) {
-  return h.trim().toLowerCase().replace(/^@/, '');
-}
-
 /**
- * QR Code Scanner — mock camera viewfinder (Simulator has no real camera). Resolves a scan
- * against the friend directory and jumps straight into 1-on-1 Super Chat, LINE/WeChat-style.
+ * QR friend scanner backed by a revocable server-side invite token.
  */
 export function QrScanScreen() {
   const insets = useSafeAreaInsets();
-  const conversations = useChatStore((s) => s.conversations);
-  const addFriend = useChatStore((s) => s.addFriend);
+  const [permission, requestPermission] = useCameraPermissions();
   const [flash, setFlash] = useState(false);
   const [resolving, setResolving] = useState(false);
-  const cycleRef = useRef(0);
 
   const scanY = useSharedValue(0);
+
+  useEffect(() => {
+    void requestPermission();
+  }, [requestPermission]);
 
   useEffect(() => {
     scanY.value = withRepeat(
@@ -52,19 +49,38 @@ export function QrScanScreen() {
     transform: [{ translateY: scanY.value }],
   }));
 
-  const handleScanned = (handle: string, displayName: string) => {
+  const handleScanned = (result: BarcodeScanningResult) => {
     if (resolving) return;
+    const match = result.data.match(/[?&]token=([^&]+)/);
+    const token = match?.[1] ? decodeURIComponent(match[1]) : '';
+    if (!token) {
+      Alert.alert('QR ไม่ถูกต้อง', 'QR นี้ไม่ใช่ลิงก์เพิ่มเพื่อนของ BoomMall');
+      return;
+    }
     setResolving(true);
-    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-
-    const target = normalizeHandle(handle);
-    const existing = conversations.find((c) => normalizeHandle(c.peerHandle) === target);
-    const conversationId = existing?.id ?? addFriend(displayName, handle);
-
-    setTimeout(() => {
-      if (router.canDismiss()) router.dismiss();
-      router.replace(`/(tabs)/chat/${conversationId}`);
-    }, 220);
+    void resolveFriendInvite(token).then((profile) => {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert(
+        `เพิ่ม ${profile.displayName} เป็นเพื่อน?`,
+        `@${profile.handle ?? profile.friendCode} · ${profile.friendCode}`,
+        [
+          { text: 'ยกเลิก', style: 'cancel', onPress: () => setResolving(false) },
+          {
+            text: 'ส่งคำขอ',
+            onPress: () => void sendFriendRequest(profile.userId).then(() => {
+              Alert.alert('ส่งคำขอแล้ว', 'รออีกฝ่ายตอบรับก่อนเริ่มแชต');
+              router.back();
+            }).catch((error: unknown) => {
+              setResolving(false);
+              Alert.alert('ส่งคำขอไม่สำเร็จ', error instanceof Error ? error.message : 'กรุณาลองใหม่');
+            }),
+          },
+        ],
+      );
+    }).catch((error: unknown) => {
+      setResolving(false);
+      Alert.alert('QR ใช้งานไม่ได้', error instanceof Error ? error.message : 'QR อาจหมดอายุแล้ว');
+    });
   };
 
   const goAddFriend = () => {
@@ -72,25 +88,8 @@ export function QrScanScreen() {
     router.push('/(tabs)/chat/add-friend');
   };
 
-  /** Dev-only: Simulator has no camera. Hidden in App Store compliance mode. */
-  const simulateScan = () => {
-    if (!ENABLE_SIMULATED_CAMERA_TOOLS) return;
-    const candidates = SEARCH_DIRECTORY.filter(
-      (r) => !conversations.some((c) => normalizeHandle(c.peerHandle) === r.handle),
-    );
-    const pool = candidates.length > 0 ? candidates : SEARCH_DIRECTORY;
-    if (pool.length === 0) {
-      Alert.alert('ยังไม่มีรายชื่อ', 'พิมพ์ชื่อผู้ใช้หรือเพิ่มเพื่อนแทนการจำลองสแกน');
-      return;
-    }
-    const target = pool[cycleRef.current % pool.length];
-    cycleRef.current += 1;
-    if (!target) return;
-    handleScanned(target.handle, target.displayName);
-  };
-
   return (
-    <View style={styles.root}>
+    <DragDownDismiss onDismiss={() => router.back()} style={styles.root}>
       <LinearGradient colors={['#141414', '#000000']} style={StyleSheet.absoluteFill} />
 
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
@@ -105,6 +104,15 @@ export function QrScanScreen() {
 
       <View style={styles.center}>
         <View style={styles.frame}>
+          {permission?.granted ? (
+            <CameraView
+              style={StyleSheet.absoluteFill}
+              facing="back"
+              enableTorch={flash}
+              barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+              onBarcodeScanned={resolving ? undefined : handleScanned}
+            />
+          ) : null}
           <View style={[styles.corner, styles.cornerTL]} />
           <View style={[styles.corner, styles.cornerTR]} />
           <View style={[styles.corner, styles.cornerBL]} />
@@ -113,30 +121,17 @@ export function QrScanScreen() {
         </View>
         <Text style={styles.hint}>จ่อกล้องไปที่ QR Code ของเพื่อนหรือร้านค้า</Text>
         <Text style={styles.hintSub}>
-          {ENABLE_SIMULATED_CAMERA_TOOLS
-            ? 'เพิ่มเพื่อนและเริ่มแชตได้ทันทีที่สแกนสำเร็จ'
-            : 'ยังไม่มีกล้องสแกนในเวอร์ชันนี้ — เพิ่มเพื่อนด้วยชื่อผู้ใช้แทน'}
+          ระบบจะแสดงโปรไฟล์ให้ยืนยันก่อนส่งคำขอทุกครั้ง
         </Text>
       </View>
 
       <View style={[styles.bottomPanel, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-        {ENABLE_SIMULATED_CAMERA_TOOLS ? (
-          <Pressable
-            style={[styles.simulateBtn, resolving && styles.simulateBtnBusy]}
-            onPress={simulateScan}
-            disabled={resolving}
-          >
-            <Ionicons name="scan" size={18} color={colors.brand.ink} />
-            <Text style={styles.simulateBtnText}>
-              {resolving ? 'กำลังเพิ่มเพื่อน...' : 'จำลองสแกนสำเร็จ (Simulator)'}
-            </Text>
-          </Pressable>
-        ) : (
+        {!permission?.granted ? (
           <Pressable style={styles.simulateBtn} onPress={goAddFriend}>
             <Ionicons name="person-add" size={18} color={colors.brand.ink} />
-            <Text style={styles.simulateBtnText}>เพิ่มเพื่อน</Text>
+            <Text style={styles.simulateBtnText}>อนุญาตกล้อง หรือเพิ่มด้วยรหัสแทน</Text>
           </Pressable>
-        )}
+        ) : null}
 
         <View style={styles.divider}>
           <View style={styles.dividerLine} />
@@ -149,7 +144,7 @@ export function QrScanScreen() {
           <Text style={styles.manualBtnText}>พิมพ์ชื่อผู้ใช้ / ไอดีแทน</Text>
         </Pressable>
       </View>
-    </View>
+    </DragDownDismiss>
   );
 }
 

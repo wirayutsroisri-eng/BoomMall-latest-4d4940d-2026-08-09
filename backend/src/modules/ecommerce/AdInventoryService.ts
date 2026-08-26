@@ -450,7 +450,7 @@ export function adsDomainStatus() {
   return {
     domain: 'marketplace-ads',
     placements: ['BANNER', 'SPONSORED_FEED', 'APP_OPEN'],
-    billing: 'THB invoices via PSP (not GP / Boom Coin)',
+    billing: 'THB invoices via PSP',
     pspConfigured: gateway.provider !== 'UNCONFIGURED',
     pspProvider: gateway.provider,
     policy: 'Ad fees billed separately from marketplace GP; no fake payment success',

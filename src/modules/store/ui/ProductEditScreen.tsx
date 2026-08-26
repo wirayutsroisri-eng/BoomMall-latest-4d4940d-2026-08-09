@@ -36,7 +36,8 @@ import { ProductMediaStrip } from '@/modules/store/ui/sell/ProductMediaStrip';
 import { SpecRowsEditor } from '@/modules/store/ui/sell/SpecRowsEditor';
 import { useInventoryStore } from '@/modules/commerce/state/inventory-store';
 import { useCategoriesStore } from '@/modules/store/state/categories-store';
-import { MY_SHOP_ID, useWarehouseStore } from '@/modules/warehouse/state/warehouse-store';
+import { useWarehouseStore } from '@/modules/warehouse/state/warehouse-store';
+import { useAuthStore } from '@/modules/auth/state/auth-store';
 import type { VariantInput } from '@/modules/commerce/domain/stock-core';
 import { colors } from '@/shared/theme/colors';
 import {
@@ -51,8 +52,6 @@ import {
   conditionToChannel,
   type ProductCondition,
 } from '@/modules/commerce/domain/product-condition';
-
-const MY_WAREHOUSE_ID = 'wh-boom-ev';
 
 type FieldErrors = Partial<
   Record<'title' | 'sku' | 'barcode' | 'price' | 'cost' | 'stock' | 'photo', string>
@@ -71,6 +70,7 @@ function parseNonNegInt(raw: string): number | null {
 }
 
 export function ProductEditScreen() {
+  const myShopId = useAuthStore((s) => s.user?.shopId ?? '');
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { id: idParam, copied: copiedParam } = useLocalSearchParams<{
@@ -88,6 +88,7 @@ export function ProductEditScreen() {
   const createMasterWithVariants = useInventoryStore((s) => s.createMasterWithVariants);
   const deleteProduct = useInventoryStore((s) => s.deleteProduct);
   const warehouses = useInventoryStore((s) => s.warehouses);
+  const warehouseRecords = useWarehouseStore((s) => s.warehouses);
   const onNewProductCreated = useWarehouseStore((s) => s.onNewProductCreated);
   const categories = useCategoriesStore((s) => s.categories);
 
@@ -617,7 +618,7 @@ export function ProductEditScreen() {
     const cost = costText.trim() ? parseNonNegNumber(costText)! : 0;
     const channel = conditionToChannel(condition);
     const warehouseId: WarehouseId =
-      warehouses.find((w) => w.channelFocus.includes(channel))?.id ?? 'WH-CTI-MAIN';
+      warehouses.find((w) => w.channelFocus.includes(channel))?.id ?? 'PRIMARY';
     const skuTail = `${Date.now()}`.slice(-6);
     const newSku = `BEV-COPY-${skuTail}`;
     const customFields = collectCustomFields();
@@ -666,13 +667,14 @@ export function ProductEditScreen() {
       specImages,
       usageImages,
       categoryKey: categoryKey || undefined,
-      ownerShopId: master.ownerShopId ?? MY_SHOP_ID,
+      ownerShopId: myShopId,
       brand: master.brand,
       shopName: master.shopName,
       media: nextMedia.length ? nextMedia : undefined,
       variants: prepared,
     });
-    onNewProductCreated(MY_WAREHOUSE_ID, newId, categoryKey || undefined);
+    const ownedWarehouse = warehouseRecords.find((row) => row.ownerShopId === myShopId);
+    if (ownedWarehouse) onNewProductCreated(ownedWarehouse.id, newId, categoryKey || undefined);
     setSaving(null);
 
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -725,7 +727,7 @@ export function ProductEditScreen() {
     );
   }
 
-  const isMine = !master.ownerShopId || master.ownerShopId === MY_SHOP_ID;
+  const isMine = master.ownerShopId === myShopId;
   const visibleCategories = categories.filter((c) => !c.hidden);
 
   return (

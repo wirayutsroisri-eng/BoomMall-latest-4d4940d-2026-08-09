@@ -109,9 +109,9 @@ export const TERMS_DOC: LegalDoc = {
       headingEn: '4. Purchases',
       headingTh: '4. การซื้อสินค้า',
       bodyEn:
-        'Physical-goods checkout charges money only through a real payment provider. This build does not claim a successful card/PromptPay payment unless that provider confirms capture. Digital Boom Coin purchase is not offered in this iOS build.',
+        'Physical-goods checkout charges money only through a real payment provider. This build does not claim a successful card/PromptPay payment unless that provider confirms capture. No digital currency, top-up, or tipping product is offered.',
       bodyTh:
-        'การสั่งสินค้ากายภาพเรียกเก็บเงินผ่านผู้ให้บริการชำระเงินจริงเท่านั้น บิลด์นี้ไม่อ้างว่าชำระบัตร/พร้อมเพย์สำเร็จจนกว่าผู้ให้บริการยืนยัน การซื้อ Boom Coin ไม่มีในบิลด์ iOS นี้',
+        'การสั่งสินค้ากายภาพเรียกเก็บเงินผ่านผู้ให้บริการชำระเงินจริงเท่านั้น บิลด์นี้ไม่อ้างว่าชำระบัตร/พร้อมเพย์สำเร็จจนกว่าผู้ให้บริการยืนยัน และไม่มีระบบเงินดิจิทัล เติมเงิน หรือให้ทิป',
     },
     {
       headingEn: '5. Intellectual property',

@@ -1,5 +1,4 @@
-import { getApiBase, useAuthStore } from '@/modules/auth/state/auth-store';
-import { MY_SHOP_ID } from '@/modules/warehouse/data/seed';
+import { currentShopId, getApiBase, useAuthStore } from '@/modules/auth/state/auth-store';
 import type { ProductCard } from '@/modules/chat/domain/types';
 import { CHAT_PAGE_SIZE } from '@/modules/chat/domain/message-sync';
 import {
@@ -80,7 +79,7 @@ export type RemoteMessagePage = {
 };
 
 export function currentChatUserId() {
-  return useAuthStore.getState().user?.id ?? MY_SHOP_ID;
+  return useAuthStore.getState().user?.id ?? '';
 }
 
 export function isCurrentChatUser(senderId: string | undefined | null) {
@@ -310,7 +309,7 @@ export async function listRemoteConversations(): Promise<RemoteChatConversation[
   return unwrapConversations(json);
 }
 
-export async function listRemoteShopInbox(shopId = MY_SHOP_ID): Promise<RemoteChatConversation[] | null> {
+export async function listRemoteShopInbox(shopId = currentShopId()): Promise<RemoteChatConversation[] | null> {
   const json = await req(
     'GET',
     `/api/v1/chat-domain/shop/conversations?shopId=${encodeURIComponent(shopId)}`,

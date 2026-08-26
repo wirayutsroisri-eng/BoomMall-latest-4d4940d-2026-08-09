@@ -4,7 +4,6 @@ import http from 'node:http';
 import { loadEnv } from './config/env';
 import { createApp } from './app';
 import { getPrismaPoolInfo, prisma } from './lib/prisma';
-import { bootstrapSystem } from './services/bootstrap';
 import { attachChatRealtime } from './modules/chat/realtime/socketServer';
 import { bootstrapPspFromEnv } from './modules/ecommerce/PspGateway';
 import { bootstrapSellerPayoutFromEnv } from './modules/finance/services/PayoutGatewayService';
@@ -18,7 +17,6 @@ async function main() {
   const env = loadEnv();
   bootstrapPspFromEnv();
   bootstrapSellerPayoutFromEnv();
-  await bootstrapSystem(prisma, env.initialTreasuryMint);
   if (APPLE_REVIEW_EMAIL) {
     await ensureAppleReviewAccount();
     console.log(`Apple Review account ready: ${APPLE_REVIEW_EMAIL}`);
@@ -41,6 +39,7 @@ async function main() {
     console.log(
       `DB pool connection_limit=${pool.connectionLimit} pool_timeout=${pool.poolTimeoutSec}s sslmode=${pool.sslMode}`,
     );
+    console.log(`Snowflake node=${env.snowflakeNodeId}`);
     console.log(`Admin auth: Authorization: Bearer ***`);
   });
 }

@@ -16,6 +16,8 @@ import {
   type FeedUiWeights,
   type PersonalUiKey,
   type RankedPreviewItem,
+  fetchRecommendationConfig, saveRecommendationWeights, resetRecommendationWeights,
+  type RecommendationConfig,
 } from '../lib/feedApi';
 
 const DEFAULT_WEIGHTS: FeedUiWeights = {
@@ -127,6 +129,8 @@ export function FeedAlgorithmPage() {
 
       {error ? <p className="mb-4 text-sm text-[var(--danger)]">{error}</p> : null}
       {msg ? <p className="mb-4 text-sm font-medium text-[var(--ok)]">{msg}</p> : null}
+
+      <RecommendationWeightsPanel />
 
       {/* 1-click presets */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -443,4 +447,18 @@ export function FeedAlgorithmPage() {
       ) : null}
     </div>
   );
+}
+
+const MATCH_FIELDS: [keyof RecommendationConfig, string][] = [
+  ['interestWeight', 'Interest Match'], ['recentBehaviorWeight', 'Recent Behavior'],
+  ['searchIntentWeight', 'Search Intent'], ['locationWeight', 'Location'],
+  ['freshnessWeight', 'Freshness'], ['popularityWeight', 'Popularity / Quality'],
+];
+function RecommendationWeightsPanel() {
+  const [value, setValue] = useState<RecommendationConfig | null>(null); const [message, setMessage] = useState('');
+  useEffect(() => { void fetchRecommendationConfig().then((r) => setValue(r.data)); }, []);
+  if (!value) return null;
+  const total = MATCH_FIELDS.reduce((sum, [key]) => sum + Number(value[key]), 0);
+  const persist = (next: RecommendationConfig) => void saveRecommendationWeights(next).then((r) => { setValue(r.data); setMessage('บันทึก Content Magnet weights แล้ว'); }).catch((e) => setMessage(e.message));
+  return <div className="surface-panel mb-5 overflow-hidden"><div className="border-b border-[var(--line)] px-6 py-5"><p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--accent)]">Content Magnet Engine</p><h2 className="font-display mt-1 text-xl font-extrabold">Recommendation weights</h2><p className="mt-1 text-sm text-[var(--ink-secondary)]">ใช้ร่วมกันกับ Feed · สินค้า · มือสอง · งาน · บริการ (รวม {Math.round(total * 100)}%)</p></div><div className="space-y-2 px-6 py-4">{MATCH_FIELDS.map(([key, label]) => <label key={key} className="grid grid-cols-[1fr_90px] items-center gap-3 text-sm"><span>{label}</span><input type="number" min="0" max="1" step="0.01" value={Number(value[key])} onChange={(e) => setValue({ ...value, [key]: Number(e.target.value) })} className="rounded-[10px] border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2" /></label>)}<label className="grid grid-cols-[1fr_90px] items-center gap-3 text-sm"><span>Negative Signal multiplier</span><input type="number" min="0" step="0.1" value={value.negativeSignalWeight} onChange={(e) => setValue({ ...value, negativeSignalWeight: Number(e.target.value) })} className="rounded-[10px] border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2" /></label><label className="grid grid-cols-[1fr_90px] items-center gap-3 text-sm"><span>Decay half-life (days)</span><input type="number" min="1" value={value.decayHalfLifeDays} onChange={(e) => setValue({ ...value, decayHalfLifeDays: Number(e.target.value) })} className="rounded-[10px] border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2" /></label><div className="flex gap-2 pt-3"><button className="btn-primary" disabled={Math.abs(total - 1) > .001} onClick={() => persist(value)}>บันทึก</button><button className="btn-secondary" onClick={() => void resetRecommendationWeights().then((r) => { setValue(r.data); setMessage('คืนค่าเริ่มต้นแล้ว'); })}>Reset Default</button></div>{message ? <p className="text-sm text-[var(--ink-secondary)]">{message}</p> : null}</div></div>;
 }

@@ -5,6 +5,7 @@ import { useChatStore } from '@/modules/chat/state/chat-store';
 import type { OrderSnapshotCard } from '@/modules/chat/domain/types';
 import type { IncomingOrder } from './types';
 import { buyerIdOf, shortOrderId, snapshotOfOrder } from './order-snapshot';
+import { currentShopId } from '@/modules/auth/state/auth-store';
 
 export { buyerIdOf, shortOrderId, snapshotOfOrder };
 
@@ -41,7 +42,7 @@ export async function notifyBuyerOrderChat(snapshot: OrderSnapshotCard, conversa
 
 /** Seller order card → shop↔buyer thread with pinned order snapshot */
 export function openSellerOrderChat(order: IncomingOrder) {
-  const snapshot = snapshotOfOrder(order);
+  const snapshot = snapshotOfOrder(order, currentShopId());
   const { sellerConversationId, buyerConversationId, isNewBuyerCard } = useChatStore
     .getState()
     .startSellerOrderChat({

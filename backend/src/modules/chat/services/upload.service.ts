@@ -103,7 +103,7 @@ export function assertMediaAssetStorageReady(): ObjectStorageConfig {
   return config;
 }
 
-function s3(): { client: S3Client; config: ObjectStorageConfig } {
+export function storageClient(): { client: S3Client; config: ObjectStorageConfig } {
   const config = objectStorageConfig();
   if (!config) throw new AppError('OBJECT_STORAGE_NOT_CONFIGURED', 'Object storage is not configured', 501);
   if (!cachedClient) {
@@ -138,7 +138,7 @@ export class UploadService {
     const ext = chatMediaExtension(mime);
     if (!ext) throw new AppError('VALIDATION', 'unsupported media type', 415);
 
-    const { client, config } = s3();
+    const { client, config } = storageClient();
     const key = `chat-media/${safeUserSegment(userId)}/${Date.now()}-${randomBytes(16).toString('hex')}.${ext}`;
     const command = new PutObjectCommand({
       Bucket: config.bucket,
@@ -170,7 +170,7 @@ export class UploadService {
     if (!extension) throw new AppError('UNSUPPORTED_MEDIA_TYPE', 'unsupported image or video type', 415);
     const kind = normalizedMime.startsWith('video/') ? 'video' : 'image';
     assertMediaAssetStorageReady();
-    const { client, config } = s3();
+    const { client, config } = storageClient();
     const key = `media/${safeUserSegment(userId)}/${assetId}/original.${extension}`;
     const uploadUrl = await getSignedUrl(client, new PutObjectCommand({
       Bucket: config.bucket,
@@ -194,7 +194,7 @@ export class UploadService {
   }
 
   static async assertObjectUploaded(storageKey: string) {
-    const { client, config } = s3();
+    const { client, config } = storageClient();
     const object = await client.send(new HeadObjectCommand({ Bucket: config.bucket, Key: storageKey }));
     return {
       contentLength: typeof object.ContentLength === 'number' ? object.ContentLength : undefined,

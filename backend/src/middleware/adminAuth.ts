@@ -226,9 +226,7 @@ export function sessionPermissions(desk: AdminDesk) {
   const has = (p: AdminPermission) => adminHasPermission(desk.role, p, desk);
   return {
     dashboard: has('dashboard:read'),
-    topupApprove: has('finance:write'),
     handbook: has('handbook:read'),
-    ledgerReconcile: has('finance:read') || has('platform:read') || has('*'),
     moderation: has('users:moderate'),
     chatAdmin: has('chat:read'),
     chatEmergency: desk.role === 'SUPER_ADMIN',

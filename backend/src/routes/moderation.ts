@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { requireAdmin } from '../middleware/adminAuth';
+import { requireUserOrDevHeader } from '../middleware/userAuth';
 import {
   deleteHardUser,
   getAuditLog,
@@ -16,6 +17,7 @@ import {
   postKeywordScan,
   postModerationReport,
   postPublicReport,
+  postSecondhandReport,
   postResolveReport,
   postSocialLogin,
   postUnlockUser,
@@ -24,7 +26,8 @@ import {
 /** Public surfaces for mobile app */
 export const moderationPublicRouter = Router();
 moderationPublicRouter.get('/content-blocks', getPublicBlocks);
-moderationPublicRouter.post('/reports', postPublicReport);
+moderationPublicRouter.post('/reports', requireUserOrDevHeader, postPublicReport);
+moderationPublicRouter.post('/secondhand/reports', requireUserOrDevHeader, postSecondhandReport);
 moderationPublicRouter.post('/auth/social', postSocialLogin);
 moderationPublicRouter.post('/keywords/scan', postKeywordScan);
 

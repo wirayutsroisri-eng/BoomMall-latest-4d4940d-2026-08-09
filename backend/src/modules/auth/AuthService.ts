@@ -10,10 +10,11 @@ import { verifyGoogleIdentityToken } from './GoogleAuth';
 import { verifyFacebookAccessToken } from './FacebookAuth';
 import { consumePhoneOtp, maskPhone, requestPhoneOtp as issuePhoneOtp } from './PhoneAuth';
 import { signAppJwt } from './JwtService';
-import { getProfile, getProfileByEmail, upsertProfile } from './ProfileService';
+import { ensureProfileShopId, getProfile, getProfileByEmail, upsertProfile } from './ProfileService';
 import { ensureAppleReviewAccount, isAppleReviewEmail } from './appleReviewAccount';
 import { assertPasswordPolicy, hashPassword, verifyPassword } from './PasswordService';
 import { recordAnalyticsEvent } from '../ecommerce/EventService';
+import { createDefaultUsername } from './UsernamePolicy';
 import {
   getUser,
   isSocialBlacklisted,
@@ -130,20 +131,22 @@ export async function exchangeSocialLogin(input: {
   if (!realDisplayName) {
     throw new AppError('VALIDATION', 'กรุณากรอกชื่อที่แสดงก่อนสมัครสมาชิก', 400);
   }
+  const accountHandle = existingProfile?.handle ?? handle ?? createDefaultUsername(userId);
   const user = upsertUser({
     id: userId,
     displayName: realDisplayName,
-    handle: existingProfile?.handle ?? handle,
+    handle: accountHandle,
     social: { [provider]: providerUserId },
   });
 
-  const profile = await upsertProfile({
+  await upsertProfile({
     userId,
     displayName: user.displayName,
     handle: user.handle ?? undefined,
     role: 'BUYER',
     email: verifiedEmail,
   });
+  const profile = await ensureProfileShopId(userId);
 
   await linkIdentity(userId, provider, providerUserId);
 
@@ -168,7 +171,9 @@ export async function exchangeSocialLogin(input: {
       status: user.status,
       role: profile.role,
       provider,
+      shopId: profile.shopId!,
     },
+    shopId: profile.shopId!,
   };
 }
 
@@ -179,7 +184,7 @@ function issueSession(input: {
   role: string;
   provider: string;
   status?: string;
-  shopId?: string | null;
+  shopId: string;
 }) {
   void recordAnalyticsEvent({
     userId: input.userId,
@@ -191,7 +196,7 @@ function issueSession(input: {
     sub: input.userId,
     role: input.role,
     provider: input.provider,
-    shopId: input.shopId ?? undefined,
+    shopId: input.shopId,
   }).then((accessToken) => ({
     accessToken,
     tokenType: 'Bearer' as const,
@@ -203,7 +208,9 @@ function issueSession(input: {
       status: input.status ?? 'active',
       role: input.role,
       provider: input.provider,
+      shopId: input.shopId,
     },
+    shopId: input.shopId,
   }));
 }
 
@@ -223,12 +230,12 @@ export async function registerEmail(input: {
   if (banned?.status === 'banned') {
     throw new AppError('FORBIDDEN', 'Account suspended', 403);
   }
-  const handle = email.split('@')[0]?.replace(/[^a-z0-9_]/gi, '').slice(0, 20) || `u${userId.slice(0, 8)}`;
+  const handle = createDefaultUsername(userId);
   const displayName = input.displayName?.trim();
   if (!displayName) throw new AppError('VALIDATION', 'กรุณากรอกชื่อที่แสดง', 400);
   if (banned?.status === 'hard_deleted') restoreHardDeletedUser(userId, displayName, handle);
   upsertUser({ id: userId, displayName, handle });
-  const profile = await upsertProfile({
+  await upsertProfile({
     userId,
     displayName,
     handle,
@@ -236,6 +243,7 @@ export async function registerEmail(input: {
     passwordHash: await hashPassword(input.password),
     role: 'BUYER',
   });
+  const profile = await ensureProfileShopId(userId);
   await linkIdentity(userId, 'email', email);
   return issueSession({
     userId,
@@ -270,7 +278,7 @@ export async function verifyPhoneOtp(input: { phone: string; code: string; mode?
     if (input.mode === 'login') throw new AppError('NOT_FOUND', 'ไม่พบบัญชี กรุณาสมัครสมาชิกใหม่', 404);
     const restoredName = input.displayName?.trim();
     if (!restoredName) throw new AppError('VALIDATION', 'กรุณากรอกชื่อที่แสดงก่อนสมัครสมาชิก', 400);
-    restoreHardDeletedUser(userId, restoredName, `u${userId.slice(0, 12)}`);
+    restoreHardDeletedUser(userId, restoredName, createDefaultUsername(userId));
   } else {
     if (input.mode === 'register' && existingProfile) {
       throw new AppError('ACCOUNT_EXISTS', 'เบอร์นี้สมัครแล้ว กรุณาเลือกเข้าสู่ระบบ', 409);
@@ -282,19 +290,20 @@ export async function verifyPhoneOtp(input: { phone: string; code: string; mode?
 
   const displayName = existingProfile?.displayName?.trim() || existing?.displayName || input.displayName?.trim();
   if (!displayName) throw new AppError('VALIDATION', 'กรุณากรอกชื่อที่แสดงก่อนสมัครสมาชิก', 400);
-  const handle = existingProfile?.handle || existing?.handle || `u${userId.replace(/-/g, '').slice(0, 12)}`;
+  const handle = existingProfile?.handle || existing?.handle || createDefaultUsername(userId);
   const user = upsertUser({
     id: userId,
     displayName,
     handle,
     social: { phone: e164 },
   });
-  const profile = await upsertProfile({
+  await upsertProfile({
     userId,
     displayName: user.displayName,
     handle: user.handle ?? handle,
     role: 'BUYER',
   });
+  const profile = await ensureProfileShopId(userId);
   await linkIdentity(userId, 'phone', e164);
 
   return issueSession({
@@ -325,12 +334,13 @@ export async function loginEmail(input: { email: string; password: string }) {
     throw new AppError('FORBIDDEN', 'Account deleted', 403);
   }
 
+  const profileWithShop = await ensureProfileShopId(profile.userId);
   return issueSession({
-    userId: profile.userId,
-    displayName: profile.displayName ?? email,
-    handle: profile.handle,
-    role: profile.role,
+    userId: profileWithShop.userId,
+    displayName: profileWithShop.displayName ?? email,
+    handle: profileWithShop.handle,
+    role: profileWithShop.role,
     provider: 'email',
-    shopId: profile.shopId,
+    shopId: profileWithShop.shopId,
   });
 }

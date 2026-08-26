@@ -6,10 +6,12 @@ export default defineConfig({
     environment: 'node',
     include: [
       'src/**/*.test.ts',
+      'backend/src/config/**/*.test.ts',
       'backend/src/modules/ecommerce/**/*.test.ts',
       'backend/src/modules/auth/**/*.test.ts',
       'backend/src/modules/feed/**/*.test.ts',
       'backend/src/modules/media/**/*.test.ts',
+      'backend/src/modules/recommendation/**/*.test.ts',
     ],
   },
   resolve: {

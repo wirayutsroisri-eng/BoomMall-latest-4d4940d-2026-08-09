@@ -96,9 +96,7 @@ export type AdminSession = {
   home?: string;
   permissions: {
     dashboard: boolean;
-    topupApprove: boolean;
     handbook: boolean;
-    ledgerReconcile: boolean;
     moderation?: boolean;
     chatAdmin?: boolean;
     chatEmergency?: boolean;
@@ -112,25 +110,7 @@ export async function fetchAdminSession() {
   return request<{ ok: true; data: AdminSession }>('/api/v1/admin/me');
 }
 
-export async function fetchHandbookAccess() {
-  return request<{ ok: true; data: { allowed: boolean; role: AdminRole } }>(
-    '/api/v1/admin/handbook/access',
-  );
-}
-
 export type DashboardStats = {
-  totalMintedSupply: string;
-  circulatingSupply: string;
-  userBalance: string;
-  sellerBalance: string;
-  treasuryBalance: string;
-  rewardPoolBalance: string;
-  treasuryAndRewardPool: string;
-  totalCompanyRevenueThb: string;
-  pendingTopUpCount: number;
-  approvedTopUpCount: number;
-  approvedTopUpCoinSum: string;
-  ledgerHealthy: boolean;
   generatedAt: string;
   dau24h?: number;
   gmvPaidThb?: number;
@@ -140,40 +120,10 @@ export type DashboardStats = {
   userCount?: number;
   postCount?: number;
   popularPosts?: Array<{ id: string; body: string; likeCount: number; commentCount: number }>;
-  reconcile: {
-    ok: boolean;
-    delta: string;
-    accountedSupply: string;
-    circulatingSupply: string;
-    treasuryAndPools: string;
-    systemMintContra: string;
-  };
-};
-
-export type TopUpRow = {
-  id: string;
-  amountThb: string;
-  amountCoin: string;
-  proofUrl: string;
-  proofNote?: string | null;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
-  submittedBy: string;
-  reviewedBy?: string | null;
-  createdAt: string;
-  reviewedAt?: string | null;
-  sellerWallet: {
-    id: string;
-    ownerRef: string;
-    displayName: string;
-  };
 };
 
 export function fetchStats() {
   return request<{ ok: true; data: DashboardStats }>('/api/v1/admin/dashboard/stats');
-}
-
-export function fetchReconcile() {
-  return request<{ ok: boolean; data: DashboardStats['reconcile'] }>('/api/v1/ledger/reconcile');
 }
 
 export function newIdempotencyKey(prefix = 'approve') {
@@ -195,12 +145,14 @@ export type ModerationStats = {
 
 export type ModerationReport = {
   id: string;
-  kind: 'user' | 'content' | 'message' | 'comment';
+  kind: 'user' | 'content' | 'message' | 'comment' | 'secondhand_listing';
   targetId: string;
   targetLabel?: string;
   reason: string;
   details?: string;
   reporterRef?: string;
+  sellerUserId?: string;
+  uniqueReporterCount?: number;
   status: 'open' | 'reviewed' | 'actioned' | 'dismissed';
   createdAt: string;
   resolvedAt?: string;

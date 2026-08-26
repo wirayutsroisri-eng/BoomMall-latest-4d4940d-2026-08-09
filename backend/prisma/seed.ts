@@ -1,7 +1,6 @@
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { buildDatabaseUrl } from '../src/config/env';
-import { bootstrapSystem } from '../src/services/bootstrap';
 
 process.env.DATABASE_URL = buildDatabaseUrl();
 const prisma = new PrismaClient({
@@ -9,13 +8,8 @@ const prisma = new PrismaClient({
 });
 
 async function main() {
-  const initial = BigInt(process.env.INITIAL_TREASURY_MINT ?? '100000');
-  const result = await bootstrapSystem(prisma, initial);
-  console.log('Seed complete:', {
-    totalMinted: result.totalMinted.toString(),
-    treasuryBalance: result.treasuryBalance.toString(),
-    sellerDemoId: result.demoSellerWalletId,
-  });
+  await prisma.$queryRaw`SELECT 1`;
+  console.log('Seed complete: no demo financial data required.');
 }
 
 main()

@@ -1,89 +1,82 @@
-import React, { memo, useMemo } from 'react';
+import React, { memo, useEffect, useMemo, useState } from 'react';
 import { FlatList, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Avatar } from '@/shared/components/Avatar';
-import type { FeedItem } from '@/modules/feed/domain/types';
+import { VideoView, useVideoPlayer } from 'expo-video';
+import { useIsFocused } from 'expo-router';
+import { groupStories, type StoryGroup, type Story } from '@/modules/story/domain/types';
 
 type Props = {
-  items: FeedItem[];
-  ownAvatarUri?: string | null;
-  ownInitial: string;
-  onCreate: () => void;
-  onAuthor: (item: FeedItem) => void;
+  stories: Story[];
+  onOpenStory: (storyId: string) => void;
 };
 
-function coverUri(item: FeedItem) {
-  return item.imageUris?.[0]
-    ?? item.imageUri
-    ?? item.mediaAssets?.find((asset) => asset.type === 'image')?.canonicalUrl
-    ?? item.mediaAssets?.find((asset) => asset.type === 'video')?.thumbnailUrl;
+function latestStory(group: StoryGroup) {
+  return group.stories[group.stories.length - 1]!;
 }
 
-export const FeedStatusRail = memo(function FeedStatusRail({
-  items,
-  ownAvatarUri,
-  ownInitial,
-  onCreate,
-  onAuthor,
-}: Props) {
-  const statuses = useMemo(() => {
-    const seen = new Set<string>();
-    return items.filter((item) => {
-      const ownerKey = item.authorId || item.authorHandle;
-      if (!ownerKey || seen.has(ownerKey) || item.isUserPost) return false;
-      seen.add(ownerKey);
-      return true;
-    }).slice(0, 12);
-  }, [items]);
+function VideoPreview({ uri, posterUrl, active }: { uri: string; posterUrl?: string; active: boolean }) {
+  const [firstFrameRendered, setFirstFrameRendered] = useState(false);
+  const player = useVideoPlayer({ uri, useCaching: true }, (instance) => {
+    instance.muted = true;
+    instance.loop = true;
+    if (active) instance.play();
+  });
+
+  useEffect(() => {
+    try {
+      player.muted = true;
+      player.loop = true;
+      if (active) player.play();
+      else player.pause();
+    } catch {
+      // expo-video may release the native player during Fast Refresh.
+    }
+  }, [active, player]);
+
+  return (
+    <View style={styles.video}>
+      <VideoView
+        player={player}
+        style={styles.preview}
+        contentFit="cover"
+        nativeControls={false}
+        onFirstFrameRender={() => setFirstFrameRendered(true)}
+      />
+      {posterUrl && !firstFrameRendered
+        ? <Image source={{ uri: posterUrl }} style={[styles.preview, styles.poster]} resizeMode="cover" />
+        : null}
+      <Ionicons name="volume-mute" size={16} color="#fff" style={styles.muted} />
+    </View>
+  );
+}
+
+export const FeedStatusRail = memo(function FeedStatusRail({ stories, onOpenStory }: Props) {
+  const isFocused = useIsFocused();
+  const groups = useMemo(() => groupStories(stories), [stories]);
+  if (!groups.length) return null;
 
   return (
     <View style={styles.section}>
       <FlatList
         horizontal
-        data={statuses}
-        keyExtractor={(item) => `status:${item.authorId || item.authorHandle}`}
+        data={groups}
+        keyExtractor={(group) => group.userId}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.content}
-        ListHeaderComponent={(
-          <Pressable style={styles.createCard} onPress={onCreate} accessibilityRole="button" accessibilityLabel="สร้างสเตตัส">
-            <View style={styles.createAvatarArea}>
-              <Avatar initial={ownInitial} size={64} uri={ownAvatarUri} backgroundColor="#17201C" />
-            </View>
-            <View style={styles.createPlus}>
-              <Ionicons name="add" size={25} color="#fff" />
-            </View>
-            <Text style={styles.createTitle}>สร้างสเตตัส</Text>
-          </Pressable>
-        )}
-        renderItem={({ item }) => {
-          const cover = coverUri(item);
+        renderItem={({ item: group }) => {
+          const story = latestStory(group);
+          const name = story.user?.displayName || story.user?.handle || 'ผู้ใช้';
           return (
             <Pressable
-              style={styles.statusCard}
-              onPress={() => onAuthor(item)}
+              style={styles.story}
+              onPress={() => onOpenStory(story.id)}
               accessibilityRole="button"
-              accessibilityLabel={`ดูสเตตัสของ ${item.author}`}
+              accessibilityLabel={`ดู Story ของ ${name}`}
             >
-              {cover ? (
-                <Image source={{ uri: cover }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-              ) : (
-                <View style={[StyleSheet.absoluteFill, { backgroundColor: item.gradient[0] }]} />
-              )}
-              <View style={styles.scrim} />
-              <View style={styles.avatarRing}>
-                <Avatar
-                  initial={item.author.slice(0, 1)}
-                  size={48}
-                  uri={item.authorAvatarUri}
-                  backgroundColor={item.gradient[1]}
-                />
-              </View>
-              {item.videoUri ? (
-                <View style={styles.videoMark}>
-                  <Ionicons name="play" size={13} color="#fff" />
-                </View>
-              ) : null}
-              <Text style={styles.authorName} numberOfLines={2}>{item.author}</Text>
+              {story.mediaType === 'video'
+                ? <VideoPreview uri={story.mediaUrl} posterUrl={story.thumbnailUrl} active={isFocused} />
+                : <Image source={{ uri: story.mediaUrl }} style={styles.preview} resizeMode="cover" />}
+              <Text style={styles.name} numberOfLines={1}>{name}</Text>
             </Pressable>
           );
         }}
@@ -93,15 +86,12 @@ export const FeedStatusRail = memo(function FeedStatusRail({
 });
 
 const styles = StyleSheet.create({
-  section: { paddingBottom: 8, backgroundColor: '#070A08' },
-  content: { paddingHorizontal: 8, gap: 7 },
-  createCard: { width: 106, height: 166, borderRadius: 14, overflow: 'hidden', backgroundColor: '#151B18', borderWidth: StyleSheet.hairlineWidth, borderColor: '#354039' },
-  createAvatarArea: { height: 103, alignItems: 'center', justifyContent: 'center', backgroundColor: '#202824' },
-  createPlus: { position: 'absolute', top: 82, alignSelf: 'center', width: 36, height: 36, borderRadius: 18, backgroundColor: '#F33A47', borderWidth: 3, borderColor: '#151B18', alignItems: 'center', justifyContent: 'center' },
-  createTitle: { color: '#fff', fontSize: 12, fontWeight: '800', textAlign: 'center', marginTop: 25 },
-  statusCard: { width: 106, height: 166, borderRadius: 14, overflow: 'hidden', backgroundColor: '#151B18', borderWidth: StyleSheet.hairlineWidth, borderColor: '#48504C' },
-  scrim: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.16)', borderBottomColor: 'rgba(0,0,0,0.68)', borderBottomWidth: 52 },
-  avatarRing: { position: 'absolute', top: 8, left: 8, width: 54, height: 54, borderRadius: 27, borderWidth: 3, borderColor: '#F33A47', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0B0E0C' },
-  videoMark: { position: 'absolute', top: 13, right: 10, width: 25, height: 25, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.62)' },
-  authorName: { position: 'absolute', left: 8, right: 7, bottom: 9, color: '#fff', fontSize: 12, lineHeight: 15, fontWeight: '900', textShadowColor: 'rgba(0,0,0,0.95)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
+  section: { paddingVertical: 8, backgroundColor: '#E9ECE9' },
+  content: { paddingHorizontal: 10, gap: 10 },
+  story: { width: 82, gap: 5 },
+  preview: { width: 82, height: 116, borderRadius: 10, backgroundColor: '#151B18' },
+  video: { width: 82, height: 116, borderRadius: 10, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', backgroundColor: '#151B18' },
+  poster: { position: 'absolute', top: 0, left: 0 },
+  muted: { position: 'absolute', right: 6, bottom: 6, padding: 3, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.48)' },
+  name: { color: '#17201C', fontSize: 12, fontWeight: '700', textAlign: 'center' },
 });

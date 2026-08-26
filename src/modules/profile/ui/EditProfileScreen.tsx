@@ -19,7 +19,6 @@ import {
   formatCooldownDate,
   formatHandle,
   normalizeWebsite,
-  profilePublicLink,
   stripHandle,
   type ProfileEditField,
 } from '../domain/edit-profile';
@@ -76,11 +75,10 @@ export function EditProfileScreen() {
     }, [params])
   );
 
-  const handle = stripHandle(profile.handle);
-  const publicLink = profilePublicLink(profile.handle);
+  const username = formatHandle(profile.handle);
 
-  const copyLink = async () => {
-    await Clipboard.setStringAsync(publicLink);
+  const copyUsername = async () => {
+    await Clipboard.setStringAsync(username);
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
 
@@ -130,19 +128,14 @@ export function EditProfileScreen() {
       const localUpdates: Record<string, any> = {};
 
       if (displayNameDraft !== profile.displayName) {
-        const lockedUntil = cooldownUntil(profile.displayNameChangedAt);
-        if (lockedUntil) {
-          Alert.alert(
-            'เปลี่ยนชื่อไม่ได้',
-            `คุณสามารถเปลี่ยนชื่อได้อีกครั้งในวันที่ ${formatCooldownDate(lockedUntil)}`
-          );
+        const nextDisplayName = displayNameDraft.trim();
+        if (!nextDisplayName) {
+          Alert.alert('ชื่อไม่ถูกต้อง', 'กรุณาใส่ชื่อโปรไฟล์');
           return;
         }
-        updates.displayName = displayNameDraft;
-        localUpdates.displayName = displayNameDraft;
+        updates.displayName = nextDisplayName;
+        localUpdates.displayName = nextDisplayName;
         localUpdates.displayNameChangedAt = new Date().toISOString();
-        renameOwnPosts(displayNameDraft);
-        useAuthStore.setState((s) => (s.user ? { user: { ...s.user, displayName: displayNameDraft } } : s));
       }
 
       if (handleDraft !== stripHandle(profile.handle)) {
@@ -162,7 +155,6 @@ export function EditProfileScreen() {
         updates.handle = formattedHandle;
         localUpdates.handle = formattedHandle;
         localUpdates.handleChangedAt = new Date().toISOString();
-        useAuthStore.setState((s) => (s.user ? { user: { ...s.user, handle: formattedHandle } } : s));
       }
 
       if (bioDraft !== profile.bio) {
@@ -178,12 +170,27 @@ export function EditProfileScreen() {
       if (Object.keys(updates).length > 0) {
         await apiUpsertProfile(updates);
         updateProfile(localUpdates); // อัปเดต zustand store
+        if (typeof localUpdates.displayName === 'string') renameOwnPosts(localUpdates.displayName);
+        const auth = useAuthStore.getState();
+        if (auth.user && auth.sessionToken) {
+          await auth.setSession({
+            sessionToken: auth.sessionToken,
+            user: {
+              ...auth.user,
+              ...(typeof localUpdates.displayName === 'string' ? { displayName: localUpdates.displayName } : {}),
+              ...(typeof localUpdates.handle === 'string' ? { handle: localUpdates.handle } : {}),
+            },
+          });
+        }
       }
 
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.back();
     } catch (error) {
-      Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถบันทึกการเปลี่ยนแปลงโปรไฟล์ได้');
+      Alert.alert(
+        'บันทึกโปรไฟล์ไม่สำเร็จ',
+        error instanceof Error ? error.message : 'ไม่สามารถบันทึกการเปลี่ยนแปลงโปรไฟล์ได้',
+      );
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
       setIsSaving(false);
@@ -277,9 +284,9 @@ export function EditProfileScreen() {
             value={handleDraft}
             onPress={() => openField('username')}
           />
-          <Pressable style={styles.row} onPress={() => void copyLink()}>
+          <Pressable style={styles.row} onPress={() => void copyUsername()}>
             <Text style={styles.linkText} numberOfLines={1}>
-              {publicLink}
+              {username}
             </Text>
             <Ionicons name="copy-outline" size={18} color={colors.text.muted} />
           </Pressable>
@@ -300,6 +307,10 @@ export function EditProfileScreen() {
             onPress={() => openField('link')}
             last
           />
+        </View>
+        <Text style={styles.sectionLabel}>การแนะนำเฉพาะคุณ</Text>
+        <View style={styles.card}>
+          <Row label="ความสนใจ" value="Tag อาชีพ ทักษะ และหมวด" onPress={() => router.push('/profile/interests' as never)} last />
         </View>
         </View>
       </ScrollView>

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Daily PostgreSQL backup for Boom Coin ledger (on-premise).
+# Daily PostgreSQL backup for BoomMall (on-premise).
 # Stores dumps on company server local disk and prunes old files.
 #
 # Crontab example (run as deploy user, 02:30 Asia/Bangkok):

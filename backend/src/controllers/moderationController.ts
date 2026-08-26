@@ -1,4 +1,5 @@
 import type { Response, NextFunction, Request } from 'express';
+import type { UserAuthedRequest } from '../middleware/userAuth';
 import type { AuthedRequest } from '../middleware/adminAuth';
 import { AppError } from '../lib/errors';
 import {
@@ -25,6 +26,7 @@ import {
 } from '../services/moderation';
 import { runLockUnlockAlgorithm } from '../services/trustSafety/service';
 import { bumpSocialPostReport } from '../modules/feed/SocialPostService';
+import { prisma } from '../lib/prisma';
 
 export function getModerationStats(_req: AuthedRequest, res: Response) {
   res.json({ ok: true, data: moderationStats() });
@@ -59,7 +61,7 @@ export function postModerationReport(req: AuthedRequest, res: Response, next: Ne
 }
 
 /** Public report ingest from mobile (no admin key) */
-export function postPublicReport(req: Request, res: Response, next: NextFunction) {
+export async function postPublicReport(req: UserAuthedRequest, res: Response, next: NextFunction) {
   try {
     const body = req.body ?? {};
     const kind = body.kind as ReportKind;
@@ -74,8 +76,25 @@ export function postPublicReport(req: Request, res: Response, next: NextFunction
       targetLabel: body.targetLabel ? String(body.targetLabel) : undefined,
       reason,
       details: body.details ? String(body.details) : undefined,
-      reporterRef: body.reporterRef ? String(body.reporterRef) : 'app-user',
+      subReason: body.subReason ? String(body.subReason) : undefined,
+      targetOwnerId: body.targetOwnerId ? String(body.targetOwnerId) : undefined,
+      reporterRef: req.user!.sub,
     });
+    await prisma.analyticsEvent.create({
+      data: {
+        userId: req.user!.sub,
+        name: 'MODERATION_REPORT_CREATED',
+        entityType: kind.toUpperCase(),
+        entityId: targetId,
+        payloadJson: {
+          reportId: result.report.id,
+          targetOwnerId: body.targetOwnerId ? String(body.targetOwnerId) : null,
+          reason,
+          subReason: body.subReason ? String(body.subReason) : null,
+          status: 'PENDING',
+        },
+      },
+    }).catch(() => undefined);
     // Algorithm applies soft-lock / AUTO_HIDDEN / unlock from active NL policies (App Store 1.2)
     void runLockUnlockAlgorithm({ actor: 'algorithm', trigger: 'user_report' }).catch(() => {
       /* non-fatal */
@@ -86,6 +105,34 @@ export function postPublicReport(req: Request, res: Response, next: NextFunction
     res.status(201).json({ ok: true, data: result });
   } catch (e) {
     next(e);
+  }
+}
+
+/** Authenticated C2C report: one active report per user/listing, always human-reviewed. */
+export function postSecondhandReport(req: UserAuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const body = req.body ?? {};
+    const listingId = String(body.listingId ?? '').trim();
+    const sellerUserId = String(body.sellerUserId ?? '').trim();
+    const reason = String(body.reason ?? '').trim();
+    const description = String(body.description ?? '').trim();
+    if (!listingId || !sellerUserId || !reason) {
+      throw new AppError('VALIDATION', 'listingId, sellerUserId and reason required', 400);
+    }
+    const result = createReport({
+      kind: 'secondhand_listing',
+      targetId: listingId,
+      targetLabel: body.targetLabel ? String(body.targetLabel) : undefined,
+      reason,
+      details: description || undefined,
+      reporterRef: req.user!.sub,
+      sellerUserId,
+      manualReviewOnly: true,
+    });
+    void bumpSocialPostReport(listingId).catch(() => undefined);
+    res.status(201).json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
   }
 }
 

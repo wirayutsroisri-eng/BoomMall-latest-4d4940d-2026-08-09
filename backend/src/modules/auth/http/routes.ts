@@ -11,6 +11,7 @@ import type { UserAuthedRequest } from '../../../middleware/userAuth';
 import {
   acceptEula,
   authDomainStatus,
+  ensureProfileShopId,
   getProfile,
   listProfiles,
   upsertProfile,
@@ -139,11 +140,12 @@ authDomainRouter.get('/users', requireAdmin, requirePermission('users:moderate')
 
 authDomainRouter.get('/me', requireUser, async (req: UserAuthedRequest, res, next) => {
   try {
-    const profile = await getProfile(req.user!.sub);
+    const profile = await ensureProfileShopId(req.user!.sub);
     res.json({
       ok: true,
       data: {
         userId: req.user!.sub,
+        shopId: profile.shopId,
         role: req.user!.role,
         provider: req.user!.provider,
         profile,

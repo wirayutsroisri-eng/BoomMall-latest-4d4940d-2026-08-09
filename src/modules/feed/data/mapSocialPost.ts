@@ -29,6 +29,7 @@ export type SocialPostDto = {
   lane?: string;
   createdAt?: string;
   liked?: boolean;
+  saved?: boolean;
 };
 
 type MediaBlob = {
@@ -43,6 +44,7 @@ type MediaBlob = {
   overlays?: OverlayObject[];
   authorName?: string;
   authorHandle?: string;
+  product?: { name?: string; price?: number; currency?: 'THB'; tier?: 'B2B' | 'B2C' | 'C2C'; tags?: string[] };
 };
 
 function asStringArray(value: unknown): string[] {
@@ -191,6 +193,9 @@ export function normalizePostMedia(media: unknown): MediaBlob {
     overlays: asOverlays(o.overlays),
     authorName: typeof o.authorName === 'string' ? o.authorName : undefined,
     authorHandle: typeof o.authorHandle === 'string' ? o.authorHandle : undefined,
+    product: o.product && typeof o.product === 'object' && !Array.isArray(o.product)
+      ? o.product as MediaBlob['product']
+      : undefined,
   };
 }
 
@@ -252,6 +257,7 @@ export function socialPostToFeedItem(
     musicTitle: media.musicTitle?.trim() || '',
     gradient: ['#0B3D2E', '#1A7A55'],
     liked: post.liked,
+    saved: post.saved,
     imageUri: imageUris?.[0],
     imageUris,
     videoUri,
@@ -263,15 +269,18 @@ export function socialPostToFeedItem(
     overlayTextColor: media.overlayTextColor,
     overlayTransform: media.overlayTransform,
     isUserPost: mine,
+    listingStatus: ['ACTIVE', 'RESERVED', 'SOLD', 'HIDDEN', 'REMOVED', 'EXPIRED'].includes(post.status)
+      ? post.status as FeedItem['listingStatus']
+      : 'ACTIVE',
     product: {
       id: `p-${post.id}`,
-      name: post.body.slice(0, 40) || 'โพสต์',
+      name: media.product?.name?.trim() || post.body.slice(0, 40) || 'โพสต์',
       shopName: author,
-      tier: 'C2C',
-      basePrice: 0,
+      tier: media.product?.tier ?? 'C2C',
+      basePrice: typeof media.product?.price === 'number' ? media.product.price : 0,
       currency: 'THB',
-      tags: tags.length ? tags : ['New'],
-      variants: [{ id: 'v1', label: 'มาตรฐาน', price: 0, stock: 0 }],
+      tags: tags.length ? tags : media.product?.tags?.length ? media.product.tags : ['New'],
+      variants: [{ id: 'v1', label: 'มาตรฐาน', price: typeof media.product?.price === 'number' ? media.product.price : 0, stock: 0 }],
     },
   };
 }

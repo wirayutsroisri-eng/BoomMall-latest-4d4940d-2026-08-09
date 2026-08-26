@@ -52,6 +52,8 @@ export type ContentReferenceCard = {
   imageUri?: string;
   gradient: [string, string];
   authorHandle: string;
+  /** Backend identity for opening the seller's real direct conversation. */
+  peerUserId?: string;
 };
 
 /** Seller→buyer order snapshot pinned / sent when chatting from an order card */

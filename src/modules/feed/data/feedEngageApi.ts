@@ -60,6 +60,18 @@ export function syncFeedInterested(contentId: string) {
   return post('/api/v1/feed/signals', { kind: 'interested', contentId });
 }
 
+export function syncFeedSave(contentId: string, saved: boolean) {
+  return post('/api/v1/feed/signals', { kind: saved ? 'save' : 'unsave', contentId });
+}
+
+export function syncFeedHide(contentId: string, hidden: boolean) {
+  return post('/api/v1/feed/signals', { kind: hidden ? 'hide' : 'unhide', contentId });
+}
+
+export function syncFeedBlockUser(userId: string, blocked: boolean) {
+  return post('/api/v1/feed/signals', { kind: blocked ? 'block_user' : 'unblock_user', contentId: userId });
+}
+
 export function syncFeedShare(contentId: string) {
   return post('/api/v1/feed/signals', { kind: 'share', contentId });
 }
@@ -137,23 +149,39 @@ export async function syncFeedPostDelete(postId: string): Promise<boolean> {
 export async function fetchFeedPosts(
   tab?: string,
   geo?: { lat: number; lng: number; radiusKm?: number },
-  options?: { mine?: boolean },
+  options?: { mine?: boolean; refresh?: boolean; excludeIds?: string[] },
 ): Promise<SocialPostDto[]> {
   const base = getApiBase();
   if (!base) return [];
   const q = new URLSearchParams();
   if (tab) q.set('tab', tab);
   if (options?.mine) q.set('mine', '1');
+  if (options?.refresh) {
+    q.set('refresh', '1');
+    q.set('_ts', String(Date.now()));
+  }
+  if (options?.excludeIds?.length) {
+    q.set('excludeIds', options.excludeIds.slice(0, 80).join(','));
+  }
   if (geo) {
     q.set('lat', String(geo.lat));
     q.set('lng', String(geo.lng));
     if (geo.radiusKm) q.set('radiusKm', String(geo.radiusKm));
   }
   try {
-    const res = await fetch(`${base}/api/v1/feed/posts?${q.toString()}`, { headers: authHeaders() });
+    const authentication = authHeaders();
+    const headers = { ...authentication, 'cache-control': 'no-cache' };
+    const recommendationPath = tab === 'foryou' && !options?.mine && !options?.refresh && Boolean(authentication.Authorization)
+      ? '/api/v1/recommendations/feed?limit=40'
+      : `/api/v1/feed/posts?${q.toString()}`;
+    const res = await fetch(`${base}${recommendationPath}`, {
+      headers,
+      cache: 'no-store',
+    });
     if (!res.ok) return [];
-    const json = (await res.json()) as { data?: SocialPostDto[] };
-    return Array.isArray(json?.data) ? json.data : [];
+    const json = (await res.json()) as { data?: SocialPostDto[] | { items?: SocialPostDto[] } };
+    if (Array.isArray(json?.data)) return json.data;
+    return Array.isArray(json?.data?.items) ? json.data.items : [];
   } catch {
     return [];
   }

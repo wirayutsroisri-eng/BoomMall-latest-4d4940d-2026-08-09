@@ -5,8 +5,6 @@ export const PATH_NAV: Array<{ prefix: string; nav: AdminNavKey }> = [
   { prefix: '/health', nav: 'dashboard' },
   { prefix: '/cases', nav: 'safety' },
   { prefix: '/orders', nav: 'finance' },
-  { prefix: '/coins', nav: 'finance' },
-  { prefix: '/handbook', nav: 'handbook' },
   { prefix: '/promotions', nav: 'ads' },
   { prefix: '/ads', nav: 'ads' },
   { prefix: '/safety', nav: 'safety' },

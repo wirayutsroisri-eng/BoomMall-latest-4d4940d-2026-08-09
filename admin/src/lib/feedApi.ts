@@ -221,3 +221,12 @@ export function previewFeed(payload: {
     body: JSON.stringify(payload),
   });
 }
+
+export type RecommendationConfig = {
+  interestWeight: number; recentBehaviorWeight: number; searchIntentWeight: number;
+  locationWeight: number; freshnessWeight: number; popularityWeight: number;
+  negativeSignalWeight: number; decayHalfLifeDays: number; updatedAt: string;
+};
+export function fetchRecommendationConfig() { return req<{ ok: true; data: RecommendationConfig }>('/api/v1/admin/recommendation-config'); }
+export function saveRecommendationWeights(data: RecommendationConfig) { return req<{ ok: true; data: RecommendationConfig }>('/api/v1/admin/recommendation-config', { method: 'PUT', body: JSON.stringify(data) }); }
+export function resetRecommendationWeights() { return req<{ ok: true; data: RecommendationConfig }>('/api/v1/admin/recommendation-config/reset-default', { method: 'POST', body: '{}' }); }

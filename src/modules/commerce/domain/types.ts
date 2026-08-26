@@ -1,6 +1,6 @@
 export type CommerceChannel = 'B2B' | 'B2C' | 'C2C';
 
-export type WarehouseId = 'WH-CTI-MAIN' | 'WH-CTI-SERVICE' | 'WH-B2B-HUB' | 'WH-C2C-LOCKER';
+export type WarehouseId = string;
 
 export type Warehouse = {
   id: WarehouseId;

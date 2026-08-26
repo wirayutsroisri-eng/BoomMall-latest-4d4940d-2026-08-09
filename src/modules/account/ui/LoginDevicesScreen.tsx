@@ -1,11 +1,8 @@
-import React, { useCallback, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
-import { createWalletDomain } from '@/modules/wallet/services/WalletDomain';
-import { useBoomWalletStore } from '@/modules/wallet/state/boom-wallet-store';
 import { colors } from '@/shared/theme/colors';
 
 type DeviceRow = {
@@ -17,29 +14,7 @@ type DeviceRow = {
 
 export function LoginDevicesScreen() {
   const insets = useSafeAreaInsets();
-  const profileId = useBoomWalletStore((s) => s.profileId);
-  const [devices, setDevices] = useState<DeviceRow[]>(() =>
-    createWalletDomain().security.listDevices(profileId),
-  );
-
-  const reload = useCallback(() => {
-    setDevices(createWalletDomain().security.listDevices(profileId));
-  }, [profileId]);
-
-  const revoke = (device: DeviceRow) => {
-    Alert.alert('ออกจากระบบอุปกรณ์นี้?', `${device.deviceName} จะถูกเพิกถอนเซสชัน`, [
-      { text: 'ยกเลิก', style: 'cancel' },
-      {
-        text: 'ลบ',
-        style: 'destructive',
-        onPress: () => {
-          createWalletDomain().security.revokeDevice(device.id);
-          reload();
-          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-        },
-      },
-    ]);
-  };
+  const devices: DeviceRow[] = [];
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -68,9 +43,6 @@ export function LoginDevicesScreen() {
                   {d.approxLocation ? ` · ${d.approxLocation}` : ''}
                 </Text>
               </View>
-              <Pressable style={styles.revokeBtn} onPress={() => revoke(d)}>
-                <Text style={styles.revokeText}>Logout / Revoke</Text>
-              </Pressable>
             </View>
           ))
         )}

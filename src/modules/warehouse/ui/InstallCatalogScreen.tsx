@@ -16,7 +16,8 @@ import * as Haptics from 'expo-haptics';
 import { masterContentImage } from '@/modules/commerce/data/catalog';
 import { useInventoryStore } from '@/modules/commerce/state/inventory-store';
 import type { MasterSku } from '@/modules/commerce/domain/types';
-import { useWarehouseStore, MY_SHOP_ID } from '@/modules/warehouse/state/warehouse-store';
+import { useWarehouseStore } from '@/modules/warehouse/state/warehouse-store';
+import { useAuthStore } from '@/modules/auth/state/auth-store';
 import { BASE_CATEGORIES } from '@/modules/store/state/categories-store';
 import { colors } from '@/shared/theme/colors';
 
@@ -26,6 +27,7 @@ type Mode = 'all' | 'category' | 'manual';
 
 /** Bulk install: [สินค้าทั้งหมด] [เลือกตาม Category] [เลือกสินค้าเอง] — no per-SKU tapping for 1,000+ items */
 export function InstallCatalogScreen() {
+  const myShopId = useAuthStore((s) => s.user?.shopId ?? '');
   const insets = useSafeAreaInsets();
   const { warehouseId } = useLocalSearchParams<{ warehouseId: string }>();
 
@@ -51,10 +53,10 @@ export function InstallCatalogScreen() {
     () =>
       new Set(
         listings
-          .filter((l) => l.shopId === MY_SHOP_ID && l.warehouseId === warehouseId)
+          .filter((l) => l.shopId === myShopId && l.warehouseId === warehouseId)
           .map((l) => l.masterSkuId),
       ),
-    [listings, warehouseId],
+    [listings, warehouseId, myShopId],
   );
 
   const skuCountOf = useMemo(() => {

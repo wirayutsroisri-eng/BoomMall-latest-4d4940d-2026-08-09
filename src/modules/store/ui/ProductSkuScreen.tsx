@@ -21,7 +21,8 @@ import {
   stockStatusOf,
 } from '@/modules/commerce/domain/stock-core';
 import type { SkuVariant, StockLedgerEntry, WarehouseId, WarehouseStock } from '@/modules/commerce/domain/types';
-import { useWarehouseStore, MY_SHOP_ID } from '@/modules/warehouse/state/warehouse-store';
+import { useWarehouseStore } from '@/modules/warehouse/state/warehouse-store';
+import { useAuthStore } from '@/modules/auth/state/auth-store';
 import { LedgerRow } from './LedgerScreen';
 import { colors } from '@/shared/theme/colors';
 import { promptText } from '@/shared/components/AppPrompt';
@@ -58,6 +59,7 @@ function friendlyLedgerLine(entry: StockLedgerEntry): string {
 
 export function ProductSkuScreen() {
   const insets = useSafeAreaInsets();
+  const myShopId = useAuthStore((s) => s.user?.shopId ?? '');
   const { id: idParam } = useLocalSearchParams<{ id: string | string[] }>();
   const id = Array.isArray(idParam) ? idParam[0] : idParam;
   const [advanced, setAdvanced] = useState(false);
@@ -96,7 +98,7 @@ export function ProductSkuScreen() {
     );
   }
 
-  const isMine = !master.ownerShopId || master.ownerShopId === MY_SHOP_ID;
+  const isMine = master.ownerShopId === myShopId;
   const sourceWarehouse = warehousesShared.find((w) => w.ownerShopId === master.ownerShopId);
   const canEditStock = isMine || (sourceWarehouse ? canI(sourceWarehouse.id, 'EDIT_STOCK') : false);
   const sharedLabel = sourceWarehouse?.name ?? master.shopName ?? 'คลัง Boom EV';

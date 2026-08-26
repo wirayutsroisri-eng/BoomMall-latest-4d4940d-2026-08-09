@@ -1,13 +1,40 @@
 import type { MasterSku, SkuVariant, WarehouseStock } from '@/modules/commerce/domain/types';
 import { useInventoryStore } from '@/modules/commerce/state/inventory-store';
+import { useAuthStore } from '@/modules/auth/state/auth-store';
 import {
   deleteCommerceProduct,
   fetchCommerceCatalog,
   recordCommerceEvent,
-  syncCommerceCatalog,
   upsertCommerceProduct,
   type CatalogBundle,
 } from './commerceApi';
+
+type SyncOperation = 'pull' | 'upsert' | 'delete' | 'event';
+type SyncErrorHandler = (input: { operation: SyncOperation; message: string }) => void;
+
+let syncErrorHandler: SyncErrorHandler | null = null;
+let lastErrorKey = '';
+let lastErrorAt = 0;
+
+export function setCommerceSyncErrorHandler(handler: SyncErrorHandler | null) {
+  syncErrorHandler = handler;
+}
+
+function reportSyncError(operation: SyncOperation, error: unknown) {
+  const message = error instanceof Error ? error.message : 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้';
+  const key = `${operation}:${message}`;
+  const now = Date.now();
+  if (key === lastErrorKey && now - lastErrorAt < 30_000) return;
+  lastErrorKey = key;
+  lastErrorAt = now;
+  // A temporary network/server restart must not trigger React Native LogBox.
+  // The user-facing handler still reports a failure after retries are exhausted.
+  console.warn(`[COMMERCE_SYNC:${operation}]`, error);
+  syncErrorHandler?.({ operation, message });
+}
+
+const wait = (milliseconds: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
 function bundleOf(masterId: string): CatalogBundle | null {
   const { masters, variants, stockByKey } = useInventoryStore.getState();
@@ -28,33 +55,40 @@ function applyBundles(bundles: CatalogBundle[]) {
 }
 
 export async function pullCommerceCatalog() {
-  try {
-    const remote = await fetchCommerceCatalog();
-    const remoteIds = new Set((remote.data ?? []).map((b) => String(b.product.id)));
-    if (remote.data?.length) applyBundles(remote.data);
-    const localOnly = useInventoryStore
-      .getState()
-      .masters.filter((m) => !remoteIds.has(m.id))
-      .map((m) => bundleOf(m.id))
-      .filter((b): b is CatalogBundle => Boolean(b));
-    if (localOnly.length) {
-      await syncCommerceCatalog(localOnly).catch(() => undefined);
-    }
-  } catch {
-    /* offline — keep local warehouse */
+  const auth = useAuthStore.getState();
+  const shopId = auth.user?.shopId?.trim();
+  if (!auth.sessionToken || !shopId) {
+    applyBundles([]);
+    return;
   }
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const remote = await fetchCommerceCatalog(shopId);
+      // Pull is one-way server → device. Products are uploaded only from an
+      // explicit create/edit action, never merely because they exist in cache.
+      applyBundles(remote.data ?? []);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) await wait(350 * (attempt + 1));
+    }
+  }
+  reportSyncError('pull', lastError);
 }
 
 export function pushCommerceProduct(masterId: string) {
   const bundle = bundleOf(masterId);
   if (!bundle) return;
-  void upsertCommerceProduct(bundle).catch(() => undefined);
+  void upsertCommerceProduct(bundle).catch((error: unknown) => reportSyncError('upsert', error));
 }
 
 export function pushCommerceDelete(masterId: string) {
-  void deleteCommerceProduct(masterId).catch(() => undefined);
+  void deleteCommerceProduct(masterId).catch((error: unknown) => reportSyncError('delete', error));
 }
 
 export function trackCommerceEvent(name: string, entityType?: string, entityId?: string) {
-  void recordCommerceEvent({ name, entityType, entityId }).catch(() => undefined);
+  void recordCommerceEvent({ name, entityType, entityId }).catch((error: unknown) =>
+    reportSyncError('event', error),
+  );
 }

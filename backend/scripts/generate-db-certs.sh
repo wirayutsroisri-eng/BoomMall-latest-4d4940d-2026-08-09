@@ -18,12 +18,12 @@ if [[ -f server.crt && -f server.key && -f ca.crt ]]; then
   exit 0
 fi
 
-echo "Generating Boom Coin DB TLS certs → $OUT_DIR"
+echo "Generating BoomMall DB TLS certs → $OUT_DIR"
 echo "SAN hosts: $SAN_HOSTS"
 
 openssl genrsa -out ca.key 4096
 openssl req -x509 -new -nodes -key ca.key -sha256 -days "$DAYS" \
-  -subj "/O=BoomMall/OU=OnPrem/CN=BoomMall Boom Coin CA" \
+  -subj "/O=BoomMall/OU=OnPrem/CN=BoomMall Database CA" \
   -out ca.crt
 
 openssl genrsa -out server.key 2048

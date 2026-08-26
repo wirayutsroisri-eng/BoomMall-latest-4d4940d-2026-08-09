@@ -13,6 +13,7 @@ import * as AppleAuthentication from 'expo-apple-authentication';
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import * as Haptics from 'expo-haptics';
+import { prepareLocalAccountData } from '@/modules/account/services/purgeLocalAccountData';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '@/shared/theme/colors';
 import {
@@ -135,6 +136,7 @@ export function AuthForm({
         identityToken,
         mode,
       });
+      await prepareLocalAccountData(session.user.id);
       await setSession(session);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onAuthenticated?.();
@@ -283,6 +285,7 @@ export function AuthForm({
         mode,
         displayName: mode === 'register' ? displayName.trim() : undefined,
       });
+      await prepareLocalAccountData(session.user.id);
       await setSession(session);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onAuthenticated?.();
@@ -316,6 +319,7 @@ export function AuthForm({
         displayName: displayName.trim() || undefined,
         mode,
       });
+      await prepareLocalAccountData(session.user.id);
       await setSession(session);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onAuthenticated?.();

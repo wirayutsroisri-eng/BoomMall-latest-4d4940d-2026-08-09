@@ -33,7 +33,16 @@ API_HOST_BIND=0.0.0.0
 AWS_REGION=ap-southeast-7
 AWS_S3_BUCKET=boommall-media-prod
 DATABASE_SSL_MODE=require
+SNOWFLAKE_NODE_ID=1
 ```
+
+`SNOWFLAKE_NODE_ID` is a normal deployment setting, not an API key. Start the
+first ECS service with one steady-state task and node `1`. The database row lock
+still prevents duplicate IDs if two tasks temporarily share that node during a
+rolling deployment, but they serialize ID generation and reduce throughput.
+Before enabling autoscaling beyond one steady-state task, allocate a distinct
+node per writer or add a database-backed node lease allocator. Never reuse a
+node across independent writable databases.
 
 Set `CDN_BASE_URL` when media is delivered through CloudFront or another public
 media domain. Leave `S3_ENDPOINT` unset for AWS S3. Do not set

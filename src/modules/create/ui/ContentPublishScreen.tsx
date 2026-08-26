@@ -132,6 +132,7 @@ export function ContentPublishScreen() {
   const draft = useCreateDraftStore();
   const clearDraft = useCreateDraftStore((s) => s.clear);
   const setMedia = useCreateDraftStore((s) => s.setMedia);
+  const setOverlays = useCreateDraftStore((s) => s.setOverlays);
   const editFeedId = useCreateDraftStore((s) => s.editFeedId);
   const isEditing = Boolean(editFeedId);
   const authenticated = useAuthStore((s) => Boolean(s.sessionToken && s.user));
@@ -200,6 +201,49 @@ export function ContentPublishScreen() {
     }
   };
 
+  const replaceMediaAt = async (index: number) => {
+    const target = mediaItems[index];
+    if (!target) return;
+    try {
+      const items = await pickDevicePhotos({
+        selectionLimit: 1,
+        videos: target.type === 'video',
+        videosOnly: target.type === 'video',
+        title: target.type === 'video' ? 'เปลี่ยนวิดีโอ' : 'เปลี่ยนรูป',
+        sendLabel: 'เลือก',
+      });
+      const picked = items[0];
+      if (!picked?.uri) return;
+      const uri = await persistCreateMedia(
+        picked.uri,
+        target.type === 'video' ? 'video' : 'image',
+      );
+      setMedia(mediaItems.map((item, itemIndex) =>
+        itemIndex === index ? { ...item, uri, width: undefined, height: undefined } : item,
+      ));
+      setOverlays(draft.overlays.filter((overlay) => overlay.mediaId !== target.id));
+      void Haptics.selectionAsync();
+    } catch (error) {
+      Alert.alert('เปลี่ยนสื่อไม่ได้', error instanceof Error ? error.message : 'ลองอีกครั้ง');
+    }
+  };
+
+  const openPreviewActions = (index: number) => {
+    const target = mediaItems[index];
+    if (!target) return;
+    Alert.alert('แก้ไขสื่อ', undefined, [
+      { text: 'เปลี่ยนรูป/วิดีโอ', onPress: () => void replaceMediaAt(index) },
+      {
+        text: 'แต่งเพิ่ม',
+        onPress: () => router.push({
+          pathname: target.type === 'image' ? '/create-editor' : '/create-preview',
+          params: { type: target.type, edit: '1', mediaId: target.id },
+        }),
+      },
+      { text: 'ยกเลิก', style: 'cancel' },
+    ]);
+  };
+
   const publish = async (asDraft: boolean) => {
     if (!authenticated) {
       Alert.alert('ต้องเข้าสู่ระบบ', 'โพสต์คอนเทนต์ได้เฉพาะบัญชีโซเชียลเท่านั้น');
@@ -229,7 +273,7 @@ export function ContentPublishScreen() {
       linkLabel ? `🔗 ${linkLabel}` : null,
       musicTitle ? `🎵 ${musicTitle}` : null,
     ].filter(Boolean);
-    const caption = captionParts.join('\n') || 'โพสต์ใหม่จาก BoomMall';
+    const caption = captionParts.join('\n');
 
     const postPayload = {
       caption,
@@ -374,7 +418,12 @@ export function ContentPublishScreen() {
                 overlay.type === 'sticker' && overlay.mediaId === mediaItem.id,
             );
             return (
-            <View key={mediaItem.id} style={styles.coverTile}>
+            <Pressable
+              key={mediaItem.id}
+              style={styles.coverTile}
+              onPress={() => openPreviewActions(index)}
+              accessibilityLabel={`แก้ไขสื่อชิ้นที่ ${index + 1}`}
+            >
               {mediaItem.type === 'video' ? (
                 <ProductVideoThumb
                   uri={mediaItem.uri}
@@ -401,7 +450,7 @@ export function ContentPublishScreen() {
                   <Text style={styles.coverBadgeText}>ปก</Text>
                 </View>
               ) : null}
-            </View>
+            </Pressable>
           );})}
           {mediaUris.length < 6 ? (
             <Pressable style={styles.addTile} onPress={() => void addFromLibrary()}>

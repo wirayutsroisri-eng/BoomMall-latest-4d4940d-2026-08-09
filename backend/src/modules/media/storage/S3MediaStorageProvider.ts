@@ -1,4 +1,5 @@
-import { UploadService, objectStorageReadiness } from '../../chat/services/upload.service';
+import { DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { UploadService, objectStorageReadiness, storageClient } from '../../chat/services/upload.service';
 import type { CreateMediaUploadInput, MediaStorageProvider } from './MediaStorageProvider';
 
 export class S3MediaStorageProvider implements MediaStorageProvider {
@@ -16,6 +17,11 @@ export class S3MediaStorageProvider implements MediaStorageProvider {
 
   inspect(storageKey: string) {
     return UploadService.assertObjectUploaded(storageKey);
+  }
+
+  async remove(storageKey: string) {
+    const { client, config } = storageClient();
+    await client.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: storageKey }));
   }
 
   readiness() {

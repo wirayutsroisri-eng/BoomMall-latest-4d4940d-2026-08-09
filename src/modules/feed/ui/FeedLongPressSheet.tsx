@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -23,6 +23,13 @@ type Props = {
   onInterested?: () => void;
   onNotInterested: () => void;
   onSave?: () => void;
+  followed?: boolean;
+  onToggleFollow?: () => void;
+  onHide?: () => void;
+  onBlock?: () => void;
+  onWhy?: () => void;
+  onChangeVisibility?: () => void;
+  onToggleComments?: () => void;
   onReport: () => void;
   onShare: () => void;
 };
@@ -41,6 +48,13 @@ export function FeedLongPressSheet({
   onInterested,
   onNotInterested,
   onSave,
+  followed = false,
+  onToggleFollow,
+  onHide,
+  onBlock,
+  onWhy,
+  onChangeVisibility,
+  onToggleComments,
   onReport,
   onShare,
 }: Props) {
@@ -68,11 +82,13 @@ export function FeedLongPressSheet({
       <DragDownDismiss
         onDismiss={onClose}
         showDim
+        animateIn
         rootInModal
         rootStyle={styles.dismissRoot}
       >
         <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
           <View style={styles.handle} />
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.menuContent}>
 
           {isOwnPost && onEditPost ? (
             <View style={styles.group}>
@@ -98,15 +114,18 @@ export function FeedLongPressSheet({
                   />
                 </>
               ) : null}
+              {onChangeVisibility ? <><View style={styles.divider} /><MenuRow icon="eye-outline" label="เปลี่ยนการมองเห็น" onPress={onChangeVisibility} /></> : null}
+              {onToggleComments ? <><View style={styles.divider} /><MenuRow icon="chatbubble-outline" label="ปิดความคิดเห็น" onPress={onToggleComments} /></> : null}
             </View>
           ) : null}
 
-          <View style={styles.group}>
+          {!isOwnPost ? <View style={styles.group}>
             {onInterested ? (
               <>
                 <MenuRow
                   icon="add-circle-outline"
                   label="สนใจ"
+                  subtitle="เพิ่มน้ำหนักเนื้อหาประเภทนี้"
                   onPress={() => {
                     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                     onInterested();
@@ -118,12 +137,13 @@ export function FeedLongPressSheet({
             <MenuRow
               icon="remove-circle-outline"
               label="ไม่สนใจ"
+              subtitle="ลดการแสดงเนื้อหาที่คล้ายกัน"
               onPress={() => {
                 void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 onNotInterested();
               }}
             />
-          </View>
+          </View> : null}
 
           <View style={styles.group}>
             {onSave ? (
@@ -131,6 +151,7 @@ export function FeedLongPressSheet({
                 <MenuRow
                   icon={saved ? 'bookmark' : 'bookmark-outline'}
                   label={saved ? 'ยกเลิกการบันทึก' : 'บันทึกโพสต์'}
+                  subtitle={saved ? 'นำออกจากบันทึกไว้' : 'เก็บไว้ดูภายหลังในโปรไฟล์'}
                   onPress={() => {
                     void Haptics.selectionAsync();
                     onSave();
@@ -139,41 +160,56 @@ export function FeedLongPressSheet({
                 <View style={styles.divider} />
               </>
             ) : null}
-            {canReport ? (
-              <>
-                <MenuRow
-                  icon="chatbubble-ellipses-outline"
-                  label="รายงานปัญหาทางรูปภาพ"
-                  onPress={() => {
-                    void Haptics.selectionAsync();
-                    onReport();
-                  }}
-                />
-                <View style={styles.divider} />
-              </>
-            ) : null}
-            <MenuRow
-              icon="arrow-redo-outline"
-              label="แชร์"
-              onPress={() => {
-                void Haptics.selectionAsync();
-                onShare();
-              }}
-            />
-            <View style={styles.divider} />
-            <MenuRow
-              icon="ellipsis-horizontal"
-              label="ตัวเลือกเพิ่มเติม"
-              chevron
-              expanded={moreOpen}
-              onPress={() => {
-                void Haptics.selectionAsync();
-                setMoreOpen((v) => !v);
-              }}
-            />
+            {!isOwnPost ? <>
+              <MenuRow
+                icon="arrow-redo-outline"
+                label="แชร์"
+                onPress={() => {
+                  void Haptics.selectionAsync();
+                  onShare();
+                }}
+              />
+              <View style={styles.divider} />
+              <MenuRow
+                icon="ellipsis-horizontal"
+                label="ตัวเลือกเพิ่มเติม"
+                chevron
+                expanded={moreOpen}
+                onPress={() => {
+                  void Haptics.selectionAsync();
+                  setMoreOpen((v) => !v);
+                }}
+              />
+            </> : null}
           </View>
 
-          {moreOpen ? (
+          {!isOwnPost && onToggleFollow ? (
+            <View style={styles.group}>
+              <MenuRow
+                icon={followed ? 'person-remove-outline' : 'person-add-outline'}
+                label={`${followed ? 'เลิกติดตาม' : 'ติดตาม'} ${item.author}`}
+                onPress={onToggleFollow}
+              />
+            </View>
+          ) : null}
+
+          {!isOwnPost && (onHide || canReport || onBlock) ? (
+            <View style={styles.group}>
+              {onHide ? <MenuRow icon="eye-off-outline" label="ซ่อนโพสต์" subtitle="โพสต์นี้จะหายจาก Feed ของคุณ" onPress={onHide} /> : null}
+              {onHide && canReport ? <View style={styles.divider} /> : null}
+              {canReport ? <MenuRow icon="flag-outline" label="รายงานโพสต์" subtitle="ส่งให้ทีมตรวจสอบ โดยไม่ลบทันที" onPress={onReport} /> : null}
+              {canReport && onBlock ? <View style={styles.divider} /> : null}
+              {onBlock ? <MenuRow icon="ban-outline" label="บล็อกผู้ใช้" subtitle="ไม่เห็นเนื้อหาหรือการติดต่อจากบัญชีนี้" destructive onPress={onBlock} /> : null}
+            </View>
+          ) : null}
+
+          {!isOwnPost && onWhy ? (
+            <View style={styles.group}>
+              <MenuRow icon="information-circle-outline" label="ทำไมฉันจึงเห็นโพสต์นี้" chevron onPress={onWhy} />
+            </View>
+          ) : null}
+
+          {!isOwnPost && moreOpen ? (
             <View style={styles.group}>
               <View style={styles.row}>
                 <Ionicons name="speedometer-outline" size={22} color={colors.text.primary} />
@@ -252,6 +288,7 @@ export function FeedLongPressSheet({
               />
             </View>
           ) : null}
+          </ScrollView>
         </View>
       </DragDownDismiss>
     </Modal>
@@ -261,6 +298,7 @@ export function FeedLongPressSheet({
 function MenuRow({
   icon,
   label,
+  subtitle,
   onPress,
   trailing,
   chevron,
@@ -269,6 +307,7 @@ function MenuRow({
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
+  subtitle?: string;
   onPress?: () => void;
   trailing?: React.ReactNode;
   chevron?: boolean;
@@ -278,7 +317,10 @@ function MenuRow({
   return (
     <Pressable style={styles.row} onPress={onPress} disabled={!onPress && !trailing}>
       <Ionicons name={icon} size={22} color={destructive ? '#DC2626' : colors.text.primary} />
-      <Text style={[styles.rowLabel, destructive && styles.rowLabelDestructive]}>{label}</Text>
+      <View style={styles.rowCopy}>
+        <Text style={[styles.rowLabel, destructive && styles.rowLabelDestructive]}>{label}</Text>
+        {subtitle ? <Text style={styles.rowSubtitle}>{subtitle}</Text> : null}
+      </View>
       {trailing}
       {chevron ? (
         <Ionicons
@@ -300,7 +342,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingTop: 8,
     gap: 10,
+    maxHeight: '88%',
   },
+  menuContent: { gap: 10, paddingBottom: 4 },
   handle: {
     alignSelf: 'center',
     width: 36,
@@ -326,7 +370,9 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 14,
   },
-  rowLabel: { flex: 1, fontSize: 16, fontWeight: '600', color: colors.text.primary },
+  rowCopy: { flex: 1, paddingVertical: 10 },
+  rowLabel: { fontSize: 16, fontWeight: '600', color: colors.text.primary },
+  rowSubtitle: { color: '#7A827E', fontSize: 12, lineHeight: 16, marginTop: 2 },
   rowLabelDestructive: { color: '#DC2626' },
   hint: { fontSize: 13, color: colors.text.secondary, fontWeight: '600' },
   seg: { flexDirection: 'row', alignItems: 'center', gap: 4 },

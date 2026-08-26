@@ -29,6 +29,7 @@ type Props = {
   onShare: () => void;
   onSave: () => void;
   onAuthor: () => void;
+  onMenu: () => void;
   onChat?: () => void;
   onProduct?: () => void;
 };
@@ -45,7 +46,11 @@ function publishedLabel(iso?: string) {
   if (minutes < 1) return 'เมื่อสักครู่';
   if (minutes < 60) return `${minutes} นาทีที่แล้ว`;
   if (minutes < 1440) return `${Math.floor(minutes / 60)} ชม.ที่แล้ว`;
-  return date.toLocaleDateString('th-TH');
+  const days = Math.floor(minutes / 1440);
+  if (days < 30) return `${days} วันที่แล้ว`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months} เดือนที่แล้ว`;
+  return `${Math.floor(months / 12)} ปีที่แล้ว`;
 }
 
 function clamp(value: number, minimum: number, maximum: number) {
@@ -61,6 +66,7 @@ export const FeedPostCard = memo(function FeedPostCard({
   onShare,
   onSave,
   onAuthor,
+  onMenu,
   onChat,
   onProduct,
 }: Props) {
@@ -72,6 +78,7 @@ export const FeedPostCard = memo(function FeedPostCard({
     [item.imageUri, item.imageUris],
   );
   const [captionExpanded, setCaptionExpanded] = useState(false);
+  const visibleCaption = item.caption.trim() === 'โพสต์ใหม่จาก BoomMall' ? '' : item.caption;
   const [loadedImageSize, setLoadedImageSize] = useState<{ width: number; height: number } | null>(null);
   const [videoSize, setVideoSize] = useState<{ width: number; height: number } | null>(null);
   const [videoReady, setVideoReady] = useState(false);
@@ -154,7 +161,7 @@ export const FeedPostCard = memo(function FeedPostCard({
     ? Math.min(naturalVideoHeight, windowHeight * 0.92)
     : naturalVideoHeight);
   const videoPoster = videoAsset?.thumbnailUrl;
-  const canExpandCaption = item.caption.length > 180 || item.caption.split('\n').length > 5;
+  const canExpandCaption = visibleCaption.length > 180 || visibleCaption.split('\n').length > 5;
 
   useEffect(() => {
     if (!videoPlayer) {
@@ -259,6 +266,7 @@ export const FeedPostCard = memo(function FeedPostCard({
             <Avatar
               initial={item.author.slice(0, 1)}
               size={42}
+              radius={21}
               backgroundColor={item.gradient[1]}
               uri={item.isUserPost ? ownAvatarUri : item.authorAvatarUri}
             />
@@ -273,11 +281,19 @@ export const FeedPostCard = memo(function FeedPostCard({
               <Text style={styles.authorName} numberOfLines={1}>{item.author}</Text>
             </Pressable>
             <Text style={styles.meta} numberOfLines={1}>
-              @{item.authorHandle.replace(/^@/, '')} · {item.location || 'ไม่ระบุพื้นที่'} · {dateLabel}
+              {dateLabel}
             </Text>
           </View>
         </View>
-        <Ionicons name="ellipsis-horizontal" size={20} color="#AAB3AF" />
+        <Pressable
+          onPress={onMenu}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="ตัวเลือกโพสต์"
+          style={styles.menuButton}
+        >
+          <Ionicons name="ellipsis-horizontal" size={20} color="#66736D" />
+        </Pressable>
       </View>
 
       {channel === 'jobs' ? (
@@ -286,14 +302,14 @@ export const FeedPostCard = memo(function FeedPostCard({
         <View style={styles.typeBadge}><Text style={styles.typeBadgeText}>สินค้ามือสอง</Text></View>
       ) : null}
 
-      <View style={styles.captionBlock}>
-        <Text style={styles.caption} numberOfLines={captionExpanded ? undefined : 5}>{item.caption}</Text>
+      {visibleCaption ? <View style={styles.captionBlock}>
+        <Text style={styles.caption} numberOfLines={captionExpanded ? undefined : 5}>{visibleCaption}</Text>
         {canExpandCaption ? (
           <Pressable hitSlop={6} onPress={() => setCaptionExpanded((expanded) => !expanded)}>
             <Text style={styles.moreText}>{captionExpanded ? 'ย่อข้อความ' : 'ดูเพิ่มเติม'}</Text>
           </Pressable>
         ) : null}
-      </View>
+      </View> : null}
 
       {item.videoUri ? (
         <View style={[styles.media, { height: feedVideoHeight }]}>
@@ -407,37 +423,38 @@ export const FeedPostCard = memo(function FeedPostCard({
 function Action({ icon, label, active, onPress }: { icon: React.ComponentProps<typeof Ionicons>['name']; label: string; active?: boolean; onPress: () => void }) {
   return (
     <Pressable style={styles.action} onPress={onPress} hitSlop={6}>
-      <Ionicons name={icon} size={22} color={active ? '#FE2C55' : '#F2F5F3'} />
+      <Ionicons name={icon} size={22} color={active ? '#E93455' : '#34413B'} />
       {label ? <Text style={styles.actionText}>{label}</Text> : null}
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  card: { marginBottom: 8, backgroundColor: '#101512', overflow: 'hidden' },
+  card: { marginBottom: 8, backgroundColor: '#F4F5F3', overflow: 'hidden' },
   authorRow: { minHeight: 60, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   authorButton: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, marginRight: 12 },
+  menuButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 19 },
   authorText: { flex: 1 },
   authorNameButton: { alignSelf: 'flex-start', maxWidth: '100%' },
-  authorName: { color: '#fff', fontSize: 15, fontWeight: '900' },
-  meta: { color: '#8E9B95', fontSize: 12, marginTop: 2 },
+  authorName: { color: '#168BFF', fontSize: 15, fontWeight: '900' },
+  meta: { color: '#707A75', fontSize: 12, marginTop: 2 },
   captionBlock: { paddingHorizontal: 12, paddingBottom: 10 },
-  caption: { color: '#ECF2EF', fontSize: 15, lineHeight: 21 },
-  moreText: { color: '#9DA8A3', fontSize: 13, fontWeight: '700', marginTop: 3 },
-  typeBadge: { alignSelf: 'flex-start', marginLeft: 14, marginBottom: 8, backgroundColor: 'rgba(0,214,143,0.14)', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 999 },
-  typeBadgeText: { color: '#4CE2AE', fontSize: 11, fontWeight: '800' },
+  caption: { color: '#202824', fontSize: 15, lineHeight: 21 },
+  moreText: { color: '#65716B', fontSize: 13, fontWeight: '700', marginTop: 3 },
+  typeBadge: { alignSelf: 'flex-start', marginLeft: 14, marginBottom: 8, backgroundColor: '#DDF3EA', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 999 },
+  typeBadgeText: { color: '#087A55', fontSize: 11, fontWeight: '800' },
   media: { width: '100%', backgroundColor: '#050706', overflow: 'hidden' },
   videoPoster: { ...StyleSheet.absoluteFill, backgroundColor: '#090D0B', alignItems: 'center', justifyContent: 'center' },
   playbackIcon: { position: 'absolute', left: '50%', top: '50%', width: 66, height: 66, marginLeft: -33, marginTop: -33, borderRadius: 33, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.58)' },
   videoBadge: { position: 'absolute', top: 10, right: 10, flexDirection: 'row', gap: 4, alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.65)', paddingHorizontal: 8, paddingVertical: 5, borderRadius: 999 },
   videoBadgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
-  productRow: { minHeight: 66, margin: 12, marginBottom: 2, borderRadius: 12, paddingHorizontal: 12, backgroundColor: '#1C2521', flexDirection: 'row', alignItems: 'center', gap: 10 },
-  productName: { color: '#fff', fontSize: 13, fontWeight: '900' },
-  productMeta: { color: '#8E9B95', fontSize: 11, marginTop: 2 },
-  price: { color: '#36D9A0', fontSize: 15, fontWeight: '900' },
+  productRow: { minHeight: 66, margin: 12, marginBottom: 2, borderRadius: 12, paddingHorizontal: 12, backgroundColor: '#E7EAE7', flexDirection: 'row', alignItems: 'center', gap: 10 },
+  productName: { color: '#202824', fontSize: 13, fontWeight: '900' },
+  productMeta: { color: '#707A75', fontSize: 11, marginTop: 2 },
+  price: { color: '#07835B', fontSize: 15, fontWeight: '900' },
   chatButton: { height: 42, marginHorizontal: 12, marginTop: 10, borderRadius: 11, backgroundColor: '#38DDA4', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
   chatButtonText: { color: '#07140F', fontWeight: '900', fontSize: 13 },
   actions: { height: 54, paddingHorizontal: 13, flexDirection: 'row', alignItems: 'center', gap: 18 },
   action: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  actionText: { color: '#D7DFDB', fontSize: 12, fontWeight: '700' },
+  actionText: { color: '#34413B', fontSize: 12, fontWeight: '700' },
 });

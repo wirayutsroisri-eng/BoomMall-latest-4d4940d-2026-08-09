@@ -21,10 +21,6 @@ export function formatHandle(raw: string) {
   return cleaned ? `@${cleaned}` : '@';
 }
 
-export function profilePublicLink(handle: string) {
-  return `boommall.app/@${stripHandle(handle)}`;
-}
-
 export function cooldownUntil(changedAt?: string | null) {
   if (!changedAt) return null;
   const at = Date.parse(changedAt);

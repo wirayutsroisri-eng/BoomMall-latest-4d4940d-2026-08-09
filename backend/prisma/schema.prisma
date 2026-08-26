@@ -1,5 +1,4 @@
-// Boom Coin — Double-entry ledger (PostgreSQL)
-// Balances are projections only. Never mutate wallet balance without ledger entries.
+// BoomMall production backend — PostgreSQL
 
 generator client {
   provider = "prisma-client-js"
@@ -10,173 +9,12 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum WalletKind {
-  USER
-  SELLER
-  TREASURY
-  REWARD_POOL
-  SYSTEM_MINT
-}
-
-enum WalletStatus {
-  NORMAL
-  LIMITED
-  REVIEW
-  FROZEN
-}
-
-enum AccountBucket {
-  AVAILABLE
-  PENDING
-  LOCKED
-}
-
-enum TxType {
-  INITIAL_MINT
-  SELLER_TOPUP_MINT
-  TRANSFER
-  CONTENT_SUPPORT
-  REWARD_PAYOUT
-  REFUND
-  REVERSAL
-  /// Marketplace GP settlement (must pair with audit trail)
-  GP_SETTLEMENT
-  /// PSP capture / payout reference (real gateway only)
-  PSP_CAPTURE
-}
-
-enum TxStatus {
-  PENDING
-  COMMITTED
-  FAILED
-  REVERSED
-  CANCELLED
-}
-
-enum EntrySide {
-  DEBIT
-  CREDIT
-}
-
-enum TopUpStatus {
-  PENDING
-  APPROVED
-  REJECTED
-  CANCELLED
-}
-
-/// System-wide supply counters (single row id = 1)
-model SystemSupply {
-  id                 Int      @id @default(1)
-  /// All coins ever minted into the closed loop
-  totalMinted        BigInt   @default(0)
-  /// THB received from approved seller top-ups
-  totalRevenueThb    BigInt   @default(0)
-  updatedAt          DateTime @updatedAt
-}
-
-model Wallet {
-  id          String       @id @default(cuid())
-  kind        WalletKind
-  /// External owner (userId / sellerId). System wallets use codes like PLATFORM_TREASURY
-  ownerRef    String
-  displayName String
-  status      WalletStatus @default(NORMAL)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-
-  accounts WalletAccount[]
-
-  topUpsAsSeller SellerTopUpRequest[] @relation("SellerWallet")
-
-  @@unique([kind, ownerRef])
-  @@index([kind])
-}
-
-/// Balance projection — updated only inside ledger commit transactions
-model WalletAccount {
-  id        String        @id @default(cuid())
-  walletId  String
-  bucket    AccountBucket @default(AVAILABLE)
-  /// Projection of committed ledger entries (integer Boom Coin)
-  balance   BigInt        @default(0)
-  version   Int           @default(0)
-  updatedAt DateTime      @updatedAt
-
-  wallet  Wallet        @relation(fields: [walletId], references: [id])
-  entries LedgerEntry[]
-
-  @@unique([walletId, bucket])
-}
-
-/// Transaction header (immutable after COMMITTED)
-model WalletTransaction {
-  id              String   @id @default(cuid())
-  requestId       String   @unique
-  idempotencyKey  String   @unique
-  type            TxType
-  status          TxStatus @default(PENDING)
-  /// Gross coin amount moved / minted
-  amount          BigInt
-  referenceId     String?
-  metadataJson    Json     @default("{}")
-  previousHash    String
-  recordHash      String
-  createdAt       DateTime @default(now())
-  confirmedAt     DateTime?
-
-  entries LedgerEntry[]
-  topUp   SellerTopUpRequest?
-
-  @@index([type, status])
-  @@index([createdAt])
-}
-
-/// Double-entry line — for each tx, sum(DEBIT) == sum(CREDIT)
-model LedgerEntry {
-  id              String    @id @default(cuid())
-  transactionId   String
-  walletAccountId String
-  side            EntrySide
-  amount          BigInt
-  createdAt       DateTime  @default(now())
-
-  transaction   WalletTransaction @relation(fields: [transactionId], references: [id])
-  walletAccount WalletAccount     @relation(fields: [walletAccountId], references: [id])
-
-  @@index([walletAccountId])
-  @@index([transactionId])
-}
-
+/// Generic request idempotency storage. Kept for order/payment operations.
 model IdempotencyRecord {
   key           String   @id
   transactionId String   @unique
   responseJson  Json
   createdAt     DateTime @default(now())
-}
-
-model SellerTopUpRequest {
-  id                String      @id @default(cuid())
-  sellerWalletId    String
-  /// THB amount transferred to company bank account
-  amountThb         BigInt
-  /// Boom Coin to mint on approve (1 THB = 1 Coin)
-  amountCoin        BigInt
-  proofUrl          String
-  proofNote         String?
-  status            TopUpStatus @default(PENDING)
-  submittedBy       String
-  reviewedBy        String?
-  reviewNote        String?
-  idempotencyKey    String?     @unique
-  walletTransactionId String?   @unique
-  createdAt         DateTime    @default(now())
-  reviewedAt        DateTime?
-
-  sellerWallet      Wallet             @relation("SellerWallet", fields: [sellerWalletId], references: [id])
-  walletTransaction WalletTransaction? @relation(fields: [walletTransactionId], references: [id])
-
-  @@index([status, createdAt])
 }
 
 model AdminAuditLog {
@@ -226,26 +64,26 @@ model ModerationState {
 
 /// Global Feed Ranking & Personalization weights + discovery rules
 model FeedPersonalizationConfig {
-  id                     String   @id @default("GLOBAL_CONFIG")
+  id                     String @id @default("GLOBAL_CONFIG")
   /// Personalization slice (target sum with systemSignals = 1.0; personalization ≈ 0.75)
-  interestMatchWeight    Float    @default(0.35)
-  watchTimeWeight        Float    @default(0.25)
-  freshnessWeight        Float    @default(0.10)
-  creatorDiversityWeight Float    @default(0.05)
-  systemSignalsWeight    Float    @default(0.25)
+  interestMatchWeight    Float  @default(0.35)
+  watchTimeWeight        Float  @default(0.25)
+  freshnessWeight        Float  @default(0.10)
+  creatorDiversityWeight Float  @default(0.05)
+  systemSignalsWeight    Float  @default(0.25)
 
-  boostNewCreators       Boolean  @default(true)
-  exploreNewInterests    Boolean  @default(true)
-  reduceRepeatedContent  Boolean  @default(true)
-  reduceLowQuality       Boolean  @default(true)
+  boostNewCreators      Boolean @default(true)
+  exploreNewInterests   Boolean @default(true)
+  reduceRepeatedContent Boolean @default(true)
+  reduceLowQuality      Boolean @default(true)
 
-  geoProximityBoost      Boolean  @default(true)
-  downrankReported       Boolean  @default(true)
-  prioritizeEnergyPush   Boolean  @default(true)
-  hideOutOfStock         Boolean  @default(true)
+  geoProximityBoost    Boolean @default(true)
+  downrankReported     Boolean @default(true)
+  prioritizeEnergyPush Boolean @default(true)
+  hideOutOfStock       Boolean @default(true)
 
-  updatedAt              DateTime @updatedAt
-  updatedBy              String?
+  updatedAt DateTime @updatedAt
+  updatedBy String?
 }
 
 /// One-click Feed algorithm presets
@@ -275,19 +113,19 @@ enum ChatMessageStatus {
 }
 
 model ChatConversation {
-  id            String                @id @default(uuid())
-  type          ChatConversationType  @default(SHOP)
+  id               String               @id @default(uuid())
+  type             ChatConversationType @default(SHOP)
   /// Shop / seller external id (USER_SHOP)
-  shopId        String?
-  shopName      String?
-  title         String?
+  shopId           String?
+  shopName         String?
+  title            String?
   /// Mall product / order context for shop support rooms (optional).
   contextProductId String?
   contextOrderId   String?
-  lastSequence  BigInt                @default(0)
-  lastMessageAt DateTime?
-  createdAt     DateTime              @default(now())
-  updatedAt     DateTime              @updatedAt
+  lastSequence     BigInt               @default(0)
+  lastMessageAt    DateTime?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
 
   participants ChatParticipant[]
   messages     ChatMessage[]
@@ -329,9 +167,9 @@ model ChatMessage {
   createdAt        DateTime          @default(now())
   persistedAt      DateTime?
 
-  conversation ChatConversation         @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  replyTo      ChatMessage?             @relation("ChatReply", fields: [replyToMessageId], references: [id], onDelete: SetNull)
-  replies      ChatMessage[]            @relation("ChatReply")
+  conversation ChatConversation        @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  replyTo      ChatMessage?            @relation("ChatReply", fields: [replyToMessageId], references: [id], onDelete: SetNull)
+  replies      ChatMessage[]           @relation("ChatReply")
   attachments  ChatMessageAttachment[]
   reactions    ChatMessageReaction[]
 
@@ -375,8 +213,9 @@ model ChatMessageReaction {
 // ─── Auth & Profile ──────────────────────────────────────────────────────────
 
 model UserProfile {
-  id           String   @id @default(uuid())
-  userId       String   @unique
+  userId       String   @id
+  snowflakeId  BigInt   @unique @default(dbgenerated("generate_snowflake_id()")) @map("snowflake_id")
+  friendCode   String   @unique @default(dbgenerated("generate_friend_code()")) @map("friend_code") @db.VarChar(12)
   displayName  String?
   handle       String?
   role         String   @default("BUYER") // BUYER | SELLER | ADMIN
@@ -392,20 +231,166 @@ model UserProfile {
   updatedAt    DateTime @updatedAt
 
   eulaAcceptances EulaAcceptance[]
+  interestProfile UserInterestProfile?
+  behaviorEvents  BehaviorEvent[]
+  stories         Story[]
+  storyViews      StoryView[]
+  friendInvites   FriendInvite[]
+  sentFriendRequests FriendRequest[] @relation("SentFriendRequests")
+  receivedFriendRequests FriendRequest[] @relation("ReceivedFriendRequests")
+  ownedContacts Contact[] @relation("ContactOwner")
+  contactOf     Contact[] @relation("ContactTarget")
+  commerceProducts CommerceProduct[] @relation("CommerceProductOwner")
 
   @@index([shopId])
   @@index([handle])
   @@index([email])
 }
 
+enum FriendRequestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+model FriendInvite {
+  id          BigInt    @id @default(dbgenerated("generate_snowflake_id()"))
+  ownerUserId String    @map("owner_user_id")
+  tokenHash   String    @unique @map("token_hash") @db.VarChar(64)
+  expiresAt   DateTime  @map("expires_at")
+  revokedAt   DateTime? @map("revoked_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  owner UserProfile @relation(fields: [ownerUserId], references: [userId], onDelete: Cascade)
+
+  @@index([ownerUserId, revokedAt, expiresAt])
+  @@map("friend_invites")
+}
+
+model FriendRequest {
+  id          BigInt              @id @default(dbgenerated("generate_snowflake_id()"))
+  pairKey     String              @unique @map("pair_key") @db.VarChar(73)
+  senderId    String              @map("sender_id")
+  receiverId  String              @map("receiver_id")
+  status      FriendRequestStatus @default(PENDING)
+  message     String?             @db.VarChar(200)
+  createdAt   DateTime            @default(now()) @map("created_at")
+  respondedAt DateTime?           @map("responded_at")
+
+  sender   UserProfile @relation("SentFriendRequests", fields: [senderId], references: [userId], onDelete: Cascade)
+  receiver UserProfile @relation("ReceivedFriendRequests", fields: [receiverId], references: [userId], onDelete: Cascade)
+
+  @@index([senderId, status])
+  @@index([receiverId, status])
+  @@map("friend_requests")
+}
+
+model Contact {
+  id         BigInt   @id @default(dbgenerated("generate_snowflake_id()"))
+  userId     String   @map("user_id")
+  contactId  String   @map("contact_id")
+  nickname   String?  @db.VarChar(50)
+  isFavorite Boolean  @default(false) @map("is_favorite")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  user    UserProfile @relation("ContactOwner", fields: [userId], references: [userId], onDelete: Cascade)
+  contact UserProfile @relation("ContactTarget", fields: [contactId], references: [userId], onDelete: Cascade)
+
+  @@unique([userId, contactId])
+  @@index([contactId])
+  @@map("contacts")
+}
+
+enum InterestSource {
+  PROFILE
+  SEARCH
+  VIEW
+  LIKE
+  SAVE
+  COMMENT
+  CHAT
+  PURCHASE
+  SELL
+  JOB
+  SERVICE
+  SHARE
+  NEGATIVE
+}
+
+model UserInterestProfile {
+  id                      String   @id @default(uuid())
+  userId                  String   @unique
+  explicitInterestsJson   Json     @default("[]")
+  occupation              String?
+  occupationVisible       Boolean  @default(false)
+  careerField             String?
+  careerFieldVisible      Boolean  @default(false)
+  skillsJson              Json     @default("[]")
+  skillsVisible           Boolean  @default(false)
+  interestsVisible        Boolean  @default(false)
+  preferredCategoriesJson Json     @default("[]")
+  categoriesVisible       Boolean  @default(false)
+  behavioralInterestsJson Json     @default("[]")
+  searchInterestsJson     Json     @default("[]")
+  locationPreferencesJson Json     @default("[]")
+  personalizationEnabled  Boolean  @default(true)
+  vectorVersion           Int      @default(1)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  profile UserProfile @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@index([updatedAt])
+}
+
+model BehaviorEvent {
+  id           String         @id @default(uuid())
+  userId       String
+  eventType    String
+  contentId    String?
+  contentType  String?
+  tagsJson     Json           @default("[]")
+  query        String?
+  source       InterestSource
+  weightDelta  Float
+  durationMs   Int?
+  metadataJson Json           @default("{}")
+  occurredAt   DateTime
+  createdAt    DateTime       @default(now())
+
+  profile UserProfile @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@index([userId, occurredAt])
+  @@index([userId, occurredAt, id])
+  @@index([contentType, contentId])
+  @@index([eventType, createdAt])
+}
+
+model RecommendationConfig {
+  id                   String   @id @default("GLOBAL_RECOMMENDATION")
+  interestWeight       Float    @default(0.30)
+  recentBehaviorWeight Float    @default(0.25)
+  searchIntentWeight   Float    @default(0.20)
+  locationWeight       Float    @default(0.10)
+  freshnessWeight      Float    @default(0.10)
+  popularityWeight     Float    @default(0.05)
+  negativeSignalWeight Float    @default(1.00)
+  decayHalfLifeDays    Float    @default(30)
+  eventWeightsJson     Json     @default("{}")
+  updatedAt            DateTime @updatedAt
+  updatedBy            String?
+}
+
 model EulaAcceptance {
-  id          String   @id @default(uuid())
-  userId      String
-  policyKey   String // APP_STORE_C4_CHAT | MARKETPLACE_TERMS | PRIVACY
-  version     String
-  acceptedAt  DateTime @default(now())
-  ipHint      String?
-  userAgent   String?
+  id         String   @id @default(uuid())
+  userId     String
+  policyKey  String // APP_STORE_C4_CHAT | MARKETPLACE_TERMS | PRIVACY
+  version    String
+  acceptedAt DateTime @default(now())
+  ipHint     String?
+  userAgent  String?
 
   profile UserProfile? @relation(fields: [userId], references: [userId], onDelete: Cascade)
 
@@ -416,18 +401,18 @@ model EulaAcceptance {
 // ─── Marketplace audit (GP / PSP) ────────────────────────────────────────────
 
 model MarketplaceAuditLog {
-  id           String   @id @default(cuid())
-  actor        String
-  action       String // gp.settle | psp.capture | psp.reject | order.pay
-  entityType   String
-  entityId     String
-  amountThb    BigInt?
-  gpBps        Int? // basis points e.g. 500 = 5%
-  gpAmountThb  BigInt?
-  pspRef       String?
-  ledgerTxId   String?
-  detailJson   Json     @default("{}")
-  createdAt    DateTime @default(now())
+  id          String   @id @default(cuid())
+  actor       String
+  action      String // gp.settle | psp.capture | psp.reject | order.pay
+  entityType  String
+  entityId    String
+  amountThb   BigInt?
+  gpBps       Int? // basis points e.g. 500 = 5%
+  gpAmountThb BigInt?
+  pspRef      String?
+  ledgerTxId  String?
+  detailJson  Json     @default("{}")
+  createdAt   DateTime @default(now())
 
   @@index([createdAt])
   @@index([action, createdAt])
@@ -436,40 +421,41 @@ model MarketplaceAuditLog {
 
 /// Admin-configurable marketplace GP (commission). 500 bps = 5.00%.
 model MarketplaceGpPolicy {
-  id                     String   @id @default("GLOBAL_GP")
-  enabled                Boolean  @default(true)
-  defaultGpBps           Int      @default(500)
-  b2cGpBps               Int?
-  b2bGpBps               Int?
-  minOrderThb            Int      @default(0)
+  id                    String   @id @default("GLOBAL_GP")
+  enabled               Boolean  @default(true)
+  defaultGpBps          Int      @default(500)
+  b2cGpBps              Int?
+  b2bGpBps              Int?
+  minOrderThb           Int      @default(0)
   /// Days after buyer+seller confirm + no return before seller net is payable
-  holdDaysAfterComplete  Int      @default(7)
+  holdDaysAfterComplete Int      @default(7)
   /// Weekly payout cycle for RELEASE_ELIGIBLE orders
-  payoutCycleDays        Int      @default(7)
-  merchantOverridesJson  Json     @default("[]")
-  updatedAt              DateTime @updatedAt
-  updatedBy              String?
+  payoutCycleDays       Int      @default(7)
+  merchantOverridesJson Json     @default("[]")
+  updatedAt             DateTime @updatedAt
+  updatedBy             String?
 }
 
 /// Chat/Social control policy (single row)
 model SocialControlPolicy {
-  id                    String   @id @default("GLOBAL_SOCIAL")
-  maxMessagesPerMinute  Int      @default(30)
-  maxMessagesPerDay     Int      @default(2000)
-  mediaRetentionDays    Int      @default(90)
-  textRetentionDays     Int      @default(365)
-  requireEulaForChat    Boolean  @default(true)
-  eulaVersion           String   @default("c4-2026.1")
-  reportBlockEnabled    Boolean  @default(true)
-  moderationEnabled     Boolean  @default(true)
-  updatedAt             DateTime @updatedAt
-  updatedBy             String?
+  id                   String   @id @default("GLOBAL_SOCIAL")
+  maxMessagesPerMinute Int      @default(30)
+  maxMessagesPerDay    Int      @default(2000)
+  mediaRetentionDays   Int      @default(90)
+  textRetentionDays    Int      @default(365)
+  requireEulaForChat   Boolean  @default(true)
+  eulaVersion          String   @default("c4-2026.1")
+  reportBlockEnabled   Boolean  @default(true)
+  moderationEnabled    Boolean  @default(true)
+  updatedAt            DateTime @updatedAt
+  updatedBy            String?
 }
 
 // ─── Auth identities (Sign in with Apple / social) ───────────────────────────
 
 model AuthIdentity {
   id             String   @id @default(uuid())
+  snowflakeId    BigInt   @unique @default(dbgenerated("generate_snowflake_id()")) @map("snowflake_id")
   userId         String
   provider       String // apple | google | line
   providerUserId String
@@ -568,7 +554,7 @@ model AdCreative {
   @@index([campaignId, active])
 }
 
-/// Ad billing invoices (THB via PSP) — NOT Boom Coin GP
+/// Ad billing invoices in THB via the configured PSP.
 model AdInvoice {
   id            String          @id @default(cuid())
   campaignId    String
@@ -637,6 +623,7 @@ model SellerNotification {
 
 model SocialPost {
   id            String   @id @default(uuid())
+  snowflakeId   BigInt   @unique @default(dbgenerated("generate_snowflake_id()")) @map("snowflake_id")
   authorId      String
   body          String
   mediaJson     Json     @default("[]")
@@ -656,11 +643,47 @@ model SocialPost {
   updatedAt     DateTime @updatedAt
 
   mediaAssets MediaAsset[]
+  comments    SocialComment[]
 
   @@index([createdAt])
   @@index([authorId, createdAt])
   @@index([status, createdAt])
   @@index([lane, createdAt])
+}
+
+model Story {
+  id           String         @id @default(uuid())
+  snowflakeId  BigInt         @unique @default(dbgenerated("generate_snowflake_id()")) @map("snowflake_id")
+  userId       String
+  mediaType    MediaAssetType
+  mediaUrl     String
+  thumbnailUrl String?
+  caption      String?
+  overlayJson  Json           @default("[]")
+  status       String         @default("ACTIVE")
+  viewCount    Int            @default(0)
+  createdAt    DateTime       @default(now())
+  expiresAt    DateTime
+
+  mediaAssets MediaAsset[]
+  views       StoryView[]
+  owner       UserProfile  @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@index([status, expiresAt])
+  @@index([userId, createdAt])
+}
+
+model StoryView {
+  id       String   @id @default(uuid())
+  storyId  String
+  viewerId String
+  viewedAt DateTime @default(now())
+
+  story  Story       @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  viewer UserProfile @relation(fields: [viewerId], references: [userId], onDelete: Cascade)
+
+  @@unique([storyId, viewerId])
+  @@index([viewerId, viewedAt])
 }
 
 enum MediaAssetType {
@@ -679,28 +702,31 @@ enum MediaAssetStatus {
 /// Canonical, device-independent media referenced by published content.
 /// Local app URIs never belong in this table.
 model MediaAsset {
-  id            String           @id @default(uuid())
-  ownerId       String
-  type          MediaAssetType
-  status        MediaAssetStatus @default(UPLOADING)
-  storageKey    String           @unique
-  canonicalUrl  String
-  thumbnailUrl  String?
-  playbackUrl   String?
-  width         Int?
-  height        Int?
-  durationMs    Int?
-  mimeType      String
-  fileSize      BigInt?
-  postId        String?
-  metadataJson  Json             @default("{}")
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
+  id           String           @id @default(uuid())
+  ownerId      String
+  type         MediaAssetType
+  status       MediaAssetStatus @default(UPLOADING)
+  storageKey   String           @unique
+  canonicalUrl String
+  thumbnailUrl String?
+  playbackUrl  String?
+  width        Int?
+  height       Int?
+  durationMs   Int?
+  mimeType     String
+  fileSize     BigInt?
+  postId       String?
+  storyId      String?
+  metadataJson Json             @default("{}")
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
 
-  post SocialPost? @relation(fields: [postId], references: [id], onDelete: SetNull)
+  post  SocialPost? @relation(fields: [postId], references: [id], onDelete: SetNull)
+  story Story?      @relation(fields: [storyId], references: [id], onDelete: SetNull)
 
   @@index([ownerId, status, createdAt])
   @@index([postId])
+  @@index([storyId])
   @@index([status, updatedAt])
 }
 
@@ -709,6 +735,7 @@ model MediaAsset {
 
 model CommerceProduct {
   id          String   @id
+  ownerUserId String
   merchantId  String
   shopName    String
   title       String
@@ -722,8 +749,10 @@ model CommerceProduct {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  owner    UserProfile  @relation("CommerceProductOwner", fields: [ownerUserId], references: [userId], onDelete: Cascade)
   variants CommerceSku[]
 
+  @@index([ownerUserId, status])
   @@index([merchantId, status])
   @@index([shopName])
   @@index([updatedAt])
@@ -764,30 +793,30 @@ model CommerceStock {
 }
 
 model CommerceOrder {
-  id               String    @id @default(cuid())
-  buyerId          String
-  merchantId       String?
+  id                String    @id @default(cuid())
+  buyerId           String
+  merchantId        String?
   /// PENDING_PAYMENT | PAID | SHIPPED | DELIVERED | COMPLETED | CANCELLED | REFUNDED | FAILED
-  status           String    @default("PENDING_PAYMENT")
-  merchandiseThb   Int       @default(0)
-  shippingFeeThb   Int       @default(0)
-  currency         String    @default("THB")
-  linesJson        Json      @default("[]")
-  gpBps            Int?
-  gpAmountThb      Int       @default(0)
-  netToMerchantThb Int?
-  pspRef           String?
-  idempotencyKey   String?   @unique
-  paidAt           DateTime?
-  trackingNumber   String?
-  shippingCarrier  String?
+  status            String    @default("PENDING_PAYMENT")
+  merchandiseThb    Int       @default(0)
+  shippingFeeThb    Int       @default(0)
+  currency          String    @default("THB")
+  linesJson         Json      @default("[]")
+  gpBps             Int?
+  gpAmountThb       Int       @default(0)
+  netToMerchantThb  Int?
+  pspRef            String?
+  idempotencyKey    String?   @unique
+  paidAt            DateTime?
+  trackingNumber    String?
+  shippingCarrier   String?
   /// PENDING | PACKED | SHIPPED | DELIVERED
-  shippingStatus   String?
+  shippingStatus    String?
   /// PICKED_UP | OUT_FOR_DELIVERY | DELIVERED | RETURNED
-  courierEvent     String?
-  shippedAt        DateTime?
-  deliveredAt      DateTime?
-  disputedAt       DateTime?
+  courierEvent      String?
+  shippedAt         DateTime?
+  deliveredAt       DateTime?
+  disputedAt        DateTime?
   /// HELD | RELEASE_ELIGIBLE | IN_PAYOUT | PAID_OUT | REFUNDED | DISPUTED
   settlementStatus  String    @default("HELD")
   buyerConfirmedAt  DateTime?
@@ -831,9 +860,9 @@ model ShipmentGroup {
   printedAt       DateTime @default(now())
   createdAt       DateTime @default(now())
 
+  @@unique([merchantId, trackingNumber])
   @@index([merchantId, createdAt])
   @@index([addressMergeKey])
-  @@unique([merchantId, trackingNumber])
   @@map("shipment_groups")
 }
 
@@ -876,7 +905,7 @@ model ShipmentTrackingEvent {
   @@map("shipment_tracking_events")
 }
 
-/// THB books for the marketplace (not Boom Coin Wallet).
+/// THB accounting books for marketplace settlement.
 model PlatformThbLedger {
   id         String   @id @default(cuid())
   /// PLATFORM_CASH | PLATFORM_GP | MERCHANT_HELD | MERCHANT_PAYABLE | MERCHANT_QUEUED | BUYER_REFUND
@@ -966,13 +995,16 @@ model SocialLike {
 }
 
 model SocialComment {
-  id        String   @id @default(uuid())
-  postId    String
-  authorId  String
-  parentId  String?
-  body      String
-  likeCount Int      @default(0)
-  createdAt DateTime @default(now())
+  id          String   @id @default(uuid())
+  snowflakeId BigInt   @unique @default(dbgenerated("generate_snowflake_id()")) @map("snowflake_id")
+  postId      String
+  authorId    String
+  parentId    String?
+  body        String
+  likeCount   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  post SocialPost @relation(fields: [postId], references: [id], onDelete: Cascade)
 
   @@index([postId, createdAt])
   @@index([parentId])
@@ -1048,20 +1080,20 @@ model PushDevice {
   @@index([userId])
 }
 
-/// กระเป๋าเงินร้าน (THB escrow) — ไม่ใช่ Boom Coin Wallet
+/// บัญชียอดคงเหลือร้านค้าสำหรับ THB escrow และ payout
 model SellerWallet {
-  id                String   @id @default(cuid())
-  sellerId          String   @unique @map("seller_id")
+  id               String   @id @default(cuid())
+  sellerId         String   @unique @map("seller_id")
   /// หน่วยสตางค์ (1 บาท = 100)
-  availableBalance  Int      @default(0) @map("available_balance")
-  pendingBalance    Int      @default(0) @map("pending_balance")
-  isCorporate       Boolean  @default(false) @map("is_corporate")
-  bankName          String?  @map("bank_name")
-  bankAccountNo     String?  @map("bank_account_no")
-  bankAccountName   String?  @map("bank_account_name")
-  bankCode          String?  @map("bank_code")
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  availableBalance Int      @default(0) @map("available_balance")
+  pendingBalance   Int      @default(0) @map("pending_balance")
+  isCorporate      Boolean  @default(false) @map("is_corporate")
+  bankName         String?  @map("bank_name")
+  bankAccountNo    String?  @map("bank_account_no")
+  bankAccountName  String?  @map("bank_account_name")
+  bankCode         String?  @map("bank_code")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
   transactions FinanceWalletTransaction[]
   withdrawals  WithdrawalRequest[]
@@ -1097,28 +1129,28 @@ model FinanceWalletTransaction {
 }
 
 model WithdrawalRequest {
-  id          String    @id @default(cuid())
-  walletId    String    @map("wallet_id")
-  sellerId    String    @map("seller_id")
-  amount      Int
+  id              String    @id @default(cuid())
+  walletId        String    @map("wallet_id")
+  sellerId        String    @map("seller_id")
+  amount          Int
   /// PENDING | APPROVED | TRANSFERRED | REJECTED
-  status      String    @default("PENDING")
+  status          String    @default("PENDING")
   /// MANUAL | AUTO
-  payoutChannel String  @default("MANUAL") @map("payout_channel")
-  payoutProvider String? @map("payout_provider")
-  payoutRef     String? @map("payout_ref")
+  payoutChannel   String    @default("MANUAL") @map("payout_channel")
+  payoutProvider  String?   @map("payout_provider")
+  payoutRef       String?   @map("payout_ref")
   /// เหตุที่บังคับ Manual เช่น mode_manual | over_limit | auto_failed | risk_flag
-  manualReason  String? @map("manual_reason")
-  bankName    String?   @map("bank_name")
-  bankAccountNo String? @map("bank_account_no")
-  bankAccountName String? @map("bank_account_name")
-  note        String?
-  proofOfTransfer String? @map("proof_of_transfer")
-  reviewedBy  String?   @map("reviewed_by")
-  reviewedAt  DateTime? @map("reviewed_at")
-  transferredAt DateTime? @map("transferred_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  manualReason    String?   @map("manual_reason")
+  bankName        String?   @map("bank_name")
+  bankAccountNo   String?   @map("bank_account_no")
+  bankAccountName String?   @map("bank_account_name")
+  note            String?
+  proofOfTransfer String?   @map("proof_of_transfer")
+  reviewedBy      String?   @map("reviewed_by")
+  reviewedAt      DateTime? @map("reviewed_at")
+  transferredAt   DateTime? @map("transferred_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
   wallet SellerWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
 
@@ -1149,28 +1181,28 @@ model PlatformSettings {
 
 /// ร้านค้า + กระเป๋า escrow (ยอดเป็นสตางค์)
 model Store {
-  id                String   @id
-  name              String   @default("")
-  customGpPercent   Float?   @map("custom_gp_percent")
-  availableBalance  Int      @default(0) @map("available_balance")
-  pendingBalance    Int      @default(0) @map("pending_balance")
-  isCorporate       Boolean  @default(false) @map("is_corporate")
+  id                String    @id
+  name              String    @default("")
+  customGpPercent   Float?    @map("custom_gp_percent")
+  availableBalance  Int       @default(0) @map("available_balance")
+  pendingBalance    Int       @default(0) @map("pending_balance")
+  isCorporate       Boolean   @default(false) @map("is_corporate")
   /// เลขประจำตัวผู้เสียภาษี / เลขบัตร 13 หลัก — ใช้ส่งสรรพากร
-  taxId             String?  @map("tax_id")
+  taxId             String?   @map("tax_id")
   /// ที่อยู่จดทะเบียน / ที่อยู่ติดต่อบนใบสรุปยอด
   address           String?
-  bankName          String?  @map("bank_name")
-  bankAccountNo     String?  @map("bank_account_no")
-  bankAccountName   String?  @map("bank_account_name")
-  bankCode          String?  @map("bank_code")
+  bankName          String?   @map("bank_name")
+  bankAccountNo     String?   @map("bank_account_no")
+  bankAccountName   String?   @map("bank_account_name")
+  bankCode          String?   @map("bank_code")
   /// เวลาอัปเดตบัญชีธนาคารล่าสุด — ใช้ cooling-off 24 ชม. ก่อนถอน
   bankUpdatedAt     DateTime? @map("bank_updated_at")
   /// scrypt hash ของ PIN 6 หลัก (รูปแบบเดียวกับรหัสผ่านบัญชี)
-  paymentPinHash    String?  @map("payment_pin_hash")
-  pinFailedAttempts Int      @default(0) @map("pin_failed_attempts")
+  paymentPinHash    String?   @map("payment_pin_hash")
+  pinFailedAttempts Int       @default(0) @map("pin_failed_attempts")
   pinLockedUntil    DateTime? @map("pin_locked_until")
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
   escrows OrderEscrow[]
 
@@ -1178,23 +1210,23 @@ model Store {
 }
 
 model OrderEscrow {
-  id                 String    @id @default(cuid())
-  orderId            String    @unique @map("order_id")
-  storeId            String    @map("store_id")
+  id                String    @id @default(cuid())
+  orderId           String    @unique @map("order_id")
+  storeId           String    @map("store_id")
   /// สตางค์
-  grossAmount        Int       @map("gross_amount")
-  shippingFee        Int       @default(0) @map("shipping_fee")
-  gpPercent          Float     @map("gp_percent")
-  gpAmount           Int       @map("gp_amount")
-  netMerchantAmount  Int       @map("net_merchant_amount")
-  releaseDueDate     DateTime? @map("release_due_date")
+  grossAmount       Int       @map("gross_amount")
+  shippingFee       Int       @default(0) @map("shipping_fee")
+  gpPercent         Float     @map("gp_percent")
+  gpAmount          Int       @map("gp_amount")
+  netMerchantAmount Int       @map("net_merchant_amount")
+  releaseDueDate    DateTime? @map("release_due_date")
   /// HELD | RELEASED | CANCELLED | REFUNDED
-  releaseStatus      String    @default("HELD") @map("release_status")
-  releasedAt         DateTime? @map("released_at")
-  payoutProof        String?   @map("payout_proof")
-  paidOutAt          DateTime? @map("paid_out_at")
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
+  releaseStatus     String    @default("HELD") @map("release_status")
+  releasedAt        DateTime? @map("released_at")
+  payoutProof       String?   @map("payout_proof")
+  paidOutAt         DateTime? @map("paid_out_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
   store Store @relation(fields: [storeId], references: [id])
 

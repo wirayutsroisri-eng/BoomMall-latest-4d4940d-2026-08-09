@@ -43,4 +43,25 @@ describe('buildOwnerFeedItems account isolation', () => {
 
     expect(rows.map((row) => row.id)).toEqual(['current-account-post']);
   });
+
+  it('uses the stable user id when the account has not chosen a handle yet', () => {
+    const rows = buildOwnerFeedItems('', [item('owned-post', 'new-user')], {
+      isSelf: true,
+      ownerUserId: 'new-user',
+      requireMedia: false,
+    });
+    expect(rows.map((row) => row.id)).toEqual(['owned-post']);
+  });
+
+  it('does not leave a profile-grid tile for a post without media', () => {
+    const mediaPost = item('media-post', 'current-user');
+    const textOnlyPost = { ...item('text-only-post', 'current-user'), imageUri: undefined };
+
+    const rows = buildOwnerFeedItems('@boommall_user', [mediaPost, textOnlyPost], {
+      isSelf: true,
+      ownerUserId: 'current-user',
+    });
+
+    expect(rows.map((row) => row.id)).toEqual(['media-post']);
+  });
 });

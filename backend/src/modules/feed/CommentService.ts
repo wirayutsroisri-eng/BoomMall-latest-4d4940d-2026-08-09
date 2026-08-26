@@ -3,9 +3,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { prisma } from '../../lib/prisma';
 import { AppError } from '../../lib/errors';
+import { snowflakeIdForApi } from '../../config/snowflake';
 
 export type CommentDto = {
   id: string;
+  snowflakeId?: string;
   postId: string;
   authorId: string;
   authorName?: string | null;
@@ -149,6 +151,7 @@ export async function toggleCommentLike(commentId: string, liked: boolean) {
 function mapComment(
   row: {
     id: string;
+    snowflakeId?: bigint | string | null;
     postId: string;
     authorId: string;
     parentId: string | null;
@@ -160,6 +163,10 @@ function mapComment(
 ): CommentDto {
   return {
     id: row.id,
+    snowflakeId:
+      typeof row.snowflakeId === 'bigint'
+        ? snowflakeIdForApi(row.snowflakeId)
+        : row.snowflakeId ?? undefined,
     postId: row.postId,
     authorId: row.authorId,
     authorName: profile?.displayName ?? null,

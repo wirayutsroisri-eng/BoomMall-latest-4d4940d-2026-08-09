@@ -5,7 +5,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   View,
 } from 'react-native';
@@ -333,11 +332,6 @@ export function CartScreen() {
             <Ionicons name="chevron-forward" size={14} color={colors.text.muted} />
           </Pressable>
 
-          <View style={styles.coinsRow}>
-            <Text style={styles.coinsText}>BoomMall Coins ไม่เพียงพอ</Text>
-            <Switch value={false} disabled trackColor={{ false: '#D0D5D2' }} />
-          </View>
-
           <View style={styles.checkoutBar}>
             <Checkbox checked={allSelected} onPress={() => toggleAll(!allSelected)} />
             <Text style={styles.allLabel}>ทั้งหมด</Text>
@@ -560,14 +554,6 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   voucherBadgeText: { color: ORANGE, fontSize: 10, fontWeight: '900' },
-  coinsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  coinsText: { fontSize: 12, fontWeight: '700', color: colors.text.muted },
   checkoutBar: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -61,10 +61,11 @@ const brake: IncomingOrder = incomingFromCommerceOrder({
 });
 
 const paid = [kit, battery, brake];
+const shopId = '6ac8c9c0-f988-4d70-9471-3005b20e8acd';
 
 describe('packingManifestForOrder', () => {
   it('prints the kit card SKUs — not another address on the queue', () => {
-    const pack = packingManifestForOrder(kit, paid);
+    const pack = packingManifestForOrder(kit, paid, shopId);
     expect(pack.orderIds).toEqual(['io-kit']);
     expect(pack.summary.label).toBe('รวม 3 รายการ (5 ชิ้น)');
     expect(pack.lines.map((line) => [line.option, line.sku, line.qty])).toEqual([
@@ -79,7 +80,7 @@ describe('packingManifestForOrder', () => {
   });
 
   it('keeps same-address peers on one label and matches the card line list', () => {
-    const pack = packingManifestForOrder(battery, paid);
+    const pack = packingManifestForOrder(battery, paid, shopId);
     expect(pack.orderIds).toEqual(['io-1', 'io-1b']);
     expect(pack.lines.map((line) => line.sku)).toEqual(['BAT-60-32', 'BRK-CNC-01']);
     expect(packingManifestOf(pack.orders).lines).toEqual(pack.lines);

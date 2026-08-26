@@ -104,8 +104,8 @@ export function DashboardPage() {
       ) : null}
 
       <div className="mb-6 flex flex-wrap items-center gap-2">
-        <span className={`status-pill ${stats?.ledgerHealthy ? 'ok' : stats ? 'danger' : 'warn'}`}>
-          {stats ? (stats.ledgerHealthy ? 'บัญชีตรงกัน' : 'บัญชียังไม่ตรง — กดการเงิน') : 'กำลังตรวจระบบ'}
+        <span className={`status-pill ${stats ? 'ok' : 'warn'}`}>
+          {stats ? 'เชื่อมต่อระบบแล้ว' : 'กำลังตรวจระบบ'}
         </span>
         {stats ? (
           <span className="text-xs font-medium text-[var(--ink-tertiary)]">
@@ -118,7 +118,7 @@ export function DashboardPage() {
         {nav?.finance !== false || nav?.sellers !== false ? (
           <SummaryCard
             title="ยอดขายวันนี้"
-            value={stats ? `฿${fmt(stats.gmvPaidThb ?? stats.totalCompanyRevenueThb)}` : '—'}
+            value={stats ? `฿${fmt(stats.gmvPaidThb ?? 0)}` : '—'}
             subtitle={<TermTip term="gmv">GMV / Gross Sales</TermTip>}
             onClick={() => navigate('/orders')}
           />

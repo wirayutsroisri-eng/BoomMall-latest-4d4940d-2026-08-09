@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { AppError } from '../lib/errors';
 
-export type ReportKind = 'user' | 'content' | 'message' | 'comment';
+export type ReportKind = 'user' | 'content' | 'message' | 'comment' | 'product' | 'secondhand_listing' | 'job';
 export type ReportStatus = 'open' | 'reviewed' | 'actioned' | 'dismissed';
 export type ContentModerationStatus = 'hidden' | 'removed' | 'pending_review';
 export type UserAccountStatus = 'active' | 'soft_banned' | 'banned' | 'hard_deleted';
@@ -16,6 +16,9 @@ export type ModerationReport = {
   reason: string;
   details?: string;
   reporterRef?: string;
+  sellerUserId?: string;
+  targetOwnerId?: string;
+  subReason?: string;
   status: ReportStatus;
   createdAt: string;
   resolvedAt?: string;
@@ -234,8 +237,15 @@ export function scanKeywords(text: string) {
 
 export function listReports(status?: string) {
   const store = readStore();
-  if (!status || status === 'all') return store.reports;
-  return store.reports.filter((r) => r.status === status);
+  const rows = !status || status === 'all' ? store.reports : store.reports.filter((r) => r.status === status);
+  const counts = new Map<string, Set<string>>();
+  for (const report of store.reports) {
+    const reporters = counts.get(report.targetId) ?? new Set<string>();
+    reporters.add((report.reporterRef ?? report.id).toLowerCase());
+    counts.set(report.targetId, reporters);
+  }
+  return rows.map((report) => ({ ...report, uniqueReporterCount: counts.get(report.targetId)?.size ?? 1 }))
+    .sort((a, b) => b.uniqueReporterCount - a.uniqueReporterCount || b.createdAt.localeCompare(a.createdAt));
 }
 
 export function createReport(input: {
@@ -245,8 +255,21 @@ export function createReport(input: {
   reason: string;
   details?: string;
   reporterRef?: string;
+  sellerUserId?: string;
+  targetOwnerId?: string;
+  subReason?: string;
+  manualReviewOnly?: boolean;
 }) {
   const store = readStore();
+  const reporterRef = input.reporterRef?.trim();
+  const duplicate = reporterRef && store.reports.find((report) =>
+    report.kind === input.kind
+    && report.targetId === input.targetId
+    && report.reporterRef?.toLowerCase() === reporterRef.toLowerCase()
+    && (report.status === 'open' || report.status === 'reviewed'));
+  if (duplicate) {
+    throw new AppError('DUPLICATE_REPORT', 'คุณได้รายงานประกาศนี้แล้ว', 409);
+  }
   const report: ModerationReport = {
     id: newId('rpt'),
     kind: input.kind,
@@ -254,7 +277,10 @@ export function createReport(input: {
     targetLabel: input.targetLabel,
     reason: input.reason,
     details: input.details,
-    reporterRef: input.reporterRef,
+    reporterRef,
+    sellerUserId: input.sellerUserId,
+    targetOwnerId: input.targetOwnerId,
+    subReason: input.subReason,
     status: 'open',
     createdAt: new Date().toISOString(),
   };
@@ -263,7 +289,7 @@ export function createReport(input: {
   // Rule 3: >3 unique reporters → auto-hide
   const unique = uniqueReportsForTarget(store, input.targetId);
   let autoHide: ContentModerationRecord | null = null;
-  if (unique >= AUTO_HIDE_REPORT_THRESHOLD) {
+  if (!input.manualReviewOnly && unique >= AUTO_HIDE_REPORT_THRESHOLD) {
     const existing = store.content[input.targetId];
     if (!existing || existing.status === 'pending_review') {
       autoHide = {

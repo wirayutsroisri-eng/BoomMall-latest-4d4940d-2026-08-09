@@ -34,6 +34,7 @@ import {
   ShippingLabelSheet,
   type LabelPreviewModel,
 } from '@/modules/store/ui/fulfillment/ShippingLabelPreview';
+import { useAuthStore } from '@/modules/auth/state/auth-store';
 
 type ShipFilter = 'todo' | 'shipping' | 'done' | 'all';
 
@@ -73,6 +74,7 @@ function labelModelFor(orders: IncomingOrder[]): LabelPreviewModel {
 
 export function SellerShippingScreen() {
   const insets = useSafeAreaInsets();
+  const myShopId = useAuthStore((s) => s.user?.shopId ?? '');
   const { width } = useWindowDimensions();
   const tablet = width >= 768;
   const incomingOrders = useOrdersStore((s) => s.incomingOrders);
@@ -84,6 +86,14 @@ export function SellerShippingScreen() {
   const [selecting, setSelecting] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const labelRef = useRef<View>(null);
+  const lastApiAlertAt = useRef(0);
+
+  const showApiError = (title: string, error: unknown) => {
+    const now = Date.now();
+    if (now - lastApiAlertAt.current < 30_000) return;
+    lastApiAlertAt.current = now;
+    Alert.alert(title, error instanceof Error ? error.message : 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้');
+  };
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30_000);
@@ -91,8 +101,10 @@ export function SellerShippingScreen() {
   }, []);
 
   useEffect(() => {
-    void pullMerchantIncomingOrders();
-    const t = setInterval(() => void pullMerchantIncomingOrders(), 20_000);
+    void pullMerchantIncomingOrders().catch((error: unknown) => showApiError('โหลดออเดอร์ไม่สำเร็จ', error));
+    const t = setInterval(() => {
+      void pullMerchantIncomingOrders().catch((error: unknown) => showApiError('ซิงก์ออเดอร์ไม่สำเร็จ', error));
+    }, 20_000);
     return () => clearInterval(t);
   }, []);
 
@@ -100,7 +112,10 @@ export function SellerShippingScreen() {
     () => incomingOrders.filter((o) => o.status === 'paid' && !o.returnRequested),
     [incomingOrders],
   );
-  const mergeGroups = useMemo(() => mergeSameAddressOrders(paid.map((o) => toSellerMergeable(o))), [paid]);
+  const mergeGroups = useMemo(
+    () => myShopId ? mergeSameAddressOrders(paid.map((o) => toSellerMergeable(o, myShopId))) : [],
+    [paid, myShopId],
+  );
   const todoGroups = useMemo(() => {
     const byId = new Map(paid.map((o) => [o.id, o]));
     const groups = mergeGroups
@@ -154,12 +169,14 @@ export function SellerShippingScreen() {
         updateCommerceOrderShipping(order.id, {
           shippingStatus: 'PACKED',
           trackingNumber: order.trackingNo,
-        }).catch(() => undefined),
+        }),
       ),
-    ).then(() => {
-      void pullCommerceCatalog();
-      void pullMerchantIncomingOrders();
-    });
+    )
+      .then(() => {
+        void pullCommerceCatalog();
+        void pullMerchantIncomingOrders().catch((error: unknown) => showApiError('โหลดออเดอร์ไม่สำเร็จ', error));
+      })
+      .catch((error: unknown) => showApiError('อัปเดตสถานะพัสดุไม่สำเร็จ', error));
   };
 
   const markDelivered = (order: IncomingOrder) => {
@@ -170,8 +187,8 @@ export function SellerShippingScreen() {
       shippingStatus: 'DELIVERED',
       trackingNumber: order.trackingNo,
     })
-      .catch(() => undefined)
-      .then(() => pullMerchantIncomingOrders());
+      .then(() => pullMerchantIncomingOrders())
+      .catch((error: unknown) => showApiError('อัปเดตการจัดส่งไม่สำเร็จ', error));
   };
 
   const printPickList = async () => {

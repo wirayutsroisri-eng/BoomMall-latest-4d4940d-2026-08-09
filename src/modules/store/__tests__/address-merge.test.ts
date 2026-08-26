@@ -9,7 +9,7 @@ import {
   type MergeableOrder,
 } from '../domain/address-merge';
 
-const shop = 'shop-boom-ev';
+const shop = '6ac8c9c0-f988-4d70-9471-3005b20e8acd';
 
 function order(partial: Partial<MergeableOrder> & Pick<MergeableOrder, 'id'>): MergeableOrder {
   return {

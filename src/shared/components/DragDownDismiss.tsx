@@ -37,6 +37,8 @@ type Props = {
   dimPressToDismiss?: boolean;
   /** Wrap with GestureHandlerRootView (needed inside RN Modal) */
   rootInModal?: boolean;
+  /** Present the sheet from the bottom with an iOS-like spring. */
+  animateIn?: boolean;
 };
 
 /**
@@ -55,14 +57,25 @@ export function DragDownDismiss({
   showDim = false,
   dimPressToDismiss,
   rootInModal = false,
+  animateIn = false,
 }: Props) {
   const dismissY = useSharedValue(0);
   const onDismissRef = useRef(onDismiss);
   onDismissRef.current = onDismiss;
 
   useEffect(() => {
-    dismissY.value = 0;
-  }, [dismissY]);
+    if (!animateIn) {
+      dismissY.value = 0;
+      return;
+    }
+    dismissY.value = SCREEN_H;
+    dismissY.value = withSpring(0, {
+      damping: 28,
+      stiffness: 260,
+      mass: 0.78,
+      overshootClamping: true,
+    });
+  }, [animateIn, dismissY]);
 
   const finishDismiss = useCallback(() => {
     onDismissRef.current();
@@ -161,7 +174,7 @@ const styles = StyleSheet.create({
   },
   dim: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: '#000',
+    backgroundColor: 'rgba(0,0,0,0.24)',
   },
   sheet: {
     overflow: 'visible',

@@ -54,8 +54,14 @@ export function Avatar({
 
   if (uri) {
     return (
-      <View style={[shared, { overflow: 'hidden' }, style as StyleProp<ViewStyle>]}>
-        <Image source={{ uri }} style={{ width: size, height: size }} resizeMode="cover" />
+      <View
+        style={[shared, { overflow: 'hidden' }, style as StyleProp<ViewStyle>]}
+      >
+        <Image
+          source={{ uri }}
+          style={{ width: size, height: size, borderRadius: r }}
+          resizeMode="cover"
+        />
       </View>
     );
   }

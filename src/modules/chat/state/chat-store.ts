@@ -51,9 +51,9 @@ import {
 } from '../data/chatRealtimeApi';
 import { rememberChatSequence } from '../data/chatSocket';
 import { prepareChatMedia, prepareChatMediaList } from '../data/chatMedia';
-import { loadAllCachedThreads, loadCachedInbox, loadCachedThread, saveCachedInbox, saveCachedThread } from '../data/chatLocalDb';
+import { clearChatCache, loadAllCachedThreads, loadCachedInbox, loadCachedThread, saveCachedInbox, saveCachedThread } from '../data/chatLocalDb';
 import { attachmentsToMessageFields, kindFromRemote } from '../domain/chat-media';
-import { MY_SHOP_ID } from '@/modules/warehouse/data/seed';
+import { currentShopId, useAuthStore } from '@/modules/auth/state/auth-store';
 
 /** พิมพ์รหัสนี้ในช่องค้นหาแชต เพื่อเผย Hidden Chats */
 export const HIDDEN_CHAT_SECRET = 'boom.secret';
@@ -278,12 +278,12 @@ function apiConversationId(conversationId: string, list: Conversation[]) {
 
 function shopActorId(conversationId: string, list: Conversation[]) {
   const found = list.find((c) => c.id === conversationId || c.remoteId === conversationId);
-  return found?.inboxRole === 'seller' ? MY_SHOP_ID : currentChatUserId();
+  return found?.inboxRole === 'seller' ? currentShopId() : currentChatUserId();
 }
 
 function isOwnChatSender(senderId: string, conversation?: Conversation) {
   if (isCurrentChatUser(senderId)) return true;
-  return conversation?.inboxRole === 'seller' && senderId === MY_SHOP_ID;
+  return conversation?.inboxRole === 'seller' && senderId === currentShopId();
 }
 
 function formatRemoteStamp(iso: string) {
@@ -339,6 +339,32 @@ function quoteFromMetadata(meta?: Record<string, unknown>): MessageQuote | undef
     fileName: typeof row.fileName === 'string' ? row.fileName : undefined,
     senderName: typeof row.senderName === 'string' ? row.senderName : undefined,
   };
+}
+
+async function persistSecondhandCard(peerUserId: string, peerName: string, ref: ContentReferenceCard) {
+  const response = await ensureDirectChat(peerUserId, peerName) as unknown as {
+    data?: RemoteChatConversation;
+    id?: string;
+  } | null;
+  const remote = response?.data ?? (response?.id ? response as unknown as RemoteChatConversation : null);
+  if (!remote?.id) return null;
+  await sendProductCardRemote({
+    conversationId: remote.id,
+    clientMsgId: `secondhand-card-${ref.feedId}-${Date.now()}`,
+    productId: ref.id,
+    product: {
+      id: ref.id,
+      title: ref.title,
+      sku: `SECONDHAND-${ref.feedId}`,
+      price: ref.price,
+      currency: ref.currency,
+      imageUri: ref.imageUri,
+      shopName: peerName,
+      shopId: peerUserId,
+      shippingHint: ref.subtitle,
+    },
+  });
+  return remote.id;
 }
 
 function mapRemoteMessage(
@@ -554,10 +580,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   startConversationWithCreator: (peerName, peerHandle, avatarColor, contentRef) => {
     const target = normalizeHandle(peerHandle);
+    const remotePeerId = contentRef?.peerUserId?.trim() || target;
+    const isSecondhandCard = Boolean(contentRef?.id.startsWith('secondhand-'));
     const existing = get().conversations.find((c) => normalizeHandle(c.peerHandle) === target);
 
     if (existing) {
-      if (contentRef) get().attachContentReference(existing.id, contentRef);
+      if (contentRef) {
+        get().attachContentReference(existing.id, contentRef);
+        if (isSecondhandCard) void persistSecondhandCard(remotePeerId, peerName, contentRef).then((remoteId) => {
+          if (!remoteId) return;
+          set((state) => ({ conversations: state.conversations.map((row) => row.id === existing.id ? { ...row, remoteId } : row) }));
+        });
+      }
       set((state) => ({ conversations: bumpConversation(state.conversations, existing.id) }));
       return existing.id;
     }
@@ -568,7 +602,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     let lastMessage = greeting;
 
     // Content Reference Card first — both sides see which Feed clip triggered the DM
-    if (contentRef) {
+    if (contentRef && isSecondhandCard) {
       seedMessages.push({
         id: `m-ref-${contentRef.feedId}-${Date.now()}`,
         conversationId: id,
@@ -607,7 +641,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       conversations: [conversation, ...state.conversations],
       messagesById: { ...state.messagesById, [id]: seedMessages },
     }));
-    void ensureDirectChat(target, peerName);
+    if (contentRef) {
+      void persistSecondhandCard(remotePeerId, peerName, contentRef).then((remoteId) => {
+        if (!remoteId) return;
+        set((state) => ({ conversations: state.conversations.map((row) => row.id === id ? { ...row, remoteId } : row) }));
+      });
+    } else {
+      void ensureDirectChat(remotePeerId, peerName);
+    }
     return id;
   },
 
@@ -785,7 +826,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const message: ChatMessage = {
       id: `m-order-${snapshot.orderId}-${Date.now()}`,
       conversationId,
-      senderId: MY_SHOP_ID,
+      senderId: currentShopId(),
       kind: 'order_ref',
       orderRef: snapshot,
       createdAt: 'ตอนนี้',
@@ -813,6 +854,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (get().hydratingInbox) return;
     set({ hydratingInbox: true });
     try {
+    const auth = useAuthStore.getState();
+    const me = auth.user?.id?.trim();
+    const shopId = auth.user?.shopId?.trim();
+    if (!auth.sessionToken || !me || !shopId) {
+      // Logged-out and partially restored sessions are normal during startup.
+      // Never hydrate another account's device cache into that empty session.
+      set({ conversations: [], messagesById: {}, notes: [] });
+      await clearChatCache();
+      return;
+    }
     const cachedInbox = await loadCachedInbox();
     const cachedThreads = await loadAllCachedThreads();
     if (cachedInbox.length || Object.keys(cachedThreads).length) {
@@ -830,10 +881,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
     }
 
-    const me = currentChatUserId();
     const [mine, shopInbox] = await Promise.all([
       listRemoteConversations(),
-      listRemoteShopInbox(MY_SHOP_ID),
+      listRemoteShopInbox(shopId),
     ]);
     if (mine == null) { set({ hydratingInbox: false }); return; }
 
@@ -849,7 +899,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const incoming: Conversation[] = [];
       const pingIds: string[] = [];
       for (const row of rows) {
-        const mapped = mapRemoteConversation(row, me, MY_SHOP_ID);
+        const mapped = mapRemoteConversation(row, me, shopId);
         const match = findLocalMatch(state.conversations, row, me);
         if (match) {
           const preview = row.lastMessage?.trim();

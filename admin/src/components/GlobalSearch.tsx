@@ -19,7 +19,6 @@ const JUMPS: Array<{ q: string[]; label: string; to: string; hint: string }> = [
   { q: ['หางาน', 'บอร์ด', 'board'], label: 'Board', to: '/board', hint: 'หางาน' },
   { q: ['โฆษณา', 'ads'], label: 'โฆษณา', to: '/ads', hint: 'แคมเปญ' },
   { q: ['audit', 'บันทึก'], label: 'Audit Log', to: '/safety/audit', hint: 'ย้อนหลัง' },
-  { q: ['เหรียญ', 'coin'], label: 'Boom Coin', to: '/coins', hint: 'ยอดเหรียญระบบ' },
 ];
 
 export function GlobalSearch() {

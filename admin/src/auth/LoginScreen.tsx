@@ -3,7 +3,7 @@ import { useAdminAuth } from './AdminAuthContext';
 
 type Props = { redirectTo?: string };
 
-export function LoginScreen({ redirectTo }: Props) {
+export function LoginScreen(_props: Props) {
   const { login, error, actor } = useAdminAuth();
   const [key, setKey] = useState('');
   const [name, setName] = useState(actor);
@@ -30,7 +30,6 @@ export function LoginScreen({ redirectTo }: Props) {
         </h1>
         <p className="mt-2 text-[15px] leading-relaxed text-[var(--ink-secondary)]">
           ระบบแอดมินชุดเดียว แยกจากแอปมือถือ — ตอนนี้ใช้มาสเตอร์คีย์เข้าทั้งระบบได้ก่อน
-          {redirectTo?.includes('handbook') ? ' · คู่มือจำกัดสิทธิ์การเงิน/แพลตฟอร์ม' : ''}
         </p>
 
         <label className="mt-7 block text-xs font-semibold text-[var(--ink-tertiary)]">

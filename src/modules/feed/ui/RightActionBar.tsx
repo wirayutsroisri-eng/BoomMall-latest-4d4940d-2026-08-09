@@ -8,9 +8,7 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import { colors } from '@/shared/theme/colors';
-import { CoinIcon } from './CoinIcon';
 import { SpinningDisc } from './SpinningDisc';
-import { formatBoomCoinCount } from '@/modules/wallet/domain/boom-coin';
 
 type Props = {
   tips: number;
@@ -31,7 +29,7 @@ type Props = {
 };
 
 function formatCount(n: number) {
-  return formatBoomCoinCount(n);
+  return Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
 }
 
 export function RightActionBar({
@@ -49,19 +47,8 @@ export function RightActionBar({
   musicActive,
   bottomOffset = 0,
 }: Props) {
-  const tipScale = useSharedValue(1);
-  const tipStyle = useAnimatedStyle(() => ({ transform: [{ scale: tipScale.value }] }));
   const likeScale = useSharedValue(1);
   const likeStyle = useAnimatedStyle(() => ({ transform: [{ scale: likeScale.value }] }));
-
-  const handleTip = () => {
-    if (!onTip) return;
-    tipScale.value = withSpring(1.35, { damping: 6, stiffness: 260 }, () => {
-      tipScale.value = withSpring(1, { damping: 10 });
-    });
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    onTip();
-  };
 
   const handleLike = () => {
     if (!onLike) return;
@@ -74,16 +61,6 @@ export function RightActionBar({
 
   return (
     <View style={[styles.wrap, { bottom: 18 + bottomOffset }]} pointerEvents="box-none">
-      {onTip ? (
-        <Pressable onPress={handleTip} style={styles.action} hitSlop={10} accessibilityLabel="เหรียญ">
-          <Animated.View style={tipStyle}>
-            <CoinIcon size={28} empty active={Boolean(tipped)} />
-          </Animated.View>
-
-          <Text style={[styles.label, tipped && styles.tipLabelActive]}>{formatCount(tips)}</Text>
-        </Pressable>
-      ) : null}
-
       {onLike ? (
         <Pressable onPress={handleLike} style={styles.action} hitSlop={10} accessibilityLabel="ถูกใจ">
           <Animated.View style={likeStyle}>

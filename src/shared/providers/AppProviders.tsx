@@ -4,7 +4,6 @@ import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { Alert, StyleSheet } from 'react-native';
 import { useVaultStore } from '@/modules/vault/state/vault-store';
 import { useKnowledgeStore } from '@/modules/knowledge/state/knowledge-store';
-import { useBoomWalletStore } from '@/modules/wallet/state/boom-wallet-store';
 import { useMusicLibraryStore } from '@/modules/music/state/music-library-store';
 import { useAuthStore } from '@/modules/auth/state/auth-store';
 import { seedActivityFromApp } from '@/modules/account/state/seedActivity';
@@ -20,6 +19,7 @@ import {
   pullCommerceCatalog,
   pushCommerceDelete,
   pushCommerceProduct,
+  setCommerceSyncErrorHandler,
 } from '@/modules/commerce/data/commerceSync';
 import { AppPromptHost } from '@/shared/components/AppPrompt';
 import { PhotoLibraryHost } from '@/shared/media/PhotoLibraryHost';
@@ -28,6 +28,7 @@ import { hydrateOwnProfileFromServer } from '@/modules/profile/data/syncOwnProfi
 import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
 import { whenStoresHydrated } from '@/shared/state/whenStoreHydrated';
 import { resolveApiBase } from '@/shared/api/apiBase';
+import { useWarehouseStore } from '@/modules/warehouse/state/warehouse-store';
 
 type Props = {
   children: React.ReactNode;
@@ -36,12 +37,16 @@ type Props = {
 export function AppProviders({ children }: Props) {
   const hydrateVault = useVaultStore((s) => s.hydrate);
   const hydrateKnowledge = useKnowledgeStore((s) => s.hydrate);
-  const hydrateWallet = useBoomWalletStore((s) => s.hydrate);
   const hydrateMusic = useMusicLibraryStore((s) => s.hydrate);
   const hydrateAuth = useAuthStore((s) => s.hydrate);
   const sessionToken = useAuthStore((s) => s.sessionToken);
   const authHydrated = useAuthStore((s) => s.hydrated);
   const userId = useAuthStore((s) => s.user?.id ?? null);
+  const shopId = useAuthStore((s) => s.user?.shopId ?? null);
+
+  useEffect(() => {
+    if (shopId) useWarehouseStore.getState().bindShopIdentity(shopId);
+  }, [shopId]);
 
   useEffect(() => {
     const apiBaseUrl = resolveApiBase();
@@ -76,16 +81,35 @@ export function AppProviders({ children }: Props) {
   }, [authHydrated, sessionToken, userId]);
 
   useEffect(() => {
+    setCommerceSyncErrorHandler(({ operation, message }) => {
+      const label = operation === 'pull' ? 'โหลดคลังสินค้า' : 'ซิงก์ข้อมูลร้านค้า';
+      Alert.alert(`${label}ไม่สำเร็จ`, `${message}\n\nข้อมูลในเครื่องยังคงอยู่ แต่ยังไม่ถูกบันทึกบนเซิร์ฟเวอร์`);
+    });
     setCommerceHooks({
       onUpsert: pushCommerceProduct,
       onDelete: pushCommerceDelete,
     });
     void hydrateVault();
     void hydrateKnowledge();
-    hydrateWallet();
     void hydrateMusic();
     void hydrateAuth().then(() => {
+      const auth = useAuthStore.getState();
+      const shopId = auth.user?.shopId;
+      if (__DEV__) {
+        console.info('[AUTH_IDENTITY]', {
+          authenticated: Boolean(auth.sessionToken && auth.user),
+          userId: auth.user?.id ?? null,
+          shopId: shopId ?? null,
+        });
+      }
+      const authenticated = Boolean(auth.sessionToken && auth.user && shopId);
       void pullCommerceCatalog();
+      if (!authenticated) {
+        void useChatStore.getState().hydrateInbox();
+        clearPushRegistrationCache();
+        return;
+      }
+      useWarehouseStore.getState().bindShopIdentity(shopId!);
       whenStoresHydrated([useLoyaltyStore, useFeedStore], () => {
         void useFollowStore.getState().hydrateFromServer();
         void useFeedStore.getState().hydrateFromServer();
@@ -128,6 +152,8 @@ export function AppProviders({ children }: Props) {
     const id = setInterval(() => {
       void syncModerationContentBlocks();
       void pullCommerceCatalog();
+      const auth = useAuthStore.getState();
+      if (!auth.sessionToken || !auth.user?.shopId) return;
       if (!isChatSocketConnected()) {
         void useChatStore.getState().hydrateInbox();
         const active = useChatStore.getState().activeConversationId;
@@ -135,10 +161,11 @@ export function AppProviders({ children }: Props) {
       }
     }, 8_000);
     return () => {
+      setCommerceSyncErrorHandler(null);
       clearInterval(id);
       pushUnsub();
     };
-  }, [hydrateVault, hydrateKnowledge, hydrateWallet, hydrateMusic, hydrateAuth]);
+  }, [hydrateVault, hydrateKnowledge, hydrateMusic, hydrateAuth]);
 
   return (
     <GestureHandlerRootView style={styles.root}>

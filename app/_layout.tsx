@@ -27,6 +27,11 @@ export default function RootLayout() {
             ...dismissibleModalOptions,
           }}
         />
+        <Stack.Screen name="story-create" options={{ presentation: 'fullScreenModal', ...dismissibleModalOptions, animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="story-viewer" options={{ presentation: 'fullScreenModal', ...dismissibleModalOptions, animation: 'fade', contentStyle: { backgroundColor: '#000' } }} />
+        <Stack.Screen name="secondhand-create" options={{ presentation: 'fullScreenModal', ...dismissibleModalOptions, animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="secondhand-drafts" options={{ presentation: 'modal', ...dismissibleModalOptions, animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="secondhand/[listingId]" options={{ presentation: 'card', animation: 'slide_from_right', gestureEnabled: true, fullScreenGestureEnabled: true }} />
         <Stack.Screen
           name="create-modal"
           options={{
@@ -38,8 +43,9 @@ export default function RootLayout() {
         <Stack.Screen
           name="create-capture"
           options={{
-            presentation: 'fullScreenModal',
+            presentation: 'transparentModal',
             ...dismissibleModalOptions,
+            contentStyle: { backgroundColor: 'transparent' },
           }}
         />
         <Stack.Screen
@@ -126,11 +132,28 @@ export default function RootLayout() {
             ...dismissibleModalOptions,
           }}
         />
+        <Stack.Screen name="profile/interests" options={{ presentation: 'modal', ...dismissibleModalOptions }} />
         <Stack.Screen
           name="search"
           options={{
             presentation: 'modal',
             ...dismissibleModalOptions,
+          }}
+        />
+        <Stack.Screen
+          name="channel-search"
+          options={{
+            presentation: 'modal',
+            ...dismissibleModalOptions,
+          }}
+        />
+        <Stack.Screen
+          name="shop/search-results"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
+            gestureEnabled: true,
+            fullScreenGestureEnabled: true,
           }}
         />
         <Stack.Screen
@@ -146,20 +169,6 @@ export default function RootLayout() {
             presentation: 'fullScreenModal',
             ...dismissibleModalOptions,
             animation: 'fade',
-          }}
-        />
-        <Stack.Screen
-          name="wallet/index"
-          options={{
-            presentation: 'card',
-            animation: 'slide_from_right',
-          }}
-        />
-        <Stack.Screen
-          name="wallet/security"
-          options={{
-            presentation: 'card',
-            animation: 'slide_from_right',
           }}
         />
         <Stack.Screen

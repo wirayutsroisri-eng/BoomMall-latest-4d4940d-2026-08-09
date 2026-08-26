@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useInventoryStore } from '@/modules/commerce/state/inventory-store';
 import { useWarehouseStore } from '@/modules/warehouse/state/warehouse-store';
+import { useAuthStore } from '@/modules/auth/state/auth-store';
 import type { ClonePrefill, VariantInput } from '@/modules/commerce/domain/stock-core';
 import {
   channelToCondition,
@@ -49,14 +50,13 @@ import {
   type DraftVariant,
 } from '@/modules/store/ui/sell/VariantInventorySection';
 
-const MY_WAREHOUSE_ID = 'wh-boom-ev';
-
 /**
  * Dedicated sell / listing form. Keep this off CreatePostScreen so Expo Router
  * cannot keep serving the old clip+sell layout from a stale module.
  */
 export function SellProductScreen() {
   const insets = useSafeAreaInsets();
+  const myShopId = useAuthStore((s) => s.user?.shopId ?? '');
   const params = useLocalSearchParams<{
     category?: string | string[];
     categoryLabel?: string | string[];
@@ -125,9 +125,10 @@ export function SellProductScreen() {
       ? specsFromCustomFields(prefill.customFields)
       : suggestedSpecsForCategory(categoryKey),
   );
-  const [warehouseId, setWarehouseId] = useState<WarehouseId>('WH-CTI-MAIN');
+  const [warehouseId, setWarehouseId] = useState<WarehouseId>('PRIMARY');
 
   const warehouses = useInventoryStore((s) => s.warehouses);
+  const sharedWarehouses = useWarehouseStore((s) => s.warehouses);
   const createMasterWithVariants = useInventoryStore((s) => s.createMasterWithVariants);
   const onNewProductCreated = useWarehouseStore((s) => s.onNewProductCreated);
 
@@ -274,6 +275,10 @@ export function SellProductScreen() {
   };
 
   const save = () => {
+    if (!myShopId) {
+      Alert.alert('ไม่พบรหัสร้านค้า', 'กรุณาเข้าสู่ระบบใหม่ก่อนลงสินค้า');
+      return;
+    }
     if (!title.trim()) {
       Alert.alert('ยังไม่มีชื่อสินค้า', 'พิมพ์ชื่อให้รู้ว่าขายอะไรนะ');
       return;
@@ -351,6 +356,7 @@ export function SellProductScreen() {
       basePrice: listingPrice,
       tags: [channel, 'Shop'],
       customFields,
+      ownerShopId: myShopId,
       description: description.trim() || undefined,
       usageGuide: usageGuide.trim() || undefined,
       specImages,
@@ -364,7 +370,8 @@ export function SellProductScreen() {
             .map((uri) => ({ uri, type: 'image' as const })),
       variants: prepared,
     });
-    onNewProductCreated(MY_WAREHOUSE_ID, masterId, categoryKey);
+    const ownedWarehouse = sharedWarehouses.find((row) => row.ownerShopId === myShopId);
+    if (ownedWarehouse) onNewProductCreated(ownedWarehouse.id, masterId, categoryKey);
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
     const variantSummary = hasVariants

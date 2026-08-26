@@ -8,10 +8,13 @@ export type SocialProvider = 'apple' | 'google' | 'line' | 'facebook' | 'email' 
 
 export type AuthUser = {
   id: string;
+  /** Stable shop UUID created and owned by the backend. */
+  shopId: string;
   displayName: string;
   handle?: string;
   provider: SocialProvider;
   status: string;
+  role?: string;
 };
 
 type AuthState = {
@@ -26,6 +29,36 @@ type AuthState = {
 
 const TOKEN_KEY = 'boommall-auth-session';
 const USER_KEY = 'boommall-auth-user';
+
+function validAuthUser(value: unknown): value is AuthUser {
+  if (!value || typeof value !== 'object') return false;
+  const user = value as Partial<AuthUser>;
+  return Boolean(
+    user.id?.trim() &&
+      user.shopId?.trim() &&
+      user.displayName?.trim() &&
+      user.provider &&
+      user.status,
+  );
+}
+
+function parseSessionData(json: Record<string, unknown>) {
+  const data = json.data as { sessionToken?: unknown; user?: unknown; shopId?: unknown } | undefined;
+  const sessionToken = typeof data?.sessionToken === 'string' ? data.sessionToken : '';
+  const rawUser = data?.user && typeof data.user === 'object'
+    ? (data.user as Record<string, unknown>)
+    : null;
+  const shopId = typeof rawUser?.shopId === 'string'
+    ? rawUser.shopId
+    : typeof data?.shopId === 'string'
+      ? data.shopId
+      : '';
+  const user = rawUser ? ({ ...rawUser, shopId } as unknown) : null;
+  if (!sessionToken || !validAuthUser(user)) {
+    throw new Error('เซิร์ฟเวอร์ไม่ได้ส่งรหัสร้านค้าจริงกลับมา กรุณาอัปเดตเซิร์ฟเวอร์');
+  }
+  return { sessionToken, user };
+}
 
 async function saveSecure(token: string | null) {
   try {
@@ -52,6 +85,9 @@ export const useAuthStore = create<AuthState>()(
       sessionToken: null,
       user: null,
       setSession: async ({ sessionToken, user }) => {
+        if (!sessionToken.trim() || !validAuthUser(user)) {
+          throw new Error('ไม่สามารถบันทึก session ที่ไม่มีรหัสร้านค้าจริง');
+        }
         await saveSecure(sessionToken);
         await AsyncStorage.setItem(USER_KEY, JSON.stringify(user));
         set({ sessionToken, user, hydrated: true });
@@ -66,7 +102,8 @@ export const useAuthStore = create<AuthState>()(
         const raw = await AsyncStorage.getItem(USER_KEY);
         let user: AuthUser | null = null;
         try {
-          user = raw ? (JSON.parse(raw) as AuthUser) : null;
+          const parsed = raw ? JSON.parse(raw) : null;
+          user = validAuthUser(parsed) ? parsed : null;
         } catch {
           user = null;
         }
@@ -76,6 +113,39 @@ export const useAuthStore = create<AuthState>()(
           await AsyncStorage.removeItem(USER_KEY);
           set({ sessionToken: null, user: null, hydrated: true });
           return;
+        }
+        if (token && !user) {
+          // Upgrade sessions persisted before shopId became mandatory. Keeping
+          // the token with a null user breaks profile ownership and warehouse filters.
+          try {
+            const base = getApiBase();
+            const response = await apiFetch(`${base}/api/v1/auth/me`, {
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            });
+            const json = await readApiJson(response);
+            if (!response.ok || json.ok === false) throw apiError(json, response.status);
+            const data = json.data as Record<string, unknown> | undefined;
+            const profile = data?.profile && typeof data.profile === 'object'
+              ? data.profile as Record<string, unknown>
+              : {};
+            const repaired: AuthUser = {
+              id: String(data?.userId ?? profile.userId ?? ''),
+              shopId: String(data?.shopId ?? profile.shopId ?? ''),
+              displayName: String(profile.displayName ?? 'ผู้ใช้ BoomMall'),
+              handle: typeof profile.handle === 'string' ? profile.handle : undefined,
+              provider: String(data?.provider ?? 'email') as SocialProvider,
+              status: 'ACTIVE',
+              role: typeof data?.role === 'string' ? data.role : undefined,
+            };
+            if (!validAuthUser(repaired)) throw new Error('SESSION_PROFILE_INVALID');
+            await AsyncStorage.setItem(USER_KEY, JSON.stringify(repaired));
+            set({ sessionToken: token, user: repaired, hydrated: true });
+            return;
+          } catch {
+            // A transient network failure must not destroy the secure session.
+            set({ sessionToken: token, user: null, hydrated: true });
+            return;
+          }
         }
         set({ sessionToken: token, user: token && user ? user : null, hydrated: true });
       },
@@ -130,8 +200,7 @@ export async function exchangeSocialLogin(input: {
   });
   const json = await readApiJson(res);
   if (!res.ok || json.ok === false) throw apiError(json, res.status);
-  const data = json.data as { sessionToken: string; user: AuthUser };
-  return { sessionToken: data.sessionToken, user: data.user };
+  return parseSessionData(json);
 }
 
 export async function exchangeEmailLogin(input: {
@@ -156,8 +225,7 @@ export async function exchangeEmailLogin(input: {
   });
   const json = await readApiJson(res);
   if (!res.ok || json.ok === false) throw apiError(json, res.status);
-  const data = json.data as { sessionToken: string; user: AuthUser };
-  return { sessionToken: data.sessionToken, user: data.user };
+  return parseSessionData(json);
 }
 
 export type PhoneOtpRequestResult = {
@@ -210,6 +278,11 @@ export async function verifyPhoneOtp(input: {
   });
   const json = await readApiJson(res);
   if (!res.ok || json.ok === false) throw apiError(json, res.status);
-  const data = json.data as { sessionToken: string; user: AuthUser };
-  return { sessionToken: data.sessionToken, user: data.user };
+  return parseSessionData(json);
+}
+
+export function currentShopId(): string {
+  const shopId = useAuthStore.getState().user?.shopId?.trim();
+  if (!shopId) throw new Error('ไม่พบรหัสร้านค้าใน session กรุณาเข้าสู่ระบบใหม่');
+  return shopId;
 }

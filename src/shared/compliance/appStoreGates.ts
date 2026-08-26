@@ -5,18 +5,6 @@
  */
 export const STORE_COMPLIANCE_MODE = true;
 
-/** ตัด Boom Coin ทั้งก้อน — ห้ามเปิดจนกว่าจะมี IAP จริง */
-export const ENABLE_BOOM_WALLET_UI = false;
-
-/** Digital currency purchase / tip / top-up — ตัดออก ไม่ผ่าน App Store */
-export const ENABLE_BOOM_COIN_PURCHASE_UI = false;
-
-/** เหรียญบนฟีดตัดออก */
-export const ENABLE_FEED_COIN_REACTION = false;
-
-/** ทิปด้วยเหรียญตัดออก */
-export const ENABLE_CONTENT_TIPS = false;
-
 /** Fake checkout that claims payment success without a PSP */
 export const ENABLE_CHECKOUT_PLACE_ORDER = !STORE_COMPLIANCE_MODE;
 

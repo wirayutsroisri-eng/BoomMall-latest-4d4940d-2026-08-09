@@ -1,4 +1,3 @@
-import { MY_SHOP_ID } from '@/modules/warehouse/data/seed';
 import { mergeSameAddressOrders, type MergeableOrder } from './address-merge';
 import { sortFulfillmentQueue } from './fulfillment-priority';
 import { linesOfOrder, packSummary, type PackSummary } from './pack-lines';
@@ -14,7 +13,8 @@ export type PackingManifest = {
   codAmountThb: number;
 };
 
-export function toSellerMergeable(order: IncomingOrder, merchantId = MY_SHOP_ID): MergeableOrder {
+export function toSellerMergeable(order: IncomingOrder, merchantId: string): MergeableOrder {
+  if (!merchantId.trim()) throw new Error('merchantId required');
   const lines = linesOfOrder(order).map((line) => ({
     title: line.title,
     sku: line.sku,
@@ -46,11 +46,12 @@ export function toSellerMergeable(order: IncomingOrder, merchantId = MY_SHOP_ID)
 export function ordersForShipment(
   order: IncomingOrder,
   paid: IncomingOrder[],
+  merchantId: string,
   now = Date.now(),
 ): IncomingOrder[] {
   const pool = paid.filter((row) => row.status === 'paid' && !row.returnRequested);
   const source = pool.some((row) => row.id === order.id) ? pool : [order, ...pool];
-  const groups = mergeSameAddressOrders(source.map((row) => toSellerMergeable(row)));
+  const groups = mergeSameAddressOrders(source.map((row) => toSellerMergeable(row, merchantId)));
   const group = groups.find((g) => g.orderIds.includes(order.id));
   const byId = new Map(source.map((row) => [row.id, row]));
   const ids = group?.orderIds ?? [order.id];
@@ -78,6 +79,11 @@ export function packingManifestOf(orders: IncomingOrder[]): PackingManifest {
   };
 }
 
-export function packingManifestForOrder(order: IncomingOrder, paid: IncomingOrder[], now = Date.now()) {
-  return packingManifestOf(ordersForShipment(order, paid, now));
+export function packingManifestForOrder(
+  order: IncomingOrder,
+  paid: IncomingOrder[],
+  merchantId: string,
+  now = Date.now(),
+) {
+  return packingManifestOf(ordersForShipment(order, paid, merchantId, now));
 }

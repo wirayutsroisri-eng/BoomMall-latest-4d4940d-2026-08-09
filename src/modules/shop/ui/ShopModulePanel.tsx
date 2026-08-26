@@ -12,7 +12,7 @@ import {
   countAwaitingShipment,
   sumDeliveredSales,
 } from '@/modules/store/domain/seller-ops';
-import { MY_SHOP_ID } from '@/modules/warehouse/state/warehouse-store';
+import { useAuthStore } from '@/modules/auth/state/auth-store';
 import { useChatStore } from '@/modules/chat/state/chat-store';
 import { jumpToChatInbox } from '@/shared/navigation/safeNavigate';
 import { colors } from '@/shared/theme/colors';
@@ -34,6 +34,7 @@ type Tile = {
 
 /** โมดูลร้านขายของที่เกาะบนโปรไฟล์ — เฉพาะงานหลังร้าน ไม่รวมประวัติซื้อ/ดูของลูกค้า */
 export function ShopModulePanel() {
+  const myShopId = useAuthStore((s) => s.user?.shopId ?? '');
   const incomingOrders = useOrdersStore((s) => s.incomingOrders);
   const withdrawHeld = useSellerWithdrawStore((s) => requestedWithdrawTotal(s.requests));
   const ledgerCount = useInventoryStore((s) => s.ledger.length);
@@ -45,8 +46,8 @@ export function ShopModulePanel() {
   );
 
   const myProductCount = useMemo(
-    () => masters.filter((m) => !m.ownerShopId || m.ownerShopId === MY_SHOP_ID).length,
-    [masters],
+    () => masters.filter((m) => m.ownerShopId === myShopId).length,
+    [masters, myShopId],
   );
   const shipCount = useMemo(() => countAwaitingShipment(incomingOrders), [incomingOrders]);
   const returnCount = useMemo(() => countAwaitingReturn(incomingOrders), [incomingOrders]);

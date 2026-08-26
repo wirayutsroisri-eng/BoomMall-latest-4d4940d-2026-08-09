@@ -83,6 +83,20 @@ export async function saveCachedInbox(conversations: Conversation[]) {
   }
 }
 
+/** Remove every account-owned chat cache before another account can hydrate it. */
+export async function clearChatCache() {
+  try {
+    const db = await getDb();
+    await db.withTransactionAsync(async () => {
+      await db.runAsync('DELETE FROM chat_messages');
+      await db.runAsync('DELETE FROM chat_threads');
+      await db.runAsync('DELETE FROM chat_inbox');
+    });
+  } catch {
+    /* cache cleanup is best-effort; the in-memory store is reset separately */
+  }
+}
+
 export async function loadCachedThread(conversationId: string): Promise<ChatMessage[]> {
   try {
     const db = await getDb();

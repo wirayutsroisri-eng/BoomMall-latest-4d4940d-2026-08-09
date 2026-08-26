@@ -60,8 +60,7 @@ export async function getPlatformDomainStatus() {
       financeSettlement: financeDomainStatus(),
     },
     policies: {
-      marketplace:
-        'Ledger + Audit for GP; Ads billed as THB invoices via PSP (not Boom Coin GP)',
+      marketplace: 'Ledger + Audit for GP; ads are billed as THB invoices via PSP',
       chatSocial:
         'Moderation + Report/Block + EULA (App Store C4) + rate/retention limits for OPEX',
       storage:

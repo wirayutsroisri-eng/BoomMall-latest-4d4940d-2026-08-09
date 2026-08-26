@@ -5,6 +5,7 @@ import { AppError } from '../../lib/errors';
 import type { PublishedMediaAsset } from './mediaAssetContract';
 import { mediaStorageProvider } from './storage';
 import { LocalMediaStorageProvider } from './storage/LocalMediaStorageProvider';
+import { currentMediaUrl } from './publicMediaUrl';
 
 type AssetInput = {
   type: 'image' | 'video';
@@ -55,9 +56,9 @@ function dto(row: {
     type: row.type.toLowerCase() as 'image' | 'video',
     status: row.status.toLowerCase() as PublishedMediaAsset['status'],
     storageKey: row.storageKey,
-    canonicalUrl: row.canonicalUrl,
-    thumbnailUrl: row.thumbnailUrl ?? undefined,
-    playbackUrl: row.playbackUrl ?? undefined,
+    canonicalUrl: currentMediaUrl(row.canonicalUrl)!,
+    thumbnailUrl: currentMediaUrl(row.thumbnailUrl) ?? undefined,
+    playbackUrl: currentMediaUrl(row.playbackUrl) ?? undefined,
     width: row.width ?? undefined,
     height: row.height ?? undefined,
     duration: row.durationMs != null ? row.durationMs / 1000 : undefined,
@@ -170,5 +171,12 @@ export async function attachMediaAssetsToPost(ownerId: string, ids: string[], po
   await prisma.mediaAsset.updateMany({
     where: { id: { in: ids }, ownerId, status: 'READY' },
     data: { postId },
+  });
+}
+
+export async function attachMediaAssetToStory(ownerId: string, assetId: string, storyId: string) {
+  await prisma.mediaAsset.updateMany({
+    where: { id: assetId, ownerId, status: 'READY', postId: null },
+    data: { storyId },
   });
 }

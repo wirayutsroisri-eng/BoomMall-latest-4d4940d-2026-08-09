@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { currentShopId, useAuthStore } from '@/modules/auth/state/auth-store';
 import {
   applyAutoSyncForNewProduct,
   hasPermission,
@@ -12,10 +13,11 @@ import {
   respondRequest,
   revokeAccess,
   setMemberPermissions,
+  ROLE_PERMISSIONS,
   type WarehouseData,
 } from '../domain/warehouse-core';
 import {
-  MY_SHOP_ID,
+  CURRENT_SHOP_PLACEHOLDER,
   SEED_INVITATIONS,
   SEED_MEMBERS,
   SEED_REQUESTS,
@@ -31,12 +33,36 @@ import type {
   WarehouseRole,
 } from '../domain/types';
 
-export { MY_SHOP_ID } from '../data/seed';
-
 type ActionResult = { ok: boolean; message: string };
+
+function mine() {
+  return currentShopId();
+}
+
+function withCurrentShop<T>(rows: T[]): T[] {
+  const shopId = useAuthStore.getState().user?.shopId ?? CURRENT_SHOP_PLACEHOLDER;
+  return rows.map((row) => {
+    const value = row as Record<string, unknown>;
+    const next = { ...value };
+    for (const key of ['id', 'shopId', 'ownerShopId', 'actorShopId', 'fromShopId', 'toShopId', 'addedBy']) {
+      if (next[key] === CURRENT_SHOP_PLACEHOLDER) next[key] = shopId;
+    }
+    return next as T;
+  });
+}
+
+const LEGACY_DEMO_WAREHOUSE_IDS = new Set(['wh-boom-ev', 'wh-evparts', 'wh-fleet']);
+const LEGACY_DEMO_SHOP_IDS = new Set([
+  '__authenticated_shop__',
+  'shop-evparts',
+  'shop-fleet',
+  'shop-minmart',
+  'shop-sky',
+]);
 
 type WarehouseState = WarehouseData & {
   profiles: ShopProfile[];
+  bindShopIdentity: (shopId: string) => void;
   // ---- selectors ----
   profileOf: (shopId: string) => ShopProfile | undefined;
   myWarehouse: () => SharedWarehouse | undefined;
@@ -73,41 +99,98 @@ function pickData(s: WarehouseState): WarehouseData {
 export const useWarehouseStore = create<WarehouseState>()(
   persist(
     (set, get) => ({
-      warehouses: SEED_WAREHOUSES,
-      members: SEED_MEMBERS,
-      invitations: SEED_INVITATIONS,
-      requests: SEED_REQUESTS,
+      warehouses: withCurrentShop(SEED_WAREHOUSES),
+      members: withCurrentShop(SEED_MEMBERS),
+      invitations: withCurrentShop(SEED_INVITATIONS),
+      requests: withCurrentShop(SEED_REQUESTS),
       listings: [],
       autoSync: [],
       audit: [],
-      profiles: SHOP_PROFILES,
+      profiles: withCurrentShop(SHOP_PROFILES),
+
+      bindShopIdentity: (shopId) => {
+        if (!shopId.trim()) return;
+        set((state) => {
+          const personalWarehouse = state.warehouses.find((w) => w.ownerShopId === shopId);
+          const previous = personalWarehouse?.ownerShopId ?? CURRENT_SHOP_PLACEHOLDER;
+          const remap = <T,>(rows: T[]): T[] => rows.map((row) => {
+            const next = { ...(row as Record<string, unknown>) };
+            for (const key of ['id', 'shopId', 'ownerShopId', 'actorShopId', 'fromShopId', 'toShopId', 'addedBy']) {
+              if (next[key] === previous || next[key] === CURRENT_SHOP_PLACEHOLDER) next[key] = shopId;
+            }
+            return next as T;
+          });
+          const warehouses = remap(state.warehouses);
+          const warehouseId = personalWarehouse?.id ?? `warehouse:${shopId}`;
+          if (!warehouses.some((w) => w.ownerShopId === shopId)) {
+            warehouses.unshift({
+              id: warehouseId,
+              name: 'คลังหลัก',
+              ownerShopId: shopId,
+              description: 'คลังสินค้าของร้าน',
+              coverColor: '#0B3D2E',
+            });
+          }
+          const members = remap(state.members);
+          if (!members.some((m) => m.warehouseId === warehouseId && m.shopId === shopId)) {
+            members.unshift({
+              warehouseId,
+              shopId,
+              role: 'OWNER',
+              permissions: [...ROLE_PERMISSIONS.OWNER],
+              addedAt: new Date().toISOString(),
+              addedBy: shopId,
+            });
+          }
+          const profiles = remap(state.profiles);
+          const authUser = useAuthStore.getState().user;
+          if (!profiles.some((p) => p.id === shopId)) {
+            profiles.unshift({
+              id: shopId,
+              name: authUser?.displayName ?? 'ร้านของฉัน',
+              handle: authUser?.handle ?? `@${shopId.slice(0, 8)}`,
+              avatarColor: '#00A86B',
+            });
+          }
+          return {
+            warehouses,
+            members,
+            invitations: remap(state.invitations),
+            requests: remap(state.requests),
+            listings: remap(state.listings),
+            autoSync: remap(state.autoSync),
+            audit: remap(state.audit),
+            profiles,
+          };
+        });
+      },
 
       profileOf: (shopId) => get().profiles.find((p) => p.id === shopId),
 
-      myWarehouse: () => get().warehouses.find((w) => w.ownerShopId === MY_SHOP_ID),
+      myWarehouse: () => get().warehouses.find((w) => w.ownerShopId === mine()),
 
       warehousesSharedWithMe: () =>
         get().warehouses.filter(
-          (w) => w.ownerShopId !== MY_SHOP_ID && memberOf(pickData(get()), w.id, MY_SHOP_ID),
+          (w) => w.ownerShopId !== mine() && memberOf(pickData(get()), w.id, mine()),
         ),
 
       warehousesICanRequest: () =>
         get().warehouses.filter(
-          (w) => w.ownerShopId !== MY_SHOP_ID && !memberOf(pickData(get()), w.id, MY_SHOP_ID),
+          (w) => w.ownerShopId !== mine() && !memberOf(pickData(get()), w.id, mine()),
         ),
 
-      myListings: () => get().listings.filter((l) => l.shopId === MY_SHOP_ID),
+      myListings: () => get().listings.filter((l) => l.shopId === mine()),
 
       canI: (warehouseId, permission) =>
-        hasPermission(pickData(get()), warehouseId, MY_SHOP_ID, permission),
+        hasPermission(pickData(get()), warehouseId, mine(), permission),
 
       autoSyncOf: (warehouseId) =>
-        get().autoSync.find((a) => a.warehouseId === warehouseId && a.shopId === MY_SHOP_ID),
+        get().autoSync.find((a) => a.warehouseId === warehouseId && a.shopId === mine()),
 
       invite: (warehouseId, toShopId, role) => {
         const result = inviteMember(pickData(get()), Date.now(), {
           warehouseId,
-          actorShopId: MY_SHOP_ID,
+          actorShopId: mine(),
           toShopId,
           role,
         });
@@ -127,7 +210,7 @@ export const useWarehouseStore = create<WarehouseState>()(
         return { ok: true, message: accept ? 'ตอบรับคำเชิญแล้ว' : 'ปฏิเสธคำเชิญแล้ว' };
       },
 
-      sendAccessRequest: (warehouseId, message, fromShopId = MY_SHOP_ID) => {
+      sendAccessRequest: (warehouseId, message, fromShopId = mine()) => {
         const result = requestAccess(pickData(get()), Date.now(), {
           warehouseId,
           fromShopId,
@@ -141,7 +224,7 @@ export const useWarehouseStore = create<WarehouseState>()(
       respondToRequest: (requestId, approve, role) => {
         const result = respondRequest(pickData(get()), Date.now(), {
           requestId,
-          actorShopId: MY_SHOP_ID,
+          actorShopId: mine(),
           approve,
           role,
         });
@@ -153,7 +236,7 @@ export const useWarehouseStore = create<WarehouseState>()(
       changeMemberRole: (warehouseId, targetShopId, role) => {
         const result = setMemberPermissions(pickData(get()), Date.now(), {
           warehouseId,
-          actorShopId: MY_SHOP_ID,
+          actorShopId: mine(),
           targetShopId,
           role,
         });
@@ -162,7 +245,7 @@ export const useWarehouseStore = create<WarehouseState>()(
         return { ok: true, message: `เปลี่ยนบทบาทเป็น ${role} แล้ว` };
       },
 
-      installCatalog: (warehouseId, masterSkuIds, shopId = MY_SHOP_ID) => {
+      installCatalog: (warehouseId, masterSkuIds, shopId = mine()) => {
         const result = installListings(pickData(get()), Date.now(), {
           warehouseId,
           actorShopId: shopId,
@@ -183,7 +266,7 @@ export const useWarehouseStore = create<WarehouseState>()(
       revoke: (warehouseId, targetShopId) => {
         const result = revokeAccess(pickData(get()), Date.now(), {
           warehouseId,
-          actorShopId: MY_SHOP_ID,
+          actorShopId: mine(),
           targetShopId,
         });
         if (!result.ok) return { ok: false, message: result.error };
@@ -208,15 +291,15 @@ export const useWarehouseStore = create<WarehouseState>()(
       setAutoSync: (warehouseId, enabled, categoryKeys) =>
         set((s) => {
           const rest = s.autoSync.filter(
-            (a) => !(a.warehouseId === warehouseId && a.shopId === MY_SHOP_ID),
+            (a) => !(a.warehouseId === warehouseId && a.shopId === mine()),
           );
           return {
-            autoSync: [...rest, { shopId: MY_SHOP_ID, warehouseId, enabled, categoryKeys }],
+            autoSync: [...rest, { shopId: mine(), warehouseId, enabled, categoryKeys }],
             audit: [
               {
                 id: `aud-${Date.now()}`,
                 warehouseId,
-                actorShopId: MY_SHOP_ID,
+                actorShopId: mine(),
                 action: 'AUTO_SYNC_CHANGED' as const,
                 detail: enabled
                   ? `เปิดรับสินค้าใหม่อัตโนมัติ${categoryKeys?.length ? ` (${categoryKeys.join(', ')})` : ' (ทุกหมวด)'}`
@@ -240,7 +323,37 @@ export const useWarehouseStore = create<WarehouseState>()(
     }),
     {
       name: 'boommall-warehouse-storage',
+      version: 2,
       storage: createJSONStorage(() => AsyncStorage),
+      migrate: (persisted) => {
+        const state = (persisted ?? {}) as Partial<WarehouseState>;
+        return {
+          ...state,
+          warehouses: (state.warehouses ?? []).filter(
+            (row) => !LEGACY_DEMO_WAREHOUSE_IDS.has(row.id),
+          ),
+          members: (state.members ?? []).filter(
+            (row) =>
+              !LEGACY_DEMO_WAREHOUSE_IDS.has(row.warehouseId) &&
+              !LEGACY_DEMO_SHOP_IDS.has(row.shopId),
+          ),
+          invitations: (state.invitations ?? []).filter(
+            (row) => !LEGACY_DEMO_WAREHOUSE_IDS.has(row.warehouseId),
+          ),
+          requests: (state.requests ?? []).filter(
+            (row) => !LEGACY_DEMO_WAREHOUSE_IDS.has(row.warehouseId),
+          ),
+          listings: (state.listings ?? []).filter(
+            (row) => !LEGACY_DEMO_WAREHOUSE_IDS.has(row.warehouseId),
+          ),
+          autoSync: (state.autoSync ?? []).filter(
+            (row) => !LEGACY_DEMO_WAREHOUSE_IDS.has(row.warehouseId),
+          ),
+          audit: (state.audit ?? []).filter(
+            (row) => !LEGACY_DEMO_WAREHOUSE_IDS.has(row.warehouseId),
+          ),
+        };
+      },
       partialize: (s) => ({
         members: s.members,
         invitations: s.invitations,

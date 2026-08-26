@@ -3,7 +3,7 @@ import type { Ionicons } from '@expo/vector-icons';
 import type { PaymentMethodId } from '@/modules/commerce/state/checkout-store';
 
 /** ช่องทางที่ผู้ซื้อสมัครไว้ เพื่อจ่ายเข้าบัญชีแพลตฟอร์ม ไม่ใช่โอนตรงร้าน */
-export type BuyerPaymentKind = 'truemoney' | 'promptpay' | 'bank_account' | 'card' | 'boommall_pay';
+export type BuyerPaymentKind = 'truemoney' | 'promptpay' | 'bank_account' | 'card';
 
 export type BuyerPaymentInstrument = {
   id: string;
@@ -55,13 +55,6 @@ export const BUYER_PAYMENT_META: Record<
     needsDetails: true,
     methodId: 'card',
   },
-  boommall_pay: {
-    title: 'BoomMall Pay',
-    hint: 'ยอดในแพลตฟอร์ม',
-    icon: 'wallet-outline',
-    needsDetails: false,
-    methodId: 'boommall_pay',
-  },
 };
 
 export const BUYER_BANKS = [
@@ -87,7 +80,6 @@ export function validateBuyerPayment(input: {
   accountName?: string;
   bankName?: string;
 }): string | null {
-  if (input.kind === 'boommall_pay') return null;
   const n = (input.accountNo ?? '').replace(/\D/g, '');
   if (input.kind === 'truemoney') {
     if (!/^0\d{9}$/.test(n)) return 'TrueMoney ใช้เบอร์โทร 10 หลัก';
@@ -114,6 +106,5 @@ export function buyerHint(row?: BuyerPaymentInstrument) {
   if (!row) return undefined;
   if (row.kind === 'card') return row.last4 ? `•••• ${row.last4}` : undefined;
   if (row.kind === 'bank_account') return `${row.bankName ?? 'ธนาคาร'} ${maskDigits(row.accountNo)}`.trim();
-  if (row.kind === 'boommall_pay') return 'พร้อมใช้ในแพลตฟอร์ม';
   return maskDigits(row.accountNo);
 }

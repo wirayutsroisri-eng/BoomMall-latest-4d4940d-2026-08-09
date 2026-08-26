@@ -27,13 +27,13 @@ export function buildOwnerFeedItems(
   options: Options = {},
 ): FeedItem[] {
   const key = normalizeAuthorHandle(handle);
-  if (!key) return [];
-
   const ownerUserId = options.ownerUserId?.trim();
+  if (!key && !ownerUserId) return [];
   const fromStore = options.isSelf
     ? storeItems.filter((i) =>
         ownerUserId
           ? i.authorId === ownerUserId
+            || (!i.authorId && normalizeAuthorHandle(i.authorHandle) === key)
           : normalizeAuthorHandle(i.authorHandle) === key,
       )
     : selectFeedByAuthor(storeItems, key);
@@ -50,7 +50,7 @@ export function buildOwnerFeedItems(
     .map((item) => ({
       ...item,
       author: options.displayName?.trim() || item.author,
-      authorHandle: key.startsWith('@') ? key : `@${key}`,
+      authorHandle: key ? (key.startsWith('@') ? key : `@${key}`) : item.authorHandle,
       product: {
         ...item.product,
         shopName: options.shopName?.trim() || item.product.shopName,

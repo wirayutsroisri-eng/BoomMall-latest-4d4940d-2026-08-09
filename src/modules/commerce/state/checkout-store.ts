@@ -2,7 +2,6 @@ import { create } from 'zustand';
 
 export type PaymentMethodId =
   | 'card'
-  | 'boommall_pay'
   | 'promptpay'
   | 'cod'
   | 'mobile_banking'
@@ -37,6 +36,11 @@ type CheckoutState = {
   setPlatformVoucher: (on: boolean) => void;
   setNote: (shopName: string, note: string) => void;
   setProtection: (on: boolean) => void;
+  resetAccountData: () => void;
+};
+
+const EMPTY_ADDRESS: DeliveryAddress = {
+  name: '', phone: '', line1: '', district: '', amphoe: '', province: '', postcode: '',
 };
 
 export const SHIPPING_OPTIONS: Array<{
@@ -74,7 +78,6 @@ export const PAYMENT_OPTIONS: Array<{
   activate?: boolean;
 }> = [
   { id: 'truemoney', label: 'TrueMoney Wallet', activate: true },
-  { id: 'boommall_pay', label: 'ยอดเงิน BoomMall Pay', activate: true },
   { id: 'bank_account', label: 'ตัดบัญชีธนาคาร', activate: true },
   { id: 'card', label: 'บัตรเครดิต/บัตรเดบิต', activate: true },
   { id: 'promptpay', label: 'QR พร้อมเพย์', activate: true },
@@ -83,15 +86,7 @@ export const PAYMENT_OPTIONS: Array<{
 ];
 
 export const useCheckoutStore = create<CheckoutState>((set) => ({
-  address: {
-    name: 'นายวีรยุทธ สร้อยศรี',
-    phone: '(+66) 99 926 6218',
-    line1: '29/247 ม.7 ต.จันทนิมิต',
-    district: 'ตำบลจันทนิมิต',
-    amphoe: 'อำเภอเมืองจันทบุรี',
-    province: 'จังหวัดจันทบุรี',
-    postcode: '22000',
-  },
+  address: { ...EMPTY_ADDRESS },
   paymentMethod: 'cod',
   cardLabel: '',
   shippingMethod: 'standard',
@@ -111,6 +106,11 @@ export const useCheckoutStore = create<CheckoutState>((set) => ({
   setNote: (shopName, note) =>
     set((s) => ({ noteByShop: { ...s.noteByShop, [shopName]: note } })),
   setProtection: (on) => set({ protectionOn: on }),
+  resetAccountData: () => set({
+    address: { ...EMPTY_ADDRESS }, paymentMethod: 'cod', cardLabel: '',
+    shippingMethod: 'standard', shopVoucherOn: true, platformVoucherOn: true,
+    noteByShop: {}, protectionOn: false,
+  }),
 }));
 
 /** Shared money math for cart footer + checkout summary */

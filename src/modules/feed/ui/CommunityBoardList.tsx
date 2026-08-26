@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Image,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -32,7 +33,6 @@ import { extractJobKeywords } from '@/modules/matching/domain/extract-keywords';
 import { useBoardUiStore } from '@/modules/matching/state/board-ui-store';
 import { colors } from '@/shared/theme/colors';
 import { Avatar } from '@/shared/components/Avatar';
-import { safePush } from '@/shared/navigation/safeNavigate';
 
 type Props = {
   items: FeedItem[];
@@ -43,6 +43,8 @@ type Props = {
   tabCount?: number;
   onCommitTabIndex?: (index: number) => void;
   onVerticalScroll?: (offsetY: number) => void;
+  refreshing?: boolean;
+  onRefresh?: () => void;
 };
 
 const TABS: Array<{ key: BoardSide; label: string }> = [
@@ -203,6 +205,8 @@ export function CommunityBoardList({
   tabCount = 1,
   onCommitTabIndex,
   onVerticalScroll,
+  refreshing = false,
+  onRefresh,
 }: Props) {
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
@@ -284,56 +288,60 @@ export function CommunityBoardList({
   return (
     <GestureDetector gesture={horizontalSwipe}>
     <View style={styles.root}>
-      <View style={[styles.stickyHeader, { paddingTop: topInset + 52 }]}>
-        <Text style={styles.introTitle}>หางาน</Text>
-        <Text style={styles.introSub}>
-          จันทบุรี · บูมบอทจับคู่ข้ามแท็บตามรัศมี GPS ที่คุณตั้ง
-        </Text>
-        <View style={styles.tabRow}>
-          {TABS.map((tab) => {
-            const active = side === tab.key;
-            return (
-              <Pressable
-                key={tab.key}
-                style={[styles.tab, active && styles.tabActive]}
-                onPress={() => {
-                  void Haptics.selectionAsync();
-                  setSide(tab.key);
-                }}
-              >
-                <Text style={[styles.tabText, active && styles.tabTextActive]} numberOfLines={1}>
-                  {tab.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      </View>
-
-      {rows.length === 0 ? (
-        <View style={styles.empty}>
-          <Ionicons name="clipboard-outline" size={36} color={colors.text.muted} />
-          <Text style={styles.emptyTitle}>
-            {side === 'demand' ? 'ยังไม่มีโพสต์หาช่าง' : 'ยังไม่มีบัตรรับงาน'}
+      <ScrollView
+        contentContainerStyle={{
+          paddingBottom: Math.max(insets.bottom, 16) + 96,
+          flexGrow: rows.length === 0 ? 1 : undefined,
+        }}
+        showsVerticalScrollIndicator={false}
+        scrollEnabled
+        onScroll={(event) => onVerticalScroll?.(event.nativeEvent.contentOffset.y)}
+        scrollEventThrottle={16}
+        alwaysBounceVertical
+        refreshControl={onRefresh ? (
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand.primaryDark} />
+        ) : undefined}
+      >
+        <View style={[styles.stickyHeader, { paddingTop: topInset + 52 }]}>
+          <Text style={styles.introTitle}>หางาน</Text>
+          <Text style={styles.introSub}>
+            จันทบุรี · บูมบอทจับคู่ข้ามแท็บตามรัศมี GPS ที่คุณตั้ง
           </Text>
-            <Text style={styles.emptySub}>
-              {side === 'demand'
-                ? 'กด “+ ประกาศหางาน” เพื่อลงประกาศ — ระบบจับคู่ข้ามแท็บให้อัตโนมัติ'
-                : 'กดกล้องด้านล่างเพื่อลงบัตรรับงาน — ระบบจับคู่เมื่อมีคนหางานใกล้คุณ'}
-            </Text>
+          <View style={styles.tabRow}>
+            {TABS.map((tab) => {
+              const active = side === tab.key;
+              return (
+                <Pressable
+                  key={tab.key}
+                  style={[styles.tab, active && styles.tabActive]}
+                  onPress={() => {
+                    void Haptics.selectionAsync();
+                    setSide(tab.key);
+                  }}
+                >
+                  <Text style={[styles.tabText, active && styles.tabTextActive]} numberOfLines={1}>
+                    {tab.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
         </View>
-      ) : (
-        <ScrollView
-          contentContainerStyle={{
-            paddingHorizontal: pad,
-            paddingTop: 10,
-            paddingBottom: Math.max(insets.bottom, 16) + 96,
-          }}
-          showsVerticalScrollIndicator={false}
-          scrollEnabled
-          onScroll={(event) => onVerticalScroll?.(event.nativeEvent.contentOffset.y)}
-          scrollEventThrottle={16}
-        >
+
+        {rows.length === 0 ? (
+          <View style={styles.empty}>
+            <Ionicons name="clipboard-outline" size={36} color={colors.text.muted} />
+            <Text style={styles.emptyTitle}>
+              {side === 'demand' ? 'ยังไม่มีโพสต์หาช่าง' : 'ยังไม่มีบัตรรับงาน'}
+            </Text>
+              <Text style={styles.emptySub}>
+                {side === 'demand'
+                  ? 'กดปุ่ม + ตรงกลางด้านล่างเพื่อลงประกาศ — ระบบจับคู่ข้ามแท็บให้อัตโนมัติ'
+                  : 'กดปุ่ม + ตรงกลางด้านล่างเพื่อลงบัตรรับงาน — ระบบจับคู่เมื่อมีคนหางานใกล้คุณ'}
+              </Text>
+          </View>
+        ) : (
+          <View style={{ paddingHorizontal: pad, paddingTop: 10 }}>
           <View style={styles.masonry}>
             <View style={[styles.masonryCol, { width: tileW, gap }]}>
               {rows.filter((_, i) => i % 2 === 0).map((row) => (
@@ -346,24 +354,10 @@ export function CommunityBoardList({
               ))}
             </View>
           </View>
-        </ScrollView>
-      )}
+          </View>
+        )}
+      </ScrollView>
 
-      {side === 'demand' ? (
-        <Pressable
-          style={[styles.fab, { bottom: Math.max(insets.bottom, 12) + 12 }]}
-          onPress={() => {
-            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            safePush({
-              pathname: '/board-create',
-              params: { side: 'demand', locked: '1' },
-            });
-          }}
-        >
-          <Ionicons name="add" size={22} color={colors.brand.ink} />
-          <Text style={styles.fabText}>+ ประกาศหางาน</Text>
-        </Pressable>
-      ) : null}
     </View>
     </GestureDetector>
   );

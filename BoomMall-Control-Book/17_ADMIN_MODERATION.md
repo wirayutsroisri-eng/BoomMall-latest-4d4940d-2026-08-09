@@ -6,7 +6,6 @@
 - Posts/Comments
 - Chat reports
 - Orders
-- Boom Coin
 - Ads
 - Feed controls
 - Audit log

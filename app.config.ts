@@ -59,7 +59,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         CFBundleAllowMixedLocalizations: true,
         CFBundleLocalizations: ['th', 'en'],
         NSCameraUsageDescription:
-          'BoomMall ใช้กล้องเพื่อถ่ายรูปสินค้า สแกนบาร์โค้ดคลัง โพสต์คอนเทนต์ และแนบรูปในแชต',
+          'BoomMall ใช้กล้องเพื่อถ่ายรูปสินค้า สแกน QR เพิ่มเพื่อนและบาร์โค้ดคลัง โพสต์คอนเทนต์ และแนบรูปในแชต',
         NSMicrophoneUsageDescription:
           'BoomMall ใช้ไมโครโฟนเพื่อบันทึกวอยซ์โน้ตในแชตและคลิปเสียงประกอบคอนเทนต์',
         NSPhotoLibraryUsageDescription:

@@ -1,16 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {
-  seedMasterSkus,
-  seedVariants,
-  seedWarehouseStock,
-  externalMasterSkus,
-  externalVariants,
-  externalWarehouseStock,
-  WAREHOUSES,
-  DEFAULT_CUSTOM_FIELDS,
-} from '../data/catalog';
+import { WAREHOUSES, DEFAULT_CUSTOM_FIELDS } from '../data/catalog';
 import { persistProductImages, persistProductMedia } from '../data/product-media';
 import { firstImageUri, fromLegacyImages, imageUrisOf } from '../domain/product-media';
 import {
@@ -182,13 +173,7 @@ type InventoryState = {
   }) => void;
 };
 
-const allSeedMasters = [...seedMasterSkus, ...externalMasterSkus];
-const allSeedVariants = [...seedVariants, ...externalVariants];
-
 const initialStock: Record<string, WarehouseStock> = {};
-for (const row of [...seedWarehouseStock, ...externalWarehouseStock]) {
-  initialStock[stockKey(row.variantId, row.warehouseId)] = { ...row };
-}
 
 type PersistedInventory = Pick<
   InventoryState,
@@ -218,8 +203,8 @@ export const useInventoryStore = create<InventoryState>()(
       const lock = () => set((s) => ({ _lockEpoch: s._lockEpoch + 1 }));
 
       return {
-        masters: allSeedMasters,
-        variants: allSeedVariants,
+        masters: [],
+        variants: [],
         stockByKey: initialStock,
         customFieldDefs: DEFAULT_CUSTOM_FIELDS,
         warehouses: WAREHOUSES,
@@ -879,28 +864,23 @@ export const useInventoryStore = create<InventoryState>()(
           })),
 
         hydrateFromServer: (input) => {
-          const serverMasterIds = new Set(input.masters.map((m) => m.id));
-          const serverVariantIds = new Set(input.variants.map((v) => v.id));
-          set((s) => {
-            const localMasters = s.masters.filter((m) => !serverMasterIds.has(m.id));
-            const localVariants = s.variants.filter(
-              (v) => !serverVariantIds.has(v.id) && !serverMasterIds.has(v.masterSkuId),
-            );
-            const nextStock = { ...s.stockByKey };
-            for (const row of input.stock) {
-              nextStock[stockKey(row.variantId, row.warehouseId)] = row;
-            }
-            return {
-              masters: [...input.masters, ...localMasters],
-              variants: [...input.variants, ...localVariants],
-              stockByKey: nextStock,
-            };
+          // The authenticated shop's server catalog is authoritative. Merging
+          // local-only rows here leaked products from a previous account and
+          // could upload them into the next shop during pull reconciliation.
+          set({
+            masters: input.masters,
+            variants: input.variants,
+            stockByKey: Object.fromEntries(
+              input.stock.map((row) => [stockKey(row.variantId, row.warehouseId), row]),
+            ),
+            ledger: [],
           });
         },
       };
     },
     {
-      name: 'boommall-inventory-storage-v3',
+      // v4 intentionally drops the pre-production, cross-account demo catalog.
+      name: 'boommall-inventory-storage-v4',
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state): PersistedInventory => ({
         masters: state.masters,
@@ -911,12 +891,25 @@ export const useInventoryStore = create<InventoryState>()(
       }),
       merge: (persisted, current) => {
         const saved = (persisted ?? {}) as Partial<PersistedInventory>;
-        // Empty shop / real catalog: trust AsyncStorage only — never revive demo seeds
+        const realMasters = (saved.masters ?? current.masters).filter(
+          (master) => !/^ms-(0[1-9]|1\d|20)$/.test(master.id),
+        );
+        const realMasterIds = new Set(realMasters.map((master) => master.id));
+        const realVariants = (saved.variants ?? current.variants).filter((variant) =>
+          realMasterIds.has(variant.masterSkuId),
+        );
+        const realVariantIds = new Set(realVariants.map((variant) => variant.id));
+        const realStock = Object.fromEntries(
+          Object.entries(saved.stockByKey ?? current.stockByKey).filter(([, row]) =>
+            realVariantIds.has(row.variantId),
+          ),
+        );
+        // Trust persisted real catalog; the bundled initial catalog is empty.
         return {
           ...current,
-          masters: saved.masters ?? current.masters,
-          variants: saved.variants ?? current.variants,
-          stockByKey: saved.stockByKey ?? current.stockByKey,
+          masters: realMasters,
+          variants: realVariants,
+          stockByKey: realStock,
           ledger: saved.ledger ?? current.ledger,
           customFieldDefs: saved.customFieldDefs
             ? [

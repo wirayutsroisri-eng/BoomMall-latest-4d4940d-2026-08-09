@@ -45,6 +45,8 @@ type NewPostInput = {
   overlayStickers?: FeedItem['overlayStickers'];
   /** ชื่อสินค้าบนการ์ดซื้อ (ถ้าไม่ใส่ใช้แคปชัน) */
   productName?: string;
+  /** Domain tags persisted with SocialPost (e.g. มือสอง/category/condition). */
+  tags?: string[];
 
   /** ผูก Master จากคลังเมื่อโพสต์พร้อมขาย */
   masterProductId?: string;
@@ -152,6 +154,7 @@ type FeedState = {
   openCreatorProfile: (handle: string, feedId?: string) => void;
   closeCreatorProfile: () => void;
   hydrateFromServer: () => Promise<void>;
+  refreshFromServer: () => Promise<void>;
   switchAccount: (userId: string | null) => boolean;
 };
 
@@ -230,7 +233,7 @@ export const useFeedStore = create<FeedState>()(
       (input.imageUri ? [input.imageUri] : undefined);
     const gps = input.gps ?? CHANTHABURI;
     const searchRadius = input.searchRadius ?? DEFAULT_SEARCH_RADIUS;
-    const caption = input.caption || 'โพสต์ใหม่จาก BoomMall';
+    const caption = input.caption || '';
     const author = profile.displayName;
     const authorHandle = profile.handle.replace(/^@/, '');
     // Only board intent (or explicit forceBoard/boardSide) lands on เว็บบอร์ด.
@@ -252,7 +255,7 @@ export const useFeedStore = create<FeedState>()(
       boardSide,
       caption,
       createdAt: new Date().toISOString(),
-      location: 'จันทบุรี',
+      location: input.locationLabel?.trim() || 'จันทบุรี',
       gps,
       searchRadius,
       likes: 0,
@@ -285,6 +288,7 @@ export const useFeedStore = create<FeedState>()(
         tags: [
           input.channel,
           input.masterProductId ? 'Shop' : 'New',
+          ...(input.tags ?? []),
           ...(isJobPost ? ['เว็บบอร์ด', 'บริการ', boardSide === 'supply' ? 'รับงาน' : 'หาช่าง'] : []),
         ],
         variants: [
@@ -363,6 +367,13 @@ export const useFeedStore = create<FeedState>()(
           mediaAssets: uploaded.mediaAssets,
           authorName: author,
           authorHandle,
+          product: {
+            name: newItem.product.name,
+            price: newItem.product.basePrice,
+            currency: newItem.product.currency,
+            tier: newItem.product.tier,
+            tags: newItem.product.tags,
+          },
         },
         lat: gps.lat,
         lng: gps.lng,
@@ -835,6 +846,34 @@ export const useFeedStore = create<FeedState>()(
     const local = keepPersistedFeedItems(get().items);
     if (!remote.length && local.length === get().items.length) return;
     set({ items: mergeFeedItems(remote, local) });
+  },
+  refreshFromServer: async () => {
+    if (!useFeedStore.persist.hasHydrated()) return;
+    const current = keepPersistedFeedItems(get().items);
+    const auth = useAuthStore.getState().user;
+    const excludeIds = current
+      .filter((item) => !item.id.startsWith('feed-user-') && item.lane !== 'board')
+      .map((item) => item.id)
+      .slice(0, 80);
+    const [feedRows, ownRows] = await Promise.all([
+      fetchFeedPosts(undefined, undefined, { refresh: true, excludeIds }),
+      auth?.id ? fetchFeedPosts(undefined, undefined, { mine: true, refresh: true }) : Promise.resolve([]),
+    ]);
+    const rows = [...new Map([...feedRows, ...ownRows].map((row) => [row.id, row])).values()];
+    if (!rows.length) return;
+    const profileName = useLoyaltyStore.getState().profile.displayName.trim();
+    const remote = rows
+      .map((row) => {
+        const item = socialPostToFeedItem(row, { myUserId: auth?.id, myHandle: auth?.handle });
+        return {
+          ...item,
+          musicTitle: sanitizeMusicTitle(item.musicTitle),
+          author: item.isUserPost && profileName ? profileName : item.author,
+        };
+      })
+      .filter((item) => !isDemoCatalogFeedItem(item));
+    const localDrafts = current.filter((item) => item.id.startsWith('feed-user-') || item.lane === 'board');
+    set({ items: mergeFeedItems(remote, localDrafts) });
   },
   switchAccount: (userId) => {
     const nextOwnerId = userId?.trim() || null;
