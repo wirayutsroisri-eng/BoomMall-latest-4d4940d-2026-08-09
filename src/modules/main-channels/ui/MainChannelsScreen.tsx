@@ -288,7 +288,11 @@ export function MainChannelsScreen() {
               hitSlop={8}
               onPress={() => router.push({
                 pathname: '/channel-search',
-                params: { scope: channels[activeIndex]?.id ?? INITIAL_CHANNEL_ID },
+                params: {
+                  scope: (channels[activeIndex]?.id ?? INITIAL_CHANNEL_ID) === 'feed'
+                    ? 'feed_global'
+                    : channels[activeIndex]?.id ?? INITIAL_CHANNEL_ID,
+                },
               })}
               accessibilityRole="button"
               accessibilityLabel={`ค้นหาใน${channels[activeIndex]?.title ?? 'BoomMall'}`}

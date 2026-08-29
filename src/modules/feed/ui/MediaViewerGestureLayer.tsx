@@ -21,6 +21,7 @@ type Props = {
   dismissY: SharedValue<number>;
   onDismiss: () => void;
   onZoomChange: (zoomed: boolean) => void;
+  zoomEnabled?: boolean;
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -30,7 +31,7 @@ function clamp(value: number, min: number, max: number) {
 
 /** Gesture priority: zoomed image pan > pinch/double tap > vertical dismiss. */
 export function MediaViewerGestureLayer({
-  children, active, resetKey, dismissY, onDismiss, onZoomChange,
+  children, active, resetKey, dismissY, onDismiss, onZoomChange, zoomEnabled = true,
 }: Props) {
   const scale = useSharedValue(1);
   const startScale = useSharedValue(1);
@@ -57,7 +58,7 @@ export function MediaViewerGestureLayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetKey]);
 
-  const pinch = Gesture.Pinch().enabled(active)
+  const pinch = Gesture.Pinch().enabled(active && zoomEnabled)
     .onStart((event) => {
       startScale.value = scale.value;
       pinchStartTx.value = tx.value;
@@ -92,7 +93,7 @@ export function MediaViewerGestureLayer({
       }
     });
 
-  const doubleTap = Gesture.Tap().enabled(active).numberOfTaps(2).maxDuration(260)
+  const doubleTap = Gesture.Tap().enabled(active && zoomEnabled).numberOfTaps(2).maxDuration(260)
     .onEnd((_event, success) => {
       if (!success) return;
       const zoomIn = scale.value < 1.2;
@@ -115,7 +116,7 @@ export function MediaViewerGestureLayer({
       runOnJS(notifyZoom)(zoomIn);
     });
 
-  const imagePan = Gesture.Pan().enabled(active).manualActivation(true)
+  const imagePan = Gesture.Pan().enabled(active && zoomEnabled).manualActivation(true)
     .onTouchesMove((_event, manager) => {
       if (scale.value > 1.03) manager.activate();
       else manager.fail();

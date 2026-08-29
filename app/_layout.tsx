@@ -29,6 +29,15 @@ export default function RootLayout() {
         />
         <Stack.Screen name="story-create" options={{ presentation: 'fullScreenModal', ...dismissibleModalOptions, animation: 'slide_from_bottom' }} />
         <Stack.Screen name="story-viewer" options={{ presentation: 'fullScreenModal', ...dismissibleModalOptions, animation: 'fade', contentStyle: { backgroundColor: '#000' } }} />
+        <Stack.Screen
+          name="video-feed"
+          options={{
+            presentation: 'card',
+            animation: 'none',
+            gestureEnabled: false,
+            contentStyle: { backgroundColor: '#000' },
+          }}
+        />
         <Stack.Screen name="secondhand-create" options={{ presentation: 'fullScreenModal', ...dismissibleModalOptions, animation: 'slide_from_bottom' }} />
         <Stack.Screen name="secondhand-drafts" options={{ presentation: 'modal', ...dismissibleModalOptions, animation: 'slide_from_bottom' }} />
         <Stack.Screen name="secondhand/[listingId]" options={{ presentation: 'card', animation: 'slide_from_right', gestureEnabled: true, fullScreenGestureEnabled: true }} />

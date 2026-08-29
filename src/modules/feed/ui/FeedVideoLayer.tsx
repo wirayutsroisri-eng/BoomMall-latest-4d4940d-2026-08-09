@@ -15,6 +15,7 @@ type Props = {
   onPlayerReady?: (player: VideoPlayer) => void;
   /** Called once the player reports the video's real pixel dimensions (no scale). */
   onVideoSize?: (width: number, height: number) => void;
+  onFirstFrameRender?: () => void;
 };
 
 /**
@@ -34,8 +35,9 @@ export function FeedVideoLayer({
   contentFit = 'contain',
   onPlayerReady,
   onVideoSize,
+  onFirstFrameRender,
 }: Props) {
-  const player = useVideoPlayer(uri, (instance) => {
+  const player = useVideoPlayer({ uri, useCaching: true }, (instance) => {
     instance.loop = true;
     instance.muted = false;
     instance.currentTime = 0;
@@ -147,6 +149,7 @@ export function FeedVideoLayer({
       surfaceType="textureView"
       pointerEvents="none"
       nativeControls={false}
+      onFirstFrameRender={onFirstFrameRender}
     />
   );
 }

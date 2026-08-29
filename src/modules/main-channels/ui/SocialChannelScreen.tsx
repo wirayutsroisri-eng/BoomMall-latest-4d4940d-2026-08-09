@@ -222,6 +222,7 @@ export function SocialChannelScreen({ kind, active, onVerticalScroll }: Props) {
         ListHeaderComponent={kind === 'feed' ? (
           <FeedStatusRail
             stories={stories}
+            onCreateStory={() => router.push('/story-create')}
             onOpenStory={(storyId) => router.push({ pathname: '/story-viewer', params: { storyId } })}
           />
         ) : null}

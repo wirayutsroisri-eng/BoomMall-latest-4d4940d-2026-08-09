@@ -71,6 +71,7 @@ type Props = {
   bottomMetaInset?: number;
   bottomActionsInset?: number;
   bottomSeekInset?: number;
+  initialPlaybackTime?: number;
 };
 
 /**
@@ -102,6 +103,7 @@ export function FeedReelCard({
   bottomMetaInset = 0,
   bottomActionsInset = 0,
   bottomSeekInset = 0,
+  initialPlaybackTime = 0,
 }: Props) {
   const gallery = useMemo(() => galleryOf(item), [item]);
   const multi = gallery.length > 1;
@@ -538,7 +540,13 @@ export function FeedReelCard({
             imageLayout={mediaLayout}
             isActive={isActive}
             isManuallyPaused={isManuallyPaused}
-            onPlayerReady={setPlayer}
+            onPlayerReady={(nextPlayer) => {
+              if (initialPlaybackTime > 0 && nextPlayer.currentTime < 0.5) {
+                nextPlayer.currentTime = initialPlaybackTime;
+                setCurrentTime(initialPlaybackTime);
+              }
+              setPlayer(nextPlayer);
+            }}
             onOpenImage={(index) => openFeedMediaViewer(
               gallery,
               index,

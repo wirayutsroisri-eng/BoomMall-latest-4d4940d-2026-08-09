@@ -17,8 +17,9 @@ import { FeedPinchZoomLayer } from '@/modules/feed/ui/FeedPinchZoomLayer';
 import { FeedSeekBar } from '@/modules/feed/ui/FeedSeekBar';
 import { FeedVideoLayer } from '@/modules/feed/ui/FeedVideoLayer';
 import { MultiImageGrid } from '@/modules/feed/ui/MultiImageGrid';
-import { openFeedMediaViewer } from '@/modules/feed/state/feed-media-viewer-store';
+import { openFeedMediaViewer, openMediaViewer, useFeedMediaViewerStore } from '@/modules/feed/state/feed-media-viewer-store';
 import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
+import { useFeedStore } from '@/modules/feed/state/feed-store';
 
 type Props = {
   item: FeedItem;
@@ -72,6 +73,8 @@ export const FeedPostCard = memo(function FeedPostCard({
 }: Props) {
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const ownAvatarUri = useLoyaltyStore((state) => state.profile.avatarUri);
+  const viewerSourcePostId = useFeedMediaViewerStore((state) => state.sourcePostId);
+  const facebookFeed = channel === 'feed';
   const cardWidth = Math.max(280, windowWidth);
   const gallery = useMemo(
     () => item.imageUris?.filter(Boolean) ?? (item.imageUri ? [item.imageUri] : []),
@@ -86,9 +89,7 @@ export const FeedPostCard = memo(function FeedPostCard({
   const [isManuallyPaused, setIsManuallyPaused] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [playbackIcon, setPlaybackIcon] = useState<'play' | 'pause' | null>(null);
   const playerRef = useRef<VideoPlayer | null>(null);
-  const playbackIconTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isScrubbingRef = useRef(false);
   const wasPlayingBeforeScrubRef = useRef(false);
   const dateLabel = publishedLabel(item.createdAt);
@@ -107,7 +108,14 @@ export const FeedPostCard = memo(function FeedPostCard({
     ? primaryImageWidth / primaryImageHeight
     : 4 / 3;
   const safetyMaxHeight = Math.min(760, Math.round(windowHeight * 0.82));
-  const singleImageHeight = Math.round(clamp(cardWidth / imageAspect, 120, safetyMaxHeight));
+  // Facebook-like feed preview: follow the source ratio until it becomes very
+  // tall, then let the frame crop the overflow instead of squeezing the image.
+  const facebookMediaMaxHeight = Math.min(safetyMaxHeight, Math.round(cardWidth * 1.62));
+  const singleImageHeight = Math.round(clamp(
+    cardWidth / imageAspect,
+    facebookFeed ? cardWidth * 0.56 : 120,
+    facebookFeed ? facebookMediaMaxHeight : safetyMaxHeight,
+  ));
   const imageOrientations = imageAssets.length ? imageAssets : imageMedia;
   const twoLandscapeImages = gallery.length === 2
     && imageOrientations.slice(0, 2).every((media) => media.width && media.height && media.width / media.height > 1.15);
@@ -157,9 +165,14 @@ export const FeedPostCard = memo(function FeedPostCard({
   // Normal portrait video (including 9:16) keeps its complete native ratio.
   // Only unusually tall media is preview-capped to avoid one post consuming
   // several screens; tapping/pinch zoom still exposes the original content.
-  const feedVideoHeight = Math.round(videoAspect < 0.35
-    ? Math.min(naturalVideoHeight, windowHeight * 0.92)
-    : naturalVideoHeight);
+  // Keep enough of the following post visible to encourage continuous feed
+  // discovery, matching Facebook's compact portrait-video preview.
+  const facebookVideoMaxHeight = Math.min(facebookMediaMaxHeight, Math.round(cardWidth * 1.18));
+  const feedVideoHeight = Math.round(facebookFeed
+    ? clamp(naturalVideoHeight, cardWidth * 0.56, facebookVideoMaxHeight)
+    : videoAspect < 0.35
+      ? Math.min(naturalVideoHeight, windowHeight * 0.92)
+      : naturalVideoHeight);
   const videoPoster = videoAsset?.thumbnailUrl;
   const canExpandCaption = visibleCaption.length > 180 || visibleCaption.split('\n').length > 5;
 
@@ -196,35 +209,43 @@ export const FeedPostCard = memo(function FeedPostCard({
     if (!active) setIsManuallyPaused(false);
   }, [active]);
 
-  useEffect(() => () => {
-    if (playbackIconTimerRef.current) clearTimeout(playbackIconTimerRef.current);
-  }, []);
-
-  const flashPlaybackIcon = useCallback((icon: 'play' | 'pause') => {
-    if (playbackIconTimerRef.current) clearTimeout(playbackIconTimerRef.current);
-    setPlaybackIcon(icon);
-    playbackIconTimerRef.current = setTimeout(() => setPlaybackIcon(null), 550);
-  }, []);
-
-  const toggleVideoPlayback = useCallback(() => {
-    const player = playerRef.current;
-    if (!player) return;
-    if (player.playing) {
-      player.pause();
-      setIsManuallyPaused(true);
-      flashPlaybackIcon('play');
-    } else {
-      player.play();
-      setIsManuallyPaused(false);
-      flashPlaybackIcon('pause');
-    }
-  }, [flashPlaybackIcon]);
+  const openVideo = useCallback(() => {
+    const videos = useFeedStore.getState().items.filter((row) => Boolean(row.videoUri));
+    const initialIndex = Math.max(0, videos.findIndex((row) => row.id === item.id));
+    openMediaViewer({
+      items: videos.map((row) => {
+        const asset = row.mediaAssets?.find((entry) => entry.type === 'video');
+        const editor = row.editorMedia?.find((entry) => entry.type === 'video');
+        return {
+          id: `video:${row.id}`,
+          type: 'video' as const,
+          uri: row.videoUri!,
+          posterUri: asset?.thumbnailUrl,
+          width: asset?.width ?? editor?.width,
+          height: asset?.height ?? editor?.height,
+          initialTime: row.id === item.id ? currentTime : 0,
+          sourcePostId: row.id,
+          likes: row.likes,
+          comments: row.comments,
+          shares: row.shares,
+          liked: row.liked,
+          saved: row.saved,
+          author: row.author,
+          authorHandle: row.authorHandle,
+          avatarUri: row.authorAvatarUri,
+          caption: row.caption,
+        };
+      }),
+      initialIndex,
+      sourcePostId: item.id,
+    });
+  }, [currentTime, item.id]);
 
   const videoTapGesture = useMemo(() => Gesture.Tap()
     .maxDuration(250)
     .onEnd((_event, success) => {
-      if (success) runOnJS(toggleVideoPlayback)();
-    }), [toggleVideoPlayback]);
+      if (success) runOnJS(openVideo)();
+    }), [openVideo]);
 
   const handleScrub = useCallback((ratio: number) => {
     const player = playerRef.current;
@@ -259,7 +280,7 @@ export const FeedPostCard = memo(function FeedPostCard({
   ), [gallery, imageMedia, item.overlays]);
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, facebookFeed && styles.facebookCard]}>
       <View style={styles.authorRow}>
         <View style={styles.authorButton}>
           <Pressable onPress={onAuthor} accessibilityRole="button" accessibilityLabel={`ดูโปรไฟล์ ${item.author}`}>
@@ -316,9 +337,9 @@ export const FeedPostCard = memo(function FeedPostCard({
           <FeedPinchZoomLayer resetKey={item.id} enabled={videoReady} contentGesture={videoTapGesture}>
             <FeedVideoLayer
               uri={item.videoUri}
-              isActive={active}
+              isActive={active && viewerSourcePostId !== item.id}
               isManuallyPaused={isManuallyPaused}
-              contentFit="contain"
+              contentFit={facebookFeed ? 'cover' : 'contain'}
               onPlayerReady={(player) => {
                 playerRef.current = player;
                 setVideoPlayer(player);
@@ -339,11 +360,6 @@ export const FeedPostCard = memo(function FeedPostCard({
               )
               : <View pointerEvents="none" style={styles.videoPoster} />
           ) : null}
-          {playbackIcon ? (
-            <View style={styles.playbackIcon} pointerEvents="none">
-              <Ionicons name={playbackIcon} size={34} color="#fff" />
-            </View>
-          ) : null}
           <View style={styles.videoBadge} pointerEvents="none">
             <Ionicons name="play" size={13} color="#fff" />
             <Text style={styles.videoBadgeText}>วิดีโอ</Text>
@@ -363,7 +379,7 @@ export const FeedPostCard = memo(function FeedPostCard({
           <Image
             source={{ uri: gallery[0] }}
             style={StyleSheet.absoluteFill}
-            resizeMode="contain"
+            resizeMode={facebookFeed ? 'cover' : 'contain'}
             onLoad={({ nativeEvent }) => {
               const source = nativeEvent.source;
               if (source.width > 0 && source.height > 0) {
@@ -431,6 +447,7 @@ function Action({ icon, label, active, onPress }: { icon: React.ComponentProps<t
 
 const styles = StyleSheet.create({
   card: { marginBottom: 8, backgroundColor: '#F4F5F3', overflow: 'hidden' },
+  facebookCard: { marginBottom: 10, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#D8DCDA' },
   authorRow: { minHeight: 60, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   authorButton: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, marginRight: 12 },
   menuButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 19 },

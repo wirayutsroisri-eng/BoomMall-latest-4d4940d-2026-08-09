@@ -1,4 +1,4 @@
-import React, { memo, useEffect } from 'react';
+import React, { memo, useEffect, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { FeedItem } from '@/modules/feed/domain/types';
@@ -23,7 +23,10 @@ type Props = {
 export const FeedMediaRenderer = memo(function FeedMediaRenderer({
   item, gallery, width, height, imageLayout, isActive, isManuallyPaused, onPlayerReady, onOpenImage,
 }: Props) {
+  const [firstFrameRendered, setFirstFrameRendered] = useState(false);
   const renderedRemoteUri = item.videoUri ?? gallery[0];
+  const videoPoster = item.mediaAssets?.find((asset) => asset.type === 'video')?.thumbnailUrl;
+  useEffect(() => setFirstFrameRendered(false), [item.id]);
   useEffect(() => {
     if (/^https?:\/\//i.test(renderedRemoteUri ?? '')) {
       console.info('[POST_MEDIA] remote image rendered', { postId: item.id, remoteUrl: renderedRemoteUri });
@@ -38,7 +41,12 @@ export const FeedMediaRenderer = memo(function FeedMediaRenderer({
     return (
       <View style={styles.stage}>
         <FeedVideoLayer uri={item.videoUri} isActive={isActive} isManuallyPaused={isManuallyPaused}
-          contentFit="contain" onPlayerReady={onPlayerReady} style={StyleSheet.absoluteFill} />
+          contentFit="contain" onPlayerReady={onPlayerReady} onFirstFrameRender={() => setFirstFrameRendered(true)} style={StyleSheet.absoluteFill} />
+        {videoPoster && !firstFrameRendered ? (
+          <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            <Image source={{ uri: videoPoster }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          </View>
+        ) : null}
         <TextOverlayRenderer overlays={primaryTextOverlays} />
       </View>
     );

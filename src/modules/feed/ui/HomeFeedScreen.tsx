@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
+  Pressable,
   RefreshControl,
   StyleSheet,
   Text,
@@ -12,10 +13,12 @@ import {
   type ViewToken,
 } from 'react-native';
 import { BottomSheetModal } from '@gorhom/bottom-sheet';
+import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { router, useIsFocused } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import Animated, {
+  type SharedValue,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -71,10 +74,18 @@ export function HomeFeedScreen({
   channelEmbedded = false,
   channelActive = true,
   renderMediaViewer = true,
+  videoOnly = false,
+  initialFeedId,
+  initialPlaybackTime = 0,
+  verticalScrollY,
 }: {
   channelEmbedded?: boolean;
   channelActive?: boolean;
   renderMediaViewer?: boolean;
+  videoOnly?: boolean;
+  initialFeedId?: string;
+  initialPlaybackTime?: number;
+  verticalScrollY?: SharedValue<number>;
 } = {}) {
   const { width: screenWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -147,13 +158,22 @@ export function HomeFeedScreen({
     for (const t of laneOrder) {
       const lane = selectFeedByTab(allItems, t, followingMap, CHANTHABURI, 10, myHandle).filter((item) => {
         if (suppressed.has(item.id)) return false;
+        if (videoOnly && !item.videoUri) return false;
         const handle = item.authorHandle.replace(/^@/, '').toLowerCase();
         return !blocked.has(handle) && !blocked.has(item.authorHandle.toLowerCase());
       });
-      map[t] = t === 'foryou' ? pinPromotedFeedItems(lane, promotedIds) : lane;
+      const ordered = t === 'foryou' ? pinPromotedFeedItems(lane, promotedIds) : lane;
+      if (videoOnly && initialFeedId) {
+        const selectedIndex = ordered.findIndex((item) => item.id === initialFeedId);
+        map[t] = selectedIndex > 0
+          ? [ordered[selectedIndex]!, ...ordered.slice(0, selectedIndex), ...ordered.slice(selectedIndex + 1)]
+          : ordered;
+      } else {
+        map[t] = ordered;
+      }
     }
     return map;
-  }, [allItems, followingMap, myHandle, blockedUserIds, hiddenContentIds, removedContentIds, promotedIds, laneOrder]);
+  }, [allItems, followingMap, myHandle, blockedUserIds, hiddenContentIds, removedContentIds, promotedIds, laneOrder, videoOnly, initialFeedId]);
 
   const items = feedsByTab[reelTab] ?? [];
   const boardItems = feedsByTab.board ?? [];
@@ -195,10 +215,11 @@ export function HomeFeedScreen({
   useEffect(() => {
     // Restore the previously active item for this tab (persisted across tab switches).
     const restored = activeItemByTabRef.current[effectiveTab];
-    const candidate = restored && items.find((i) => i.id === restored) ? restored : items[0]?.id ?? null;
+    const requested = initialFeedId && items.some((item) => item.id === initialFeedId) ? initialFeedId : null;
+    const candidate = requested ?? (restored && items.find((i) => i.id === restored) ? restored : items[0]?.id ?? null);
     setActiveItemId(candidate);
     activeIndexRef.current = candidate ? items.findIndex((i) => i.id === candidate) : 0;
-  }, [effectiveTab, items]);
+  }, [effectiveTab, initialFeedId, items]);
 
   // Save the active item whenever it changes, so we can restore it on tab switch.
   useEffect(() => {
@@ -317,6 +338,7 @@ export function HomeFeedScreen({
     const h = e.nativeEvent.layout.height;
     if (h > 0 && h !== viewportHeight) setViewportHeight(h);
   };
+  const reelBottomInset = videoOnly ? 76 + insets.bottom : channelEmbedded ? 40 : 0;
 
   const renderLaneItem = useCallback(
     (laneTab: FeedTab, item: FeedItem) => (
@@ -351,9 +373,10 @@ export function HomeFeedScreen({
         pagerX={pagerX}
         onOpenProfile={() => openProfile(item)}
         onCommitTabIndex={commitTabIndex}
-        bottomMetaInset={channelEmbedded ? 40 : 0}
-        bottomActionsInset={channelEmbedded ? 40 : 0}
-        bottomSeekInset={channelEmbedded ? 35 : 0}
+        bottomMetaInset={reelBottomInset}
+        bottomActionsInset={reelBottomInset}
+        bottomSeekInset={videoOnly ? 70 + insets.bottom : channelEmbedded ? 35 : 0}
+        initialPlaybackTime={videoOnly && item.id === initialFeedId ? initialPlaybackTime : 0}
       />
     ),
     [
@@ -370,6 +393,9 @@ export function HomeFeedScreen({
       pagerX,
       laneOrder.length,
       promotedMasters,
+      reelBottomInset,
+      initialFeedId,
+      initialPlaybackTime,
       screenWidth,
       setActive,
       startCall,
@@ -379,7 +405,7 @@ export function HomeFeedScreen({
 
   return (
     <View
-      style={[styles.root, channelEmbedded && styles.rootEmbedded, onBoard && styles.rootBoard]}
+      style={[styles.root, channelEmbedded && !videoOnly && styles.rootEmbedded, onBoard && styles.rootBoard]}
       onLayout={onLayout}
     >
       <StatusBar style={onBoard ? 'dark' : 'light'} />
@@ -418,6 +444,8 @@ export function HomeFeedScreen({
                       listRefs.current[laneTab] = node;
                     }}
                     data={laneItems}
+                    onScroll={verticalScrollY ? (event) => { verticalScrollY.value = event.nativeEvent.contentOffset.y; } : undefined}
+                    scrollEventThrottle={verticalScrollY ? 16 : undefined}
                     keyExtractor={(item) => `${laneTab}:${item.id}`}
                     renderItem={({ item }) => renderLaneItem(laneTab, item)}
                     pagingEnabled
@@ -475,7 +503,7 @@ export function HomeFeedScreen({
                 },
               );
             }}
-            onPressSearch={() => router.push('/search')}
+            onPressSearch={() => router.push({ pathname: '/channel-search', params: { scope: 'feed_global' } })}
             onPressMore={
               onBoard
                 ? undefined
@@ -489,6 +517,25 @@ export function HomeFeedScreen({
           />
         ) : null}
       </View>
+
+      {videoOnly && activeItemId ? (
+        <View style={[styles.commentDock, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+          <Pressable
+            style={styles.commentComposer}
+            onPress={() => openCommentsSheet(activeItemId)}
+            accessibilityRole="button"
+            accessibilityLabel="แสดงความคิดเห็น"
+          >
+            <Text style={styles.commentPlaceholder}>แสดงความคิดเห็น</Text>
+          </Pressable>
+          <Pressable style={styles.commentTool} onPress={() => openCommentsSheet(activeItemId)} accessibilityLabel="เพิ่มอีโมจิ">
+            <Ionicons name="happy-outline" size={27} color="#fff" />
+          </Pressable>
+          <Pressable style={styles.commentTool} onPress={() => openCommentsSheet(activeItemId)} accessibilityLabel="เพิ่ม GIF">
+            <Text style={styles.gifText}>GIF</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <ProductBottomSheet ref={sheetRef} product={activeProduct} />
 
@@ -613,6 +660,42 @@ const styles = StyleSheet.create({
   },
   feedClipBoard: {
     backgroundColor: colors.surface.canvas,
+  },
+  commentDock: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 24,
+    minHeight: 68,
+    paddingTop: 10,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(8,8,8,0.96)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.16)',
+  },
+  commentComposer: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 24,
+    justifyContent: 'center',
+    paddingHorizontal: 17,
+    backgroundColor: '#202020',
+  },
+  commentPlaceholder: { color: 'rgba(255,255,255,0.72)', fontSize: 15 },
+  commentTool: { width: 38, height: 44, alignItems: 'center', justifyContent: 'center' },
+  gifText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '900',
+    borderWidth: 1.5,
+    borderColor: '#fff',
+    borderRadius: 4,
+    paddingHorizontal: 3,
+    paddingVertical: 1,
   },
   emptyLane: {
     flex: 1,

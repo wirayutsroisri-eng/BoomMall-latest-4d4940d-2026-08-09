@@ -8,13 +8,14 @@ import { groupStories, type StoryGroup, type Story } from '@/modules/story/domai
 type Props = {
   stories: Story[];
   onOpenStory: (storyId: string) => void;
+  onCreateStory: () => void;
 };
 
 function latestStory(group: StoryGroup) {
   return group.stories[group.stories.length - 1]!;
 }
 
-function VideoPreview({ uri, posterUrl, active }: { uri: string; posterUrl?: string; active: boolean }) {
+function VideoPreview({ uri, posterUrl, active, viewed }: { uri: string; posterUrl?: string; active: boolean; viewed: boolean }) {
   const [firstFrameRendered, setFirstFrameRendered] = useState(false);
   const player = useVideoPlayer({ uri, useCaching: true }, (instance) => {
     instance.muted = true;
@@ -34,7 +35,7 @@ function VideoPreview({ uri, posterUrl, active }: { uri: string; posterUrl?: str
   }, [active, player]);
 
   return (
-    <View style={styles.video}>
+    <View style={[styles.video, viewed ? styles.viewedFrame : styles.unviewedFrame]}>
       <VideoView
         player={player}
         style={styles.preview}
@@ -50,10 +51,9 @@ function VideoPreview({ uri, posterUrl, active }: { uri: string; posterUrl?: str
   );
 }
 
-export const FeedStatusRail = memo(function FeedStatusRail({ stories, onOpenStory }: Props) {
+export const FeedStatusRail = memo(function FeedStatusRail({ stories, onOpenStory, onCreateStory }: Props) {
   const isFocused = useIsFocused();
   const groups = useMemo(() => groupStories(stories), [stories]);
-  if (!groups.length) return null;
 
   return (
     <View style={styles.section}>
@@ -63,6 +63,21 @@ export const FeedStatusRail = memo(function FeedStatusRail({ stories, onOpenStor
         keyExtractor={(group) => group.userId}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.content}
+        ListHeaderComponent={(
+          <Pressable
+            style={styles.story}
+            onPress={onCreateStory}
+            accessibilityRole="button"
+            accessibilityLabel="เพิ่ม Story"
+          >
+            <View style={[styles.preview, styles.createPreview]}>
+              <View style={styles.createButton}>
+                <Ionicons name="add" size={25} color="#FFFFFF" />
+              </View>
+            </View>
+            <Text style={styles.name} numberOfLines={1}>เพิ่ม Story</Text>
+          </Pressable>
+        )}
         renderItem={({ item: group }) => {
           const story = latestStory(group);
           const name = story.user?.displayName || story.user?.handle || 'ผู้ใช้';
@@ -74,8 +89,8 @@ export const FeedStatusRail = memo(function FeedStatusRail({ stories, onOpenStor
               accessibilityLabel={`ดู Story ของ ${name}`}
             >
               {story.mediaType === 'video'
-                ? <VideoPreview uri={story.mediaUrl} posterUrl={story.thumbnailUrl} active={isFocused} />
-                : <Image source={{ uri: story.mediaUrl }} style={styles.preview} resizeMode="cover" />}
+                ? <VideoPreview uri={story.mediaUrl} posterUrl={story.thumbnailUrl} active={isFocused} viewed={group.viewed} />
+                : <Image source={{ uri: story.mediaUrl }} style={[styles.preview, group.viewed ? styles.viewedFrame : styles.unviewedFrame]} resizeMode="cover" />}
               <Text style={styles.name} numberOfLines={1}>{name}</Text>
             </Pressable>
           );
@@ -86,12 +101,16 @@ export const FeedStatusRail = memo(function FeedStatusRail({ stories, onOpenStor
 });
 
 const styles = StyleSheet.create({
-  section: { paddingVertical: 8, backgroundColor: '#E9ECE9' },
-  content: { paddingHorizontal: 10, gap: 10 },
-  story: { width: 82, gap: 5 },
-  preview: { width: 82, height: 116, borderRadius: 10, backgroundColor: '#151B18' },
-  video: { width: 82, height: 116, borderRadius: 10, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', backgroundColor: '#151B18' },
+  section: { paddingVertical: 5, backgroundColor: '#FFFFFF', borderBottomWidth: 2, borderBottomColor: '#CCD2CF' },
+  content: { paddingHorizontal: 6, gap: 7 },
+  story: { width: 118, gap: 4 },
+  preview: { width: 118, height: 176, borderRadius: 15, backgroundColor: '#151B18' },
+  video: { width: 118, height: 176, borderRadius: 15, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', backgroundColor: '#151B18' },
+  unviewedFrame: { borderWidth: 3, borderColor: '#168BFF' },
+  viewedFrame: { borderWidth: 2, borderColor: '#9AA49F' },
   poster: { position: 'absolute', top: 0, left: 0 },
   muted: { position: 'absolute', right: 6, bottom: 6, padding: 3, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.48)' },
-  name: { color: '#17201C', fontSize: 12, fontWeight: '700', textAlign: 'center' },
+  createPreview: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#DDE4E0', borderWidth: 2, borderColor: '#AEB8B3' },
+  createButton: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', backgroundColor: '#168BFF', borderWidth: 4, borderColor: '#FFFFFF' },
+  name: { color: '#17201C', fontSize: 13, fontWeight: '800', textAlign: 'center' },
 });
