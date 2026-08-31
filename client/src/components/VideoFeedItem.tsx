@@ -55,6 +55,7 @@ export default function VideoFeedItem({
   const bypass = isDevBypassEnabled();
   const { isAuthenticated } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const backdropVideoRef = useRef<HTMLVideoElement>(null);
   const [muted, setMuted] = useState(true);
   const [localLiked, setLocalLiked] = useState(false);
   const images = (product.images ?? []) as string[];
@@ -92,12 +93,18 @@ export default function VideoFeedItem({
 
   useEffect(() => {
     const video = videoRef.current;
+    const backdrop = backdropVideoRef.current;
     if (!video || !hasVideo) return;
     if (isActive && !swipe.isOpen) {
       video.play().catch(() => {});
+      backdrop?.play().catch(() => {});
     } else {
       video.pause();
-      if (!isActive) video.currentTime = 0;
+      backdrop?.pause();
+      if (!isActive) {
+        video.currentTime = 0;
+        if (backdrop) backdrop.currentTime = 0;
+      }
     }
   }, [isActive, hasVideo, swipe.isOpen]);
 
@@ -119,37 +126,63 @@ export default function VideoFeedItem({
   const showB2B = supportsMode(product.listingType, "b2b");
   const showC2C = supportsMode(product.listingType, "c2c");
 
+  const poster = images[0] ?? undefined;
+
   return (
     <div
-      className="relative h-[100dvh] w-full snap-start snap-always shrink-0 bg-black overflow-hidden select-none"
+      className="relative h-[100dvh] w-full snap-start snap-always shrink-0 bg-transparent overflow-hidden select-none"
       style={isActive ? swipe.style : undefined}
       {...(isActive ? swipe.handlers : {})}
     >
+      {/* Blurred fill so 16:9 clips never show a solid black letterbox */}
+      {poster && (
+        <img
+          src={poster}
+          alt=""
+          aria-hidden
+          className="absolute inset-0 w-full h-full object-cover scale-125 blur-2xl brightness-110 saturate-125 pointer-events-none"
+          draggable={false}
+        />
+      )}
+
+      {hasVideo && (
+        <video
+          ref={backdropVideoRef}
+          src={product.videoUrl!}
+          className="absolute inset-0 w-full h-full object-cover scale-125 blur-2xl brightness-110 pointer-events-none"
+          loop
+          muted
+          playsInline
+          preload="metadata"
+          aria-hidden
+        />
+      )}
+
       {hasVideo ? (
         <video
           ref={videoRef}
           src={product.videoUrl!}
-          className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+          className="absolute inset-0 w-full h-full object-contain pointer-events-none bg-transparent"
           loop
           muted={muted}
           playsInline
           preload="metadata"
-          poster={images[0] ?? undefined}
+          poster={poster}
         />
       ) : images[0] ? (
         <img
           src={images[0]}
           alt={product.title}
-          className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+          className="absolute inset-0 w-full h-full object-contain pointer-events-none"
           draggable={false}
         />
       ) : (
-        <div className="absolute inset-0 flex items-center justify-center bg-zinc-900 pointer-events-none">
-          <Package className="w-16 h-16 text-white/20" />
+        <div className="absolute inset-0 flex items-center justify-center bg-muted pointer-events-none">
+          <Package className="w-16 h-16 text-muted-foreground/40" />
         </div>
       )}
 
-      <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/70 pointer-events-none" />
+      <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/45 pointer-events-none" />
 
       <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 pt-[max(env(safe-area-inset-top),12px)] pb-2 pointer-events-none">
         <div className="flex items-center gap-2">

@@ -173,16 +173,16 @@ export default function HomePage() {
 
   if (showLoading) {
     return (
-      <div className="h-[100dvh] bg-black flex items-center justify-center">
-        <Skeleton className="w-full h-full" />
+      <div className="h-[100dvh] bg-background flex items-center justify-center">
+        <Skeleton className="w-full h-full rounded-none" />
       </div>
     );
   }
 
   if (allProducts.length === 0) {
     return (
-      <div className="h-[100dvh] bg-black flex flex-col items-center justify-center text-white gap-4 px-6 text-center">
-        <Store className="w-12 h-12 opacity-30" />
+      <div className="h-[100dvh] bg-background flex flex-col items-center justify-center text-foreground gap-4 px-6 text-center">
+        <Store className="w-12 h-12 text-muted-foreground/40" />
         {feedMode === "following" ? (
           <>
             <p className="text-sm font-semibold">ยังไม่มีสินค้าจากร้านที่ติดตาม</p>
@@ -194,7 +194,7 @@ export default function HomePage() {
             )}
             <button
               onClick={() => switchFeedMode("for-you")}
-              className="text-sm px-4 py-2 rounded-full bg-white/10 hover:bg-white/20"
+              className="text-sm px-4 py-2 rounded-full bg-muted hover:bg-muted/80"
             >
               ดูสินค้าแนะนำ
             </button>
@@ -204,7 +204,7 @@ export default function HomePage() {
             <p className="text-sm opacity-60">ยังไม่มีสินค้าใน feed</p>
             <button
               onClick={handleRefreshFeed}
-              className="flex items-center gap-2 text-sm px-4 py-2 rounded-full bg-white/10 hover:bg-white/20"
+              className="flex items-center gap-2 text-sm px-4 py-2 rounded-full bg-muted hover:bg-muted/80"
             >
               <RefreshCw className="w-4 h-4" /> รีเฟรช
             </button>
@@ -215,7 +215,7 @@ export default function HomePage() {
   }
 
   return (
-    <div className="relative h-[100dvh] bg-black overflow-hidden">
+    <div className="relative h-[100dvh] bg-background overflow-hidden">
       {bypass && (
         <div className="absolute top-[max(env(safe-area-inset-top),8px)] left-3 z-30 text-[10px] font-semibold px-2 py-1 rounded-full bg-amber-500/90 text-black">
           DEV BYPASS
