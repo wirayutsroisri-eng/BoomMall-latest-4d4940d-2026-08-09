@@ -21,6 +21,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const apiUrl = (
     process.env.EXPO_PUBLIC_API_BASE_URL || process.env.EXPO_PUBLIC_API_URL
   )?.replace(/\/$/, '');
+  // ATS: HTTPS API => enforce ATS (App Store safe). HTTP/LAN dev API => allow
+  // arbitrary loads so local testing still works. See app-store-review-notes.
+  const apiUrlIsHttps = apiUrl?.startsWith('https://') ?? false;
 
   const existingSchemes = (config.ios?.infoPlist?.LSApplicationQueriesSchemes as string[] | undefined) ?? [];
   const querySchemes = Array.from(
@@ -68,6 +71,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           'BoomMall บันทึกรูปที่คุณเลือกหรือสร้างลงคลังภาพเมื่อคุณอนุญาต',
         LSApplicationQueriesSchemes: querySchemes,
         CFBundleURLTypes: urlTypes,
+        NSAppTransportSecurity: {
+          ...(apiUrlIsHttps ? {} : { NSAllowsArbitraryLoads: true }),
+          NSAllowsLocalNetworking: true,
+        },
         ...(facebookAppId
           ? {
               FacebookAppID: facebookAppId,

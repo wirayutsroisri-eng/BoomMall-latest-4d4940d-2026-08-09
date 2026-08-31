@@ -49,6 +49,7 @@ Not Kids. UGC: chat, comments, posts, board. Report + block are in-app.
 ## Before you submit to Apple (not just TestFlight-on-LAN)
 
 1. Point `EXPO_PUBLIC_API_URL` in `eas.json` at a **public HTTPS** API (Apple reviewers are not on your Wi-Fi).
+   Production host: **`https://api.boommall.app`** (already set in `eas.json` for `preview`/`play-internal`/`production`).
 2. Confirm `https://<API>/legal/privacy` and `/legal/terms` open in a desktop browser.
 3. App Privacy nutrition labels: account, user content, identifiers — no tracking / ATT in this build.
 4. Enable Sign in with Apple on the App ID `com.boommall.superapp`.

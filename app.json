@@ -29,6 +29,7 @@
         "NSPhotoLibraryAddUsageDescription": "BoomMall บันทึกรูปที่คุณเลือกหรือสร้างลงคลังภาพเมื่อคุณอนุญาต",
         "NSLocalNetworkUsageDescription": "BoomMall เชื่อมต่อเซิร์ฟเวอร์ในเครือข่ายท้องถิ่นเพื่อซิงค์บัญชี แชต และร้านค้าระหว่างทดสอบ",
         "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": false,
           "NSAllowsLocalNetworking": true
         },
         "ITSAppUsesNonExemptEncryption": false,
