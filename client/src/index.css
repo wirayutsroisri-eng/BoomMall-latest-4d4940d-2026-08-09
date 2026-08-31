@@ -205,6 +205,11 @@
   display: none;
 }
 
+/* Native video chrome is often black; keep feed letterbox transparent */
+video {
+  background-color: transparent;
+}
+
 /* Smooth page transitions */
 @media (prefers-reduced-motion: no-preference) {
   .page-enter {
