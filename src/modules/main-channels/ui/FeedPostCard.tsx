@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import type { VideoPlayer } from 'expo-video';
 import { Gesture } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
@@ -17,7 +18,7 @@ import { FeedPinchZoomLayer } from '@/modules/feed/ui/FeedPinchZoomLayer';
 import { FeedSeekBar } from '@/modules/feed/ui/FeedSeekBar';
 import { FeedVideoLayer } from '@/modules/feed/ui/FeedVideoLayer';
 import { MultiImageGrid } from '@/modules/feed/ui/MultiImageGrid';
-import { openFeedMediaViewer, openMediaViewer, useFeedMediaViewerStore } from '@/modules/feed/state/feed-media-viewer-store';
+import { openFeedMediaViewer } from '@/modules/feed/state/feed-media-viewer-store';
 import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
 
@@ -73,7 +74,6 @@ export const FeedPostCard = memo(function FeedPostCard({
 }: Props) {
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const ownAvatarUri = useLoyaltyStore((state) => state.profile.avatarUri);
-  const viewerSourcePostId = useFeedMediaViewerStore((state) => state.sourcePostId);
   const facebookFeed = channel === 'feed';
   const cardWidth = Math.max(280, windowWidth);
   const gallery = useMemo(
@@ -92,7 +92,11 @@ export const FeedPostCard = memo(function FeedPostCard({
   const playerRef = useRef<VideoPlayer | null>(null);
   const isScrubbingRef = useRef(false);
   const wasPlayingBeforeScrubRef = useRef(false);
-  const dateLabel = publishedLabel(item.createdAt);
+  const dateLabel = item.publishStatus === 'uploading'
+    ? 'กำลังอัปโหลด…'
+    : item.publishStatus === 'failed'
+      ? 'อัปโหลดไม่สำเร็จ'
+      : publishedLabel(item.createdAt);
   const imageMedia = useMemo(
     () => item.editorMedia?.filter((media) => media.type === 'image') ?? [],
     [item.editorMedia],
@@ -210,34 +214,12 @@ export const FeedPostCard = memo(function FeedPostCard({
   }, [active]);
 
   const openVideo = useCallback(() => {
-    const videos = useFeedStore.getState().items.filter((row) => Boolean(row.videoUri));
-    const initialIndex = Math.max(0, videos.findIndex((row) => row.id === item.id));
-    openMediaViewer({
-      items: videos.map((row) => {
-        const asset = row.mediaAssets?.find((entry) => entry.type === 'video');
-        const editor = row.editorMedia?.find((entry) => entry.type === 'video');
-        return {
-          id: `video:${row.id}`,
-          type: 'video' as const,
-          uri: row.videoUri!,
-          posterUri: asset?.thumbnailUrl,
-          width: asset?.width ?? editor?.width,
-          height: asset?.height ?? editor?.height,
-          initialTime: row.id === item.id ? currentTime : 0,
-          sourcePostId: row.id,
-          likes: row.likes,
-          comments: row.comments,
-          shares: row.shares,
-          liked: row.liked,
-          saved: row.saved,
-          author: row.author,
-          authorHandle: row.authorHandle,
-          avatarUri: row.authorAvatarUri,
-          caption: row.caption,
-        };
-      }),
-      initialIndex,
-      sourcePostId: item.id,
+    router.push({
+      pathname: '/video-feed',
+      params: {
+        feedId: item.id,
+        startTime: String(currentTime),
+      },
     });
   }, [currentTime, item.id]);
 
@@ -301,7 +283,10 @@ export const FeedPostCard = memo(function FeedPostCard({
             >
               <Text style={styles.authorName} numberOfLines={1}>{item.author}</Text>
             </Pressable>
-            <Text style={styles.meta} numberOfLines={1}>
+            <Text
+              style={[styles.meta, item.publishStatus === 'failed' && styles.metaFailed]}
+              numberOfLines={1}
+            >
               {dateLabel}
             </Text>
           </View>
@@ -337,7 +322,7 @@ export const FeedPostCard = memo(function FeedPostCard({
           <FeedPinchZoomLayer resetKey={item.id} enabled={videoReady} contentGesture={videoTapGesture}>
             <FeedVideoLayer
               uri={item.videoUri}
-              isActive={active && viewerSourcePostId !== item.id}
+              isActive={active}
               isManuallyPaused={isManuallyPaused}
               contentFit={facebookFeed ? 'cover' : 'contain'}
               onPlayerReady={(player) => {
@@ -455,6 +440,7 @@ const styles = StyleSheet.create({
   authorNameButton: { alignSelf: 'flex-start', maxWidth: '100%' },
   authorName: { color: '#168BFF', fontSize: 15, fontWeight: '900' },
   meta: { color: '#707A75', fontSize: 12, marginTop: 2 },
+  metaFailed: { color: '#C62828', fontWeight: '800' },
   captionBlock: { paddingHorizontal: 12, paddingBottom: 10 },
   caption: { color: '#202824', fontSize: 15, lineHeight: 21 },
   moreText: { color: '#65716B', fontSize: 13, fontWeight: '700', marginTop: 3 },

@@ -20,18 +20,19 @@ export async function uploadFeedMedia(input: {
   const descriptors = input.editorMedia ?? [];
   const mediaAssets: MediaAsset[] = [];
   const bindings: { sourceUri: string; asset: MediaAsset }[] = [];
-  const imageUris: string[] = [];
-  for (let index = 0; index < (input.imageUris ?? []).length; index += 1) {
-    const uri = input.imageUris![index]!;
+  const imageResults = await Promise.all((input.imageUris ?? []).map(async (uri, index) => {
     if (isRemoteMediaUrl(uri)) {
-      imageUris.push(uri);
-      continue;
+      return { uri };
     }
     const descriptor = descriptors.filter((item) => item.type === 'image')[index];
     const asset = await uploadMediaAsset({ uri, type: 'image', width: descriptor?.width, height: descriptor?.height });
-    mediaAssets.push(asset);
-    bindings.push({ sourceUri: uri, asset });
-    imageUris.push(mediaAssetSource(asset));
+    return { uri: mediaAssetSource(asset), sourceUri: uri, asset };
+  }));
+  const imageUris = imageResults.map((result) => result.uri);
+  for (const result of imageResults) {
+    if (!result.asset || !result.sourceUri) continue;
+    mediaAssets.push(result.asset);
+    bindings.push({ sourceUri: result.sourceUri, asset: result.asset });
   }
   let videoUri = input.videoUri;
   if (videoUri && !isRemoteMediaUrl(videoUri)) {

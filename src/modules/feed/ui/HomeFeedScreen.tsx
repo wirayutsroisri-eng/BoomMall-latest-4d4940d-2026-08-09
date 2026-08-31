@@ -375,7 +375,7 @@ export function HomeFeedScreen({
         onCommitTabIndex={commitTabIndex}
         bottomMetaInset={reelBottomInset}
         bottomActionsInset={reelBottomInset}
-        bottomSeekInset={videoOnly ? 70 + insets.bottom : channelEmbedded ? 35 : 0}
+        bottomSeekInset={videoOnly ? 70 + insets.bottom : channelEmbedded ? 5 : 0}
         initialPlaybackTime={videoOnly && item.id === initialFeedId ? initialPlaybackTime : 0}
       />
     ),
@@ -405,7 +405,12 @@ export function HomeFeedScreen({
 
   return (
     <View
-      style={[styles.root, channelEmbedded && !videoOnly && styles.rootEmbedded, onBoard && styles.rootBoard]}
+      style={[
+        styles.root,
+        videoOnly && styles.rootVideo,
+        channelEmbedded && !videoOnly && styles.rootEmbedded,
+        onBoard && styles.rootBoard,
+      ]}
       onLayout={onLayout}
     >
       <StatusBar style={onBoard ? 'dark' : 'light'} />
@@ -449,10 +454,10 @@ export function HomeFeedScreen({
                     keyExtractor={(item) => `${laneTab}:${item.id}`}
                     renderItem={({ item }) => renderLaneItem(laneTab, item)}
                     pagingEnabled
-                    scrollEnabled={laneTab === tab && !mediaZoomed}
+                    scrollEnabled={laneTab === effectiveTab && !mediaZoomed}
                     decelerationRate="fast"
-                    bounces
-                    alwaysBounceVertical
+                    bounces={!videoOnly}
+                    alwaysBounceVertical={!videoOnly}
                     overScrollMode="never"
                     showsVerticalScrollIndicator={false}
                     snapToInterval={viewportHeight}
@@ -518,8 +523,15 @@ export function HomeFeedScreen({
         ) : null}
       </View>
 
+      {/* แถบแสดงความคิดเห็น (commentDock) ด้านล่างเฉพาะหน้า video เต็มจอ — ติดขอบล่างสุด
+          seek bar จะถูก `bottomSeekInset` ในการ์ดเลื่อนขึ้นให้อยู่เหนือ dock นี้ */}
       {videoOnly && activeItemId ? (
-        <View style={[styles.commentDock, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+        <View
+          style={[
+            styles.commentDock,
+            { paddingBottom: Math.max(insets.bottom, 10) },
+          ]}
+        >
           <Pressable
             style={styles.commentComposer}
             onPress={() => openCommentsSheet(activeItemId)}
@@ -528,10 +540,18 @@ export function HomeFeedScreen({
           >
             <Text style={styles.commentPlaceholder}>แสดงความคิดเห็น</Text>
           </Pressable>
-          <Pressable style={styles.commentTool} onPress={() => openCommentsSheet(activeItemId)} accessibilityLabel="เพิ่มอีโมจิ">
+          <Pressable
+            style={styles.commentTool}
+            onPress={() => openCommentsSheet(activeItemId)}
+            accessibilityLabel="เพิ่มอีโมจิ"
+          >
             <Ionicons name="happy-outline" size={27} color="#fff" />
           </Pressable>
-          <Pressable style={styles.commentTool} onPress={() => openCommentsSheet(activeItemId)} accessibilityLabel="เพิ่ม GIF">
+          <Pressable
+            style={styles.commentTool}
+            onPress={() => openCommentsSheet(activeItemId)}
+            accessibilityLabel="เพิ่ม GIF"
+          >
             <Text style={styles.gifText}>GIF</Text>
           </Pressable>
         </View>
@@ -647,6 +667,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brand.ink,
     paddingTop: 17,
   },
+  rootVideo: { paddingTop: 0 },
   rootBoard: {
     backgroundColor: colors.surface.canvas,
   },

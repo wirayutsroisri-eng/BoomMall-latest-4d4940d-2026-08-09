@@ -144,7 +144,7 @@ export function FeedSeekBar({
   const showLabels = duration > 0;
 
   return (
-    <View style={[styles.container, { bottom: 7 + bottomOffset }]} pointerEvents="auto">
+    <View style={[styles.container, { bottom: 10 + bottomOffset }]} pointerEvents="auto">
       {showLabels && isInteracting ? (
         <Animated.View style={[styles.timeRow, timeRowStyle]} pointerEvents="none">
           <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
@@ -173,12 +173,13 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 7, // Kept at bottom: 7 to float perfectly above bottom bar
+    bottom: 0, // ติดขอบล่างสุดของวิดีโอแบบ YouTube Shorts
     zIndex: 99,
   },
   trackHitArea: {
     height: 32, // Large hit area of 32px for very easy touch/control interaction
-    justifyContent: 'center',
+    justifyContent: 'flex-end',
+    paddingBottom: 0,
   },
   track: {
     width: '100%',
@@ -200,7 +201,7 @@ const styles = StyleSheet.create({
   timeRow: {
     flexDirection: 'row',
     justifyContent: 'center', // Center the single current time indicator
-    marginBottom: 8, // Place ABOVE the progress bar track with spacing
+    marginBottom: 12, // Place ABOVE the progress bar track with spacing
   },
   timeText: {
     color: '#fff',

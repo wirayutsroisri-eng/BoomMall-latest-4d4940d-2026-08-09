@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -557,6 +557,22 @@ export function FeedReelCard({
           />
         </FeedPinchZoomLayer>
 
+        {item.publishStatus ? (
+          <View
+            pointerEvents="none"
+            style={[styles.publishBadge, item.publishStatus === 'failed' && styles.publishBadgeFailed]}
+          >
+            {item.publishStatus === 'uploading' ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Ionicons name="alert-circle" size={16} color="#fff" />
+            )}
+            <Text style={styles.publishBadgeText}>
+              {item.publishStatus === 'uploading' ? 'กำลังอัปโหลดด้านหลัง…' : 'อัปโหลดไม่สำเร็จ'}
+            </Text>
+          </View>
+        ) : null}
+
         {!chromeHidden ? (
           <LinearGradient
             colors={['transparent', colors.feed.captionScrim]}
@@ -735,6 +751,21 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brand.ink,
     overflow: 'hidden',
   },
+  publishBadge: {
+    position: 'absolute',
+    top: 58,
+    left: 14,
+    zIndex: 20,
+    minHeight: 34,
+    paddingHorizontal: 12,
+    borderRadius: 17,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    backgroundColor: 'rgba(7,20,15,0.78)',
+  },
+  publishBadgeFailed: { backgroundColor: 'rgba(183,28,28,0.9)' },
+  publishBadgeText: { color: '#fff', fontSize: 12, fontWeight: '800' },
   pageDots: {
     position: 'absolute',
     top: 56,

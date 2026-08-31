@@ -273,7 +273,9 @@ export function ContentPublishScreen() {
       linkLabel ? `🔗 ${linkLabel}` : null,
       musicTitle ? `🎵 ${musicTitle}` : null,
     ].filter(Boolean);
-    const caption = captionParts.join('\n');
+    // SocialPost requires a non-empty body. The feed hides this exact fallback,
+    // so media-only posts stay visually captionless while satisfying the API.
+    const caption = captionParts.join('\n') || 'โพสต์ใหม่จาก BoomMall';
 
     const postPayload = {
       caption,
@@ -324,8 +326,9 @@ export function ContentPublishScreen() {
       return;
     }
 
-    const postId = await addPost({
+    const publishTask = addPost({
       clientPostId: clientPostIdRef.current,
+      background: true,
       caption,
       price: 0,
       channel: 'C2C',
@@ -338,23 +341,6 @@ export function ContentPublishScreen() {
       overlays: draft.overlays,
     });
 
-    void (async () => {
-      const result = await scanKeywordsOnServer({
-        contentId: postId,
-
-        text: caption,
-        authorUserId: authUser?.id,
-        authorHandle: authUser?.handle,
-      });
-      if (result?.quarantined) {
-        hideContent(postId);
-        Alert.alert(
-          'รอตรวจสอบ',
-          'โพสต์มีคำที่เสี่ยง — เข้าคิว Pending Review ก่อนขึ้นฟีดหลัก',
-        );
-      }
-    })();
-
     clearDraft();
     clientPostIdRef.current = null;
     console.info('[POST_FLOW] clear composer draft');
@@ -365,6 +351,39 @@ export function ContentPublishScreen() {
     closeAll();
     console.info('[POST_FLOW] 08 navigation success');
     succeeded = true;
+    void publishTask
+      .then((postId) => {
+        void scanKeywordsOnServer({
+            contentId: postId,
+            text: caption,
+            authorUserId: authUser?.id,
+            authorHandle: authUser?.handle,
+          })
+          .then((result) => {
+            if (!result?.quarantined) return;
+            hideContent(postId);
+            Alert.alert(
+              'รอตรวจสอบ',
+              'โพสต์มีคำที่เสี่ยง — เข้าคิว Pending Review ก่อนขึ้นฟีดหลัก',
+            );
+          })
+          .catch((error) => {
+            console.error('[POST_FLOW_ERROR]', {
+              step: 'background-moderation-scan',
+              message: error instanceof Error ? error.message : String(error),
+            });
+          });
+      })
+      .catch((error) => {
+        console.error('[POST_FLOW_ERROR]', {
+          step: (error as { step?: string } | null)?.step ?? 'background-create-post',
+          message: error instanceof Error ? error.message : String(error),
+        });
+        Alert.alert(
+          'โพสต์ยังไม่สำเร็จ',
+          'การอัปโหลดด้านหลังล้มเหลว โพสต์ถูกแสดงสถานะไว้ในฟีด กรุณาตรวจสอบอินเทอร์เน็ตแล้วโพสต์ใหม่',
+        );
+      });
     } catch (error) {
       const statusCode = (error as { statusCode?: number } | null)?.statusCode;
       console.error('[POST_FLOW_ERROR]', {

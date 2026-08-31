@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -18,7 +18,9 @@ import { isLiveUgcFeedItem } from '@/modules/feed/domain/isLiveUgcFeedItem';
 import { buildOwnerFeedItems } from '@/modules/profile/data/buildOwnerFeedItems';
 import type { FeedItem } from '@/modules/feed/domain/types';
 import { Avatar } from '@/shared/components/Avatar';
+import { TrustBadge, type TrustInfo } from '@/shared/components/TrustBadge';
 import { colors } from '@/shared/theme/colors';
+import { getMyFriendIdentity } from '@/modules/search/data/friendApi';
 import { ContentGrid } from './ContentGrid';
 import { MyOrdersHub } from './MyOrdersHub';
 import { SellerHomePanel } from '@/modules/store/ui/SellerHomePanel';
@@ -73,6 +75,12 @@ export function ProfileScreen() {
   const items = useFeedStore((s) => s.items);
   const refreshFeed = useFeedStore((s) => s.refreshFromServer);
   const [tab, setTab] = useState<ProfileTab>('videos');
+  const [trust, setTrust] = useState<TrustInfo | null>(null);
+
+  useEffect(() => {
+    if (!userId) return;
+    void getMyFriendIdentity().then((me) => setTrust(me.trust ?? null)).catch(() => undefined);
+  }, [userId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -279,6 +287,7 @@ export function ProfileScreen() {
               {profile.displayName}
             </Text>
           </View>
+          <TrustBadge trust={trust} showLabel />
           <Pressable
             style={styles.pencilBtn}
             onPress={openEditProfile}

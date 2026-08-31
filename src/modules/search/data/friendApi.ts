@@ -1,4 +1,5 @@
 import { getApiBase, useAuthStore } from '@/modules/auth/state/auth-store';
+import type { TrustInfo } from '@/shared/components/TrustBadge';
 
 export type FriendProfile = {
   userId: string;
@@ -8,6 +9,7 @@ export type FriendProfile = {
   displayName: string;
   avatarUrl: string | null;
   bio: string | null;
+  trust?: TrustInfo | null;
 };
 
 function headers() {

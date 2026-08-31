@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { prisma } from '../../lib/prisma';
 import { AppError } from '../../lib/errors';
 import { ensureDirectConversation } from '../chat/services/ChatService';
+import { computeTrust, computeTrusts, DEFAULT_TRUST, type TrustInfo } from '../profile/TrustService';
 
 const profileSelect = {
   userId: true,
@@ -14,7 +15,7 @@ const profileSelect = {
   privacyJson: true,
 } as const;
 
-function publicProfile(row: Awaited<ReturnType<typeof prisma.userProfile.findFirstOrThrow>>) {
+function publicProfile(row: Awaited<ReturnType<typeof prisma.userProfile.findFirstOrThrow>>, trust: TrustInfo = DEFAULT_TRUST) {
   const profile = row as unknown as Record<string, unknown>;
   return {
     userId: String(profile.userId),
@@ -24,6 +25,7 @@ function publicProfile(row: Awaited<ReturnType<typeof prisma.userProfile.findFir
     displayName: typeof profile.displayName === 'string' ? profile.displayName : 'ผู้ใช้ BoomMall',
     avatarUrl: typeof profile.avatarUrl === 'string' ? profile.avatarUrl : null,
     bio: typeof profile.bio === 'string' ? profile.bio : null,
+    trust,
   };
 }
 
@@ -46,7 +48,8 @@ function canFind(profile: { privacyJson: unknown }, viewerId: string, ownerId: s
 export async function getMyFriendIdentity(userId: string) {
   const row = await prisma.userProfile.findUnique({ where: { userId }, select: profileSelect });
   if (!row) throw new AppError('NOT_FOUND', 'ไม่พบบัญชีผู้ใช้', 404);
-  return publicProfile(row as never);
+  const trust = await computeTrust(userId);
+  return publicProfile(row as never, trust);
 }
 
 export async function searchPeople(viewerId: string, rawQuery: string) {
@@ -68,7 +71,9 @@ export async function searchPeople(viewerId: string, rawQuery: string) {
     take: 20,
     orderBy: { createdAt: 'asc' },
   });
-  return rows.filter((row) => canFind(row, viewerId, row.userId)).map((row) => publicProfile(row as never));
+  const visible = rows.filter((row) => canFind(row, viewerId, row.userId));
+  const trustMap = await computeTrusts(visible.map((row) => row.userId));
+  return visible.map((row) => publicProfile(row as never, trustMap.get(row.userId) ?? DEFAULT_TRUST));
 }
 
 export async function createFriendInvite(userId: string, ttlHours = 24) {
@@ -92,7 +97,8 @@ export async function resolveFriendInvite(viewerId: string, token: string) {
     throw new AppError('NOT_FOUND', 'QR หมดอายุหรือถูกยกเลิกแล้ว', 404);
   }
   if (invite.ownerUserId === viewerId) throw new AppError('VALIDATION', 'ไม่สามารถเพิ่มตัวเองเป็นเพื่อนได้', 400);
-  return publicProfile(invite.owner as never);
+  const trust = await computeTrust(invite.ownerUserId);
+  return publicProfile(invite.owner as never, trust);
 }
 
 export async function sendFriendRequest(senderId: string, receiverId: string, message?: string) {
@@ -120,11 +126,16 @@ export async function listFriendRequests(userId: string) {
     orderBy: { createdAt: 'desc' },
     take: 100,
   });
-  return rows.map((row) => ({
-    ...serializeRequest(row),
-    direction: row.receiverId === userId ? 'incoming' : 'outgoing',
-    peer: publicProfile((row.receiverId === userId ? row.sender : row.receiver) as never),
-  }));
+  const peerIds = rows.map((row) => (row.receiverId === userId ? row.senderId : row.receiverId));
+  const trustMap = await computeTrusts(peerIds);
+  return rows.map((row) => {
+    const peer = row.receiverId === userId ? row.sender : row.receiver;
+    return {
+      ...serializeRequest(row),
+      direction: row.receiverId === userId ? 'incoming' : 'outgoing',
+      peer: publicProfile(peer as never, trustMap.get(peer.userId) ?? DEFAULT_TRUST),
+    };
+  });
 }
 
 export async function respondFriendRequest(userId: string, id: bigint, accept: boolean) {
@@ -159,5 +170,6 @@ export async function listContacts(userId: string) {
     include: { contact: { select: profileSelect } },
     orderBy: [{ isFavorite: 'desc' }, { createdAt: 'desc' }],
   });
-  return rows.map((row) => ({ id: row.id.toString(), nickname: row.nickname, isFavorite: row.isFavorite, createdAt: row.createdAt.toISOString(), profile: publicProfile(row.contact as never) }));
+  const trustMap = await computeTrusts(rows.map((row) => row.contact.userId));
+  return rows.map((row) => ({ id: row.id.toString(), nickname: row.nickname, isFavorite: row.isFavorite, createdAt: row.createdAt.toISOString(), profile: publicProfile(row.contact as never, trustMap.get(row.contact.userId) ?? DEFAULT_TRUST) }));
 }

@@ -23,6 +23,8 @@ import type { MediaAsset } from '@/modules/media/domain/mediaAsset';
 type NewPostInput = {
   /** Stable across retries from one composer session; server uses it to deduplicate. */
   clientPostId?: string;
+  /** Surface upload state on the optimistic feed item while the composer closes. */
+  background?: boolean;
   caption: string;
   price: number;
   channel: CommerceTier;
@@ -277,6 +279,7 @@ export const useFeedStore = create<FeedState>()(
       overlayTransform: input.overlayTransform,
       overlayStickers: input.overlayStickers,
       isUserPost: true,
+      publishStatus: input.background ? 'uploading' : undefined,
       product: {
         id: input.masterProductId ?? `p-user-${Date.now()}`,
 
@@ -409,6 +412,8 @@ export const useFeedStore = create<FeedState>()(
                 };
             return {
               ...next,
+              publishStatus: undefined,
+              publishError: undefined,
               imageUri: uploaded.imageUris[0] ?? next.imageUri,
               imageUris: uploaded.imageUris.length ? uploaded.imageUris : next.imageUris,
               videoUri: uploaded.videoUri ?? next.videoUri,
@@ -439,7 +444,14 @@ export const useFeedStore = create<FeedState>()(
         });
       }
     } catch (error) {
-      set((state) => ({ items: state.items.filter((item) => item.id !== id) }));
+      const message = error instanceof Error ? error.message : 'อัปโหลดไม่สำเร็จ';
+      set((state) => ({
+        items: input.background
+          ? state.items.map((item) => item.id === id
+            ? { ...item, publishStatus: 'failed', publishError: message }
+            : item)
+          : state.items.filter((item) => item.id !== id),
+      }));
       throw error;
     }
 

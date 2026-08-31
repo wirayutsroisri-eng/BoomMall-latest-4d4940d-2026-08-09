@@ -8,6 +8,7 @@ import { AppError } from '../../lib/errors';
 import { currentMediaUrl } from '../media/publicMediaUrl';
 import { validateUsername } from './UsernamePolicy';
 import { snowflakeIdForApi } from '../../config/snowflake';
+import { computeTrust, computeTrusts, DEFAULT_TRUST, type TrustInfo } from '../profile/TrustService';
 
 export const EULA_CHAT_C4 = 'APP_STORE_C4_CHAT';
 export const EULA_MARKETPLACE = 'MARKETPLACE_TERMS';
@@ -32,6 +33,7 @@ export type ProfileDto = {
   coverUrl?: string | null;
   email?: string | null;
   privacy?: ProfilePrivacy;
+  trust?: TrustInfo | null;
   updatedAt: string;
 };
 
@@ -97,7 +99,7 @@ function mapProfile(row: {
   email?: string | null;
   privacyJson?: unknown;
   updatedAt: Date;
-}): ProfileDto {
+}, trust: TrustInfo = DEFAULT_TRUST): ProfileDto {
   return {
     userId: row.userId,
     snowflakeId: snowflakeIdForApi(row.snowflakeId),
@@ -110,6 +112,7 @@ function mapProfile(row: {
     coverUrl: currentMediaUrl(row.coverUrl) ?? null,
     email: row.email ?? null,
     privacy: asPrivacy(row.privacyJson),
+    trust,
     updatedAt: row.updatedAt.toISOString(),
   };
 }
@@ -182,7 +185,7 @@ export async function upsertProfile(input: {
         privacyJson,
       },
     });
-    return mapProfile(row);
+    return mapProfile(row, await computeTrust(input.userId));
   });
 }
 
@@ -190,7 +193,7 @@ export async function getProfile(userId: string): Promise<ProfileDto | null> {
   return database(async () => {
     const row = await prisma.userProfile.findUnique({ where: { userId } });
     if (!row) return null;
-    return mapProfile(row);
+    return mapProfile(row, await computeTrust(userId));
   });
 }
 
@@ -209,7 +212,7 @@ export async function ensureProfileShopId(
     }
     if (existing.shopId) {
       await migrateLegacyMerchantIds(userId, existing.shopId);
-      return { ...mapProfile(existing), shopId: existing.shopId };
+      return { ...mapProfile(existing, await computeTrust(userId)), shopId: existing.shopId };
     }
 
     // updateMany makes concurrent logins safe: only the first request fills it.
@@ -222,7 +225,7 @@ export async function ensureProfileShopId(
       throw new AppError('DATABASE_UNAVAILABLE', 'ไม่สามารถสร้างรหัสร้านค้าได้', 503);
     }
     await migrateLegacyMerchantIds(userId, updated.shopId);
-    return { ...mapProfile(updated), shopId: updated.shopId };
+    return { ...mapProfile(updated, await computeTrust(userId)), shopId: updated.shopId };
   });
 }
 
@@ -243,7 +246,7 @@ export async function getProfileByEmail(email: string): Promise<(ProfileDto & { 
       where: { email: { equals: key, mode: 'insensitive' } },
     });
     if (!row) return null;
-    return { ...mapProfile(row), passwordHash: row.passwordHash ?? undefined };
+    return { ...mapProfile(row, await computeTrust(row.userId)), passwordHash: row.passwordHash ?? undefined };
   });
 }
 
@@ -309,7 +312,8 @@ export async function listProfiles(limit = 100) {
       orderBy: { updatedAt: 'desc' },
       take,
     });
-    return rows.map(mapProfile);
+    const trustMap = await computeTrusts(rows.map((row) => row.userId));
+    return rows.map((row) => mapProfile(row, trustMap.get(row.userId) ?? DEFAULT_TRUST));
   });
 }
 

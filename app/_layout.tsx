@@ -32,10 +32,10 @@ export default function RootLayout() {
         <Stack.Screen
           name="video-feed"
           options={{
-            presentation: 'card',
+            presentation: 'transparentModal',
             animation: 'none',
             gestureEnabled: false,
-            contentStyle: { backgroundColor: '#000' },
+            contentStyle: { backgroundColor: 'transparent' },
           }}
         />
         <Stack.Screen name="secondhand-create" options={{ presentation: 'fullScreenModal', ...dismissibleModalOptions, animation: 'slide_from_bottom' }} />

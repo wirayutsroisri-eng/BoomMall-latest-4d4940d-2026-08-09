@@ -75,6 +75,7 @@ export function SocialChannelScreen({ kind, active, onVerticalScroll }: Props) {
   const authHydrated = useAuthStore((state) => state.hydrated);
   const sessionToken = useAuthStore((state) => state.sessionToken);
   const authUserId = useAuthStore((state) => state.user?.id);
+  const authDisplayName = useAuthStore((state) => state.user?.displayName);
   const stories = useStoryStore((state) => state.stories);
   const refreshStories = useStoryStore((state) => state.refresh);
   const commentsRef = useRef<BottomSheetModal>(null);
@@ -222,6 +223,9 @@ export function SocialChannelScreen({ kind, active, onVerticalScroll }: Props) {
         ListHeaderComponent={kind === 'feed' ? (
           <FeedStatusRail
             stories={stories}
+            currentUserId={authUserId}
+            avatarUri={profile?.avatarUri ?? null}
+            displayName={profile?.displayName?.trim() || authDisplayName}
             onCreateStory={() => router.push('/story-create')}
             onOpenStory={(storyId) => router.push({ pathname: '/story-viewer', params: { storyId } })}
           />

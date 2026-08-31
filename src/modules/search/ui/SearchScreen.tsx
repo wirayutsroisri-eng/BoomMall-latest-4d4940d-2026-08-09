@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Avatar } from '@/shared/components/Avatar';
 import { colors } from '@/shared/theme/colors';
+import { TrustBadge } from '@/shared/components/TrustBadge';
 import { useRecordSearch } from '@/modules/account/ui/useRecordSearch';
 import type { SearchResult } from '@/modules/search/domain/types';
 import { searchFriendProfiles, sendFriendRequest } from '@/modules/search/data/friendApi';
@@ -41,6 +42,7 @@ export function SearchScreen() {
         avatarColor: colors.brand.primary,
         avatarUrl: row.avatarUrl,
         kind: 'friend',
+        trust: row.trust ?? null,
       })))).catch(() => setResults([]));
     }, 300);
     return () => clearTimeout(timer);
@@ -69,9 +71,7 @@ export function SearchScreen() {
         <View style={styles.rowBody}>
           <View style={styles.nameRow}>
             <Text style={styles.name} numberOfLines={1}>{item.displayName}</Text>
-            {item.verified ? (
-              <Ionicons name="checkmark-circle" size={14} color={colors.brand.primaryDark} />
-            ) : null}
+            <TrustBadge trust={item.trust ?? (item.verified ? { level: 3, badge: 'verified', label: 'ยืนยันตัวตนแล้ว' } : null)} size={14} />
           </View>
           <Text style={styles.subtitle} numberOfLines={1}>@{item.handle} · {item.subtitle}</Text>
         </View>

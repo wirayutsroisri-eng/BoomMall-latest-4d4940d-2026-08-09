@@ -1,9 +1,11 @@
-import React from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
+import QRCode from 'react-native-qrcode-svg';
 import { DragDownDismiss } from '@/shared/components/DragDownDismiss';
 import { colors } from '@/shared/theme/colors';
+import { createFriendInvite, getMyFriendIdentity } from '@/modules/search/data/friendApi';
 
 type Props = {
   visible: boolean;
@@ -14,7 +16,36 @@ type Props = {
 
 /** Current-user QR card. Closable by drag-down or the X. */
 export function MyQrSheet({ visible, displayName, handle, onClose }: Props) {
-  const label = handle.replace(/^@/, '') || displayName || 'boommall';
+  const rawHandle = handle.replace(/^@/, '') || displayName || '';
+  const [deepLink, setDeepLink] = useState<string | null>(null);
+  const [friendCode, setFriendCode] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+  const [inviteError, setInviteError] = useState(false);
+  // ถ้ายังไม่มี username (fallback 'me') ให้ใช้รหัสเพื่อนที่จำง่ายแทน
+  const isFallbackHandle = !rawHandle || rawHandle === 'me';
+  const label = (isFallbackHandle && friendCode ? friendCode : rawHandle) || 'boommall';
+
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    setDeepLink(null);
+    setFriendCode('');
+    setLoading(true);
+    setInviteError(false);
+    void Promise.all([createFriendInvite(), getMyFriendIdentity()])
+      .then(([invite, me]) => {
+        if (cancelled) return;
+        setDeepLink(invite.deepLink);
+        setFriendCode(me.friendCode);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setInviteError(true);
+        Alert.alert('สร้าง QR Code ไม่สำเร็จ', error instanceof Error ? error.message : 'กรุณาลองใหม่');
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [visible]);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -31,7 +62,13 @@ export function MyQrSheet({ visible, displayName, handle, onClose }: Props) {
             </View>
             <View style={styles.card}>
               <View style={styles.qrFrame}>
-                <Ionicons name="qr-code" size={148} color={colors.brand.ink} />
+                {loading
+                  ? <ActivityIndicator color={colors.brand.ink} />
+                  : inviteError
+                    ? <Ionicons name="alert-circle-outline" size={44} color={colors.text.muted} />
+                    : deepLink
+                      ? <QRCode value={deepLink} size={150} color={colors.brand.ink} backgroundColor="#FFFFFF" />
+                      : null}
               </View>
               <Text style={styles.name} numberOfLines={1}>
                 {displayName || 'BoomMall'}
@@ -39,7 +76,12 @@ export function MyQrSheet({ visible, displayName, handle, onClose }: Props) {
               <Text style={styles.handle} numberOfLines={1}>
                 @{label}
               </Text>
-              <Text style={styles.hint}>ให้เพื่อนหรือร้านค้าสแกนเพื่อเริ่มแชท</Text>
+              {friendCode ? (
+                <Text style={styles.friendCode} numberOfLines={1}>
+                  รหัสเพื่อน: {friendCode}
+                </Text>
+              ) : null}
+              <Text style={styles.hint}>ให้เพื่อนสแกน QR หรือพิมพ์รหัสเพื่อนเพื่อขอเป็นเพื่อน</Text>
             </View>
           </DragDownDismiss>
         </View>
@@ -104,6 +146,16 @@ const styles = StyleSheet.create({
     marginTop: 4,
     color: colors.text.secondary,
     fontWeight: '700',
+    fontSize: 13,
+  },
+  friendCode: {
+    marginTop: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 10,
+    backgroundColor: colors.brand.mist,
+    color: colors.brand.ink,
+    fontWeight: '800',
     fontSize: 13,
   },
   hint: {

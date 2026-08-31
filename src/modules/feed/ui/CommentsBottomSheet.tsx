@@ -466,6 +466,7 @@ export const CommentsBottomSheet = forwardRef<BottomSheetModal, Props>(
         keyboardBehavior="extend"
         keyboardBlurBehavior="none"
         android_keyboardInputMode="adjustResize"
+        containerStyle={{ zIndex: 1000, elevation: 1000 }}
         onDismiss={resetSheet}
       >
         <View style={styles.header}>

@@ -1,4 +1,4 @@
-import React, { forwardRef, useCallback, useMemo, useState } from 'react';
+import React, { forwardRef, useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -20,6 +20,8 @@ import { normalizeAuthorHandle } from '@/modules/feed/domain/selectFeedByAuthor'
 import { buildCreatorPortfolio } from '@/modules/profile/data/creatorPortfolio';
 import type { FeedItem } from '@/modules/feed/domain/types';
 import { Avatar } from '@/shared/components/Avatar';
+import { TrustBadge, type TrustInfo } from '@/shared/components/TrustBadge';
+import { searchFriendProfiles } from '@/modules/search/data/friendApi';
 import { ReportBlockSheet } from '@/modules/safety/ui/ReportBlockSheet';
 import { useModerationStore } from '@/modules/safety/state/moderation-store';
 import { colors } from '@/shared/theme/colors';
@@ -155,6 +157,16 @@ function CreatorProfileBody({
   const blockUser = useModerationStore((s) => s.blockUser);
   const [tab, setTab] = useState<VisitorTab>('store');
   const [reportOpen, setReportOpen] = useState(false);
+  const [trust, setTrust] = useState<TrustInfo | null>(null);
+
+  useEffect(() => {
+    const query = handle.replace(/^@/, '').toLowerCase();
+    if (query.length < 3) return;
+    void searchFriendProfiles(query).then((rows) => {
+      const exact = rows.find((r) => (r.handle ?? '').replace(/^@/, '').toLowerCase() === query);
+      setTrust((exact ?? rows[0])?.trust ?? null);
+    }).catch(() => undefined);
+  }, [handle]);
 
   const ownerKey = normalizeAuthorHandle(handle ?? '');
   const realCreatorItems = useMemo(
@@ -291,6 +303,7 @@ function CreatorProfileBody({
         <Text style={styles.displayName} numberOfLines={1}>
           {displayName}
         </Text>
+        <TrustBadge trust={trust} showLabel />
         <Text style={styles.handleCentered} numberOfLines={1}>
           {displayHandle}
         </Text>
