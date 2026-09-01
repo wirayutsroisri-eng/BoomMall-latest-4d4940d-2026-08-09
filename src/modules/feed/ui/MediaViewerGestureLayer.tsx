@@ -131,10 +131,9 @@ export function MediaViewerGestureLayer({
 
   const dismiss = Gesture.Pan()
     .enabled(active)
-    // Let the native recognizer decide direction. A 2px threshold is effectively
-    // immediate without mutating animation values while the gesture is undecided.
-    .activeOffsetY(2)
-    .failOffsetX([-12, 12])
+    // ต้องลากลงชัดเจน (~18px) ก่อนจางพื้นดำ — กันแตะนิดเดียวแล้วดำหาย
+    .activeOffsetY(18)
+    .failOffsetX([-24, 24])
     .onUpdate((event) => {
       if (scale.value > 1.03) return;
       dismissY.value = Math.max(0, event.translationY);
@@ -145,11 +144,11 @@ export function MediaViewerGestureLayer({
         return;
       }
       if (dismissY.value > SCREEN_H * 0.16 || event.velocityY > 1050) {
-        dismissY.value = withTiming(SCREEN_H, { duration: 190 }, (done) => {
+        dismissY.value = withTiming(SCREEN_H, { duration: 220 }, (done) => {
           if (done) runOnJS(finishDismiss)();
         });
       } else {
-        dismissY.value = withSpring(0, { damping: 24, stiffness: 240, mass: 0.75 });
+        dismissY.value = withTiming(0, { duration: 200 });
       }
     });
 

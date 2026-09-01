@@ -7,7 +7,7 @@ import type { MusicTrack } from '../domain/types';
 /**
  * “ใช้เสียงนี้” — attach audio (and music-video uri when present) to create draft.
  */
-export function useThisSound(track: MusicTrack) {
+export function applyThisSound(track: MusicTrack) {
   void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   const mediaKind = track.mediaKind === 'video' ? 'video' : 'audio';
   useCreateDraftStore.getState().setDraft({
@@ -39,6 +39,6 @@ export function confirmUseThisSound(track: MusicTrack) {
       : `นำ「${track.title}」ไปเป็นเสียงประกอบตอนสร้างคลิป`;
   Alert.alert('ใช้เสียงนี้?', body, [
     { text: 'ยกเลิก', style: 'cancel' },
-    { text: 'ใช้เสียงนี้', onPress: () => useThisSound(track) },
+    { text: 'ใช้เสียงนี้', onPress: () => applyThisSound(track) },
   ]);
 }

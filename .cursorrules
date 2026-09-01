@@ -1,3 +1,9 @@
+# Output & Editing Style (Strict)
+- Be extremely concise. Avoid conversational filler and greetings.
+- Do NOT rewrite entire files.
+- Provide targeted diffs or update only the requested functions/code lines.
+- Use placeholders like `// ... existing code ...` for unchanged logic.
+- Only explain the changes if explicitly asked.
 # Expo HAS CHANGED
 
 Read the exact versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing any code.

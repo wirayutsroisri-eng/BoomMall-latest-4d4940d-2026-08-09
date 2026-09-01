@@ -965,7 +965,7 @@ function VoiceBubble({ message, mine }: { message: ChatMessage; mine: boolean })
           />
         ))}
       </View>
-      <Text style={[styles.voiceDuration, mine && styles.textMine]}>{duration}"</Text>
+      <Text style={[styles.voiceDuration, mine && styles.textMine]}>{duration}&quot;</Text>
     </View>
   );
 }

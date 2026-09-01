@@ -8,7 +8,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { Keyboard, Platform, Pressable, StyleSheet, Text, View, Alert } from 'react-native';
+import { Keyboard, Platform, Pressable, StyleSheet, Text, View, Alert, type ViewProps } from 'react-native';
 import {
   BottomSheetBackdrop,
   BottomSheetFlatList,
@@ -18,6 +18,7 @@ import {
   type BottomSheetBackdropProps,
   type BottomSheetFooterProps,
 } from '@gorhom/bottom-sheet';
+import { FullWindowOverlay } from 'react-native-screens';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -447,6 +448,18 @@ export const CommentsBottomSheet = forwardRef<BottomSheetModal, Props>(
         });
     }, [feedId, loadComments]);
 
+    // video-feed ใช้ presentation: transparentModal — BottomSheetModal พอร์ทัลไปที่
+    // root provider จึงอยู่หลัง native modal. FullWindowOverlay ดึงชีตขึ้นเหนือ modal (iOS)
+    const sheetContainer = useCallback(
+      ({ children }: ViewProps) =>
+        Platform.OS === 'ios' ? (
+          <FullWindowOverlay>{children}</FullWindowOverlay>
+        ) : (
+          <>{children}</>
+        ),
+      [],
+    );
+
     return (
       <>
       <BottomSheetModal
@@ -466,6 +479,7 @@ export const CommentsBottomSheet = forwardRef<BottomSheetModal, Props>(
         keyboardBehavior="extend"
         keyboardBlurBehavior="none"
         android_keyboardInputMode="adjustResize"
+        containerComponent={sheetContainer}
         containerStyle={{ zIndex: 1000, elevation: 1000 }}
         onDismiss={resetSheet}
       >

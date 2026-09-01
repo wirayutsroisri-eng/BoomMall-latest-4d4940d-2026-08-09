@@ -63,6 +63,13 @@ import { MediaViewer } from './MediaViewer';
 /** ซ้าย → ขวา ตามหัวแท็บ: หางาน | ใกล้คุณ | กำลังติดตาม | สำหรับคุณ */
 const TAB_ORDER: FeedTab[] = ['board', 'nearby', 'following', 'foryou'];
 
+/** ความสูงแถบคอมเมนต์หน้าคลิป — seek bar วางบนขอบบนของบาร์นี้ */
+const COMMENT_DOCK_PAD_TOP = 10;
+const COMMENT_DOCK_ROW = 44;
+const COMMENT_DOCK_MIN = 68;
+/** `FeedSeekBar` ใช้ `bottom: 10 + bottomOffset` */
+const SEEK_BAR_BASE_BOTTOM = 10;
+
 function openCreatorRoute(handle: string, feedId?: string) {
   const h = handle.replace(/^@/, '');
   if (!h) return;
@@ -338,6 +345,11 @@ export function HomeFeedScreen({
     const h = e.nativeEvent.layout.height;
     if (h > 0 && h !== viewportHeight) setViewportHeight(h);
   };
+  const commentDockPadBottom = Math.max(insets.bottom, 10);
+  const commentDockHeight = Math.max(
+    COMMENT_DOCK_MIN,
+    COMMENT_DOCK_PAD_TOP + COMMENT_DOCK_ROW + commentDockPadBottom,
+  );
   const reelBottomInset = videoOnly ? 76 + insets.bottom : channelEmbedded ? 40 : 0;
 
   const renderLaneItem = useCallback(
@@ -375,7 +387,7 @@ export function HomeFeedScreen({
         onCommitTabIndex={commitTabIndex}
         bottomMetaInset={reelBottomInset}
         bottomActionsInset={reelBottomInset}
-        bottomSeekInset={videoOnly ? 70 + insets.bottom : channelEmbedded ? 5 : 0}
+        bottomSeekInset={videoOnly ? commentDockHeight - SEEK_BAR_BASE_BOTTOM : channelEmbedded ? 5 : 0}
         initialPlaybackTime={videoOnly && item.id === initialFeedId ? initialPlaybackTime : 0}
       />
     ),
@@ -393,6 +405,7 @@ export function HomeFeedScreen({
       pagerX,
       laneOrder.length,
       promotedMasters,
+      commentDockHeight,
       reelBottomInset,
       initialFeedId,
       initialPlaybackTime,
@@ -523,13 +536,12 @@ export function HomeFeedScreen({
         ) : null}
       </View>
 
-      {/* แถบแสดงความคิดเห็น (commentDock) ด้านล่างเฉพาะหน้า video เต็มจอ — ติดขอบล่างสุด
-          seek bar จะถูก `bottomSeekInset` ในการ์ดเลื่อนขึ้นให้อยู่เหนือ dock นี้ */}
+      {/* แถบคอมเมนต์หน้าคลิป — seek bar วางติดขอบบนของบาร์นี้ */}
       {videoOnly && activeItemId ? (
         <View
           style={[
             styles.commentDock,
-            { paddingBottom: Math.max(insets.bottom, 10) },
+            { paddingBottom: commentDockPadBottom },
           ]}
         >
           <Pressable
@@ -688,19 +700,17 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     zIndex: 24,
-    minHeight: 68,
-    paddingTop: 10,
+    minHeight: COMMENT_DOCK_MIN,
+    paddingTop: COMMENT_DOCK_PAD_TOP,
     paddingHorizontal: 14,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     backgroundColor: 'rgba(8,8,8,0.96)',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.16)',
   },
   commentComposer: {
     flex: 1,
-    minHeight: 44,
+    minHeight: COMMENT_DOCK_ROW,
     borderRadius: 24,
     justifyContent: 'center',
     paddingHorizontal: 17,

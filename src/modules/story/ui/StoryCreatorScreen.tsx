@@ -95,7 +95,7 @@ export function StoryCreatorScreen() {
     }
   }, []);
 
-  const useCapturedMedia = useCallback((uri: string, type: StoryMediaType) => {
+  const handleCapturedMedia = useCallback((uri: string, type: StoryMediaType) => {
     setOverlay(null);
     setEditingText(false);
     setText('');
@@ -129,17 +129,17 @@ export function StoryCreatorScreen() {
     try {
       if (captureMode === 'image') {
         const uri = await liveCameraRef.current?.takePhoto();
-        if (uri) useCapturedMedia(uri, 'image');
+        if (uri) handleCapturedMedia(uri, 'image');
       } else {
         setRecording(true);
         const uri = await liveCameraRef.current?.startRecording(60);
-        if (uri) useCapturedMedia(uri, 'video');
+        if (uri) handleCapturedMedia(uri, 'video');
       }
     } finally {
       setRecording(false);
       setCapturing(false);
     }
-  }, [cameraGranted, cameraReady, captureMode, capturing, liveModule, openSystemCamera, recording, useCapturedMedia]);
+  }, [cameraGranted, cameraReady, captureMode, capturing, liveModule, openSystemCamera, recording, handleCapturedMedia]);
 
   const addText = () => {
     const value = text.trim();

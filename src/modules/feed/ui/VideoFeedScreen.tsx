@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { Dimensions, Pressable, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -16,29 +16,48 @@ import { DragDownDismiss } from '@/shared/components/DragDownDismiss';
 import { HomeFeedScreen } from './HomeFeedScreen';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
+const ENTER_MS = 360;
+const enterEasing = Easing.bezier(0.22, 1, 0.36, 1);
 
 export function VideoFeedScreen() {
   const insets = useSafeAreaInsets();
   const scrollY = useSharedValue(0);
   const swipeX = useSharedValue(0);
   const closing = useSharedValue(false);
+  /** 0→1 หลัง mount — ใช้ขยายเข้าจอ ไม่ใส่ opacity ค้างบน VideoView */
+  const enter = useSharedValue(0);
+  const entered = useSharedValue(false);
   const { feedId, startTime } = useLocalSearchParams<{ feedId?: string; startTime?: string }>();
   const initialPlaybackTime = Number.isFinite(Number(startTime)) ? Math.max(0, Number(startTime)) : 0;
+
+  useEffect(() => {
+    entered.value = false;
+    enter.value = 0;
+    const id = requestAnimationFrame(() => {
+      enter.value = withTiming(1, { duration: ENTER_MS, easing: enterEasing }, (finished) => {
+        if (finished) entered.value = true;
+      });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [enter, entered]);
+
   const dismiss = useCallback(() => {
     if (router.canGoBack()) router.back();
     else router.replace('/(tabs)');
   }, []);
+
   const closeToRight = useCallback(() => {
     if (closing.value) return;
     closing.value = true;
     swipeX.value = withTiming(
       SCREEN_WIDTH,
-      { duration: 230, easing: Easing.out(Easing.cubic) },
+      { duration: 240, easing: Easing.out(Easing.cubic) },
       (finished) => {
         if (finished) runOnJS(dismiss)();
       },
     );
   }, [closing, dismiss, swipeX]);
+
   const swipeBackGesture = Gesture.Pan()
     .cancelsTouchesInView(false)
     .activeOffsetX(12)
@@ -52,36 +71,38 @@ export function VideoFeedScreen() {
         closing.value = true;
         swipeX.value = withTiming(
           SCREEN_WIDTH,
-          { duration: 210, easing: Easing.out(Easing.cubic) },
+          { duration: 220, easing: Easing.out(Easing.cubic) },
           (finished) => {
             if (finished) runOnJS(dismiss)();
           },
         );
       } else {
-        swipeX.value = withTiming(0, { duration: 160, easing: Easing.out(Easing.cubic) });
+        swipeX.value = withTiming(0, { duration: 180, easing: Easing.out(Easing.cubic) });
       }
     });
+
   const swipeStyle = useAnimatedStyle(() => {
-    // ตอน idle ต้องไม่มี transform/opacity เด็ดขาด ไม่งั้น VideoView (textureView)
-    // จะถูกดึงขึ้นไปอยู่เหนือ Modal ของคอมเมนต์ (iOS offscreen layer)
+    // idle หลังเข้าจอแล้ว: ไม่มี opacity/transform — กัน VideoView ทับชีตคอมเมนต์
+    if (swipeX.value === 0 && entered.value) {
+      return {};
+    }
     if (swipeX.value === 0) {
-      return { opacity: 1 };
+      // ตอนกำลังเข้าจอ: ขยายจาก 0.88 → 1 (ไม่มี opacity flash)
+      return {
+        transform: [{ scale: interpolate(enter.value, [0, 1], [0.88, 1], 'clamp') }],
+      };
     }
     return {
-      opacity: interpolate(swipeX.value, [0, SCREEN_WIDTH], [1, 0.9], 'clamp'),
+      opacity: interpolate(swipeX.value, [0, SCREEN_WIDTH], [1, 0.88], 'clamp'),
       transform: [
         { translateX: swipeX.value },
-        { scale: interpolate(swipeX.value, [0, SCREEN_WIDTH], [1, 0.985], 'clamp') },
+        { scale: interpolate(swipeX.value, [0, SCREEN_WIDTH], [1, 0.96], 'clamp') },
       ],
     };
   });
-  const backdropStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(swipeX.value, [0, SCREEN_WIDTH], [0.32, 0], 'clamp'),
-  }));
 
   return (
     <View style={styles.routeRoot}>
-      <Animated.View pointerEvents="none" style={[styles.backdrop, backdropStyle]} />
       <GestureDetector gesture={swipeBackGesture}>
         <Animated.View style={[styles.root, swipeStyle]}>
           <DragDownDismiss onDismiss={dismiss} scrollY={scrollY} style={styles.root}>
@@ -120,11 +141,8 @@ export function VideoFeedScreen() {
 }
 
 const styles = StyleSheet.create({
-  routeRoot: { flex: 1, backgroundColor: 'transparent' },
-  backdrop: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: '#000',
-  },
+  // ดำทึบทันทีตั้งแต่เฟรมแรก — ไม่โปร่งใสให้ฟีดโผล่
+  routeRoot: { flex: 1, backgroundColor: '#000' },
   root: { flex: 1, backgroundColor: '#000' },
   header: {
     position: 'absolute',
