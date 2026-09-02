@@ -21,6 +21,7 @@ import * as Haptics from 'expo-haptics';
 import { masterContentImage } from '@/modules/commerce/data/catalog';
 import { displayMediaUri } from '@/modules/commerce/data/product-media';
 import { useInventoryStore } from '@/modules/commerce/state/inventory-store';
+import { fetchCatalogBundle, type CatalogBundle } from '@/modules/commerce/data/commerceApi';
 import { useCartStore } from '@/modules/commerce/state/cart-store';
 import type { MasterSku, SkuVariant, WarehouseId } from '@/modules/commerce/domain/types';
 import { thumbnailUriOf } from '@/modules/commerce/domain/product-media';
@@ -167,14 +168,44 @@ export function ProductDetailScreen() {
   const shopVoucherOn = useCheckoutStore((s) => s.shopVoucherOn);
   const platformVoucherOn = useCheckoutStore((s) => s.platformVoucherOn);
 
-  const master = useMemo(
+  const localMaster = useMemo(
     () => masters.find((m) => m.id === productId) ?? null,
     [masters, productId],
   );
-  const itemVariants = useMemo(
+  const localVariants = useMemo(
     () => variants.filter((v) => v.masterSkuId === productId && v.status !== 'hidden'),
     [variants, productId],
   );
+
+  /**
+   * สินค้าที่ปักตะกร้าไว้ในโพสต์อาจเป็นของร้านอื่น ซึ่งไม่มีในคลังของเครื่องนี้
+   * จึงดึงจากเซิร์ฟเวอร์มาแสดงแบบอ่านอย่างเดียว ไม่เขียนทับคลังของผู้ใช้
+   */
+  const [remoteBundle, setRemoteBundle] = useState<CatalogBundle | null>(null);
+  useEffect(() => {
+    if (!productId || localMaster) {
+      setRemoteBundle(null);
+      return;
+    }
+    let cancelled = false;
+    fetchCatalogBundle(productId)
+      .then((res) => {
+        if (!cancelled) setRemoteBundle(res.data ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setRemoteBundle(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [localMaster, productId]);
+
+  const master = localMaster ?? (remoteBundle?.product as MasterSku | undefined) ?? null;
+  const itemVariants = useMemo(() => {
+    if (localVariants.length) return localVariants;
+    const remote = (remoteBundle?.variants ?? []) as SkuVariant[];
+    return remote.filter((v) => v.status !== 'hidden');
+  }, [localVariants, remoteBundle]);
 
   const [variantId, setVariantId] = useState<string | null>(null);
   const [qtyById, setQtyById] = useState<Record<string, number>>({});

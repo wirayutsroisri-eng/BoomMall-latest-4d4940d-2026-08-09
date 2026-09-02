@@ -13,6 +13,7 @@
     "prisma:migrate": "tsx scripts/run-prisma.ts migrate dev",
     "prisma:deploy": "tsx scripts/run-prisma.ts migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
+    "feed:rollup": "tsx src/cli/feed-rollup.ts",
     "db:reset": "tsx scripts/run-prisma.ts migrate reset --force",
     "db:certs": "bash scripts/generate-db-certs.sh",
     "db:backup": "bash scripts/backup.sh",

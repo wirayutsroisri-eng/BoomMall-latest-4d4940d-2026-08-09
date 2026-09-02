@@ -160,6 +160,23 @@ financeAdminRouter.put('/settings', async (req, res, next) => {
       ok: true,
       data: await updatePlatformSettings({
         defaultGpPercent: body.defaultGpPercent != null ? Number(body.defaultGpPercent) : undefined,
+        vatPercent: body.vatPercent != null ? Number(body.vatPercent) : undefined,
+        vatRegistered: body.vatRegistered != null ? Boolean(body.vatRegistered) : undefined,
+        vatEffectiveFrom:
+          body.vatEffectiveFrom === undefined
+            ? undefined
+            : body.vatEffectiveFrom
+              ? String(body.vatEffectiveFrom)
+              : null,
+        companyTaxId:
+          body.companyTaxId === undefined ? undefined : body.companyTaxId ? String(body.companyTaxId) : null,
+        companyLegalName:
+          body.companyLegalName === undefined
+            ? undefined
+            : body.companyLegalName
+              ? String(body.companyLegalName)
+              : null,
+        whtPercent: body.whtPercent != null ? Number(body.whtPercent) : undefined,
         autoCompleteDays: body.autoCompleteDays != null ? Number(body.autoCompleteDays) : undefined,
         payoutMode: body.payoutMode != null ? String(body.payoutMode) : undefined,
         autoPayoutMaxLimit:

@@ -64,6 +64,8 @@ type NewPostInput = {
    * via keyword heuristics. Board forms pass 'board'; content passes 'content'.
    */
   intent?: 'content' | 'board' | 'sell';
+  /** ปักตะกร้า — สินค้าจริงจากคลังของผู้โพสต์ */
+  products?: Array<{ productId: string; skuId?: string; mediaId?: string; x?: number; y?: number }>;
   /** Sound from Listen Mode “ใช้เสียงนี้” */
   musicTitle?: string;
   locationLabel?: string;
@@ -383,6 +385,7 @@ export const useFeedStore = create<FeedState>()(
         locationLabel: newItem.location,
         tags: newItem.product.tags,
         lane: newItem.lane,
+        products: input.products,
       });
       if (!saved) throw new Error('FEED_PUBLISH_FAILED');
       const auth = useAuthStore.getState().user;

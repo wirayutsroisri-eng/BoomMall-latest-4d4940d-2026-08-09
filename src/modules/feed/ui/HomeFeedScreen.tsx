@@ -28,6 +28,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
+import { trackFeedSignal } from '@/modules/feed/data/feedEventQueue';
 import { ContentRefreshOverlay } from '@/shared/components/ContentRefreshOverlay';
 import { withMinimumDuration } from '@/shared/utils/minimumDuration';
 import { useCallStore } from '@/modules/chat/state/call-store';
@@ -301,6 +302,12 @@ export function HomeFeedScreen({
         return;
       }
       openComments(feedId);
+      trackFeedSignal({
+        itemId: feedId,
+        rootId: allItemsRef.current.find((i) => i.id === feedId)?.rootPostId,
+        type: 'engage',
+        action: 'comment',
+      });
       requestAnimationFrame(() => commentsSheetRef.current?.present());
     },
     [authHydrated, authenticated, openComments],
@@ -323,6 +330,9 @@ export function HomeFeedScreen({
       const nextLiked = !item.liked;
       toggleLike(item.id);
       void syncFeedLike(item.id, nextLiked);
+      if (nextLiked) {
+        trackFeedSignal({ itemId: item.id, rootId: item.rootPostId, type: 'engage', action: 'like' });
+      }
     },
     [authHydrated, authenticated, toggleLike],
   );

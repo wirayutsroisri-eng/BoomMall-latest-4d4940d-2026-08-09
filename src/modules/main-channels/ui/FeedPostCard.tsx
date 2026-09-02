@@ -17,6 +17,7 @@ import type { FeedItem } from '@/modules/feed/domain/types';
 import { FeedPinchZoomLayer } from '@/modules/feed/ui/FeedPinchZoomLayer';
 import { FeedSeekBar } from '@/modules/feed/ui/FeedSeekBar';
 import { FeedVideoLayer } from '@/modules/feed/ui/FeedVideoLayer';
+import { PostProductBar } from '@/modules/feed/ui/PostProductBar';
 import { MultiImageGrid } from '@/modules/feed/ui/MultiImageGrid';
 import { openFeedMediaViewer } from '@/modules/feed/state/feed-media-viewer-store';
 import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
@@ -332,6 +333,12 @@ export const FeedPostCard = memo(function FeedPostCard({
         ) : null}
       </View> : null}
 
+      {item.products?.length ? (
+        <View style={styles.productBlock}>
+          <PostProductBar products={item.products} itemId={item.id} rootId={item.rootPostId} />
+        </View>
+      ) : null}
+
       {item.videoUri ? (
         <View ref={videoBoxRef} style={[styles.media, { height: feedVideoHeight }]}>
           <FeedPinchZoomLayer resetKey={item.id} enabled={videoReady} contentGesture={videoTapGesture}>
@@ -468,6 +475,7 @@ const styles = StyleSheet.create({
   meta: { color: '#707A75', fontSize: 12, marginTop: 2 },
   metaFailed: { color: '#C62828', fontWeight: '800' },
   captionBlock: { paddingHorizontal: 12, paddingBottom: 10 },
+  productBlock: { paddingHorizontal: 12, paddingBottom: 10 },
   caption: { color: '#202824', fontSize: 15, lineHeight: 21 },
   moreText: { color: '#65716B', fontSize: 13, fontWeight: '700', marginTop: 3 },
   typeBadge: { alignSelf: 'flex-start', marginLeft: 14, marginBottom: 8, backgroundColor: '#DDF3EA', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 999 },

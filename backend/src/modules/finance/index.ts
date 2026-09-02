@@ -1,18 +1,15 @@
+// เส้นทางเงินจริงทั้งหมดอยู่ที่ EscrowService — ฟังก์ชันกระเป๋าชุดเก่าใน FinanceService
+// (requestWithdraw / releaseSettlement / reverseSettlement) ไม่ถูก export อีกต่อไป
+// เพราะมันแตะยอดคนละชุดกับ escrow ถ้านำมาต่อ route จะทำให้ยอดร้านเพี้ยน
 export {
-  calculateSettlement,
   settleOrder,
-  releaseSettlement,
-  reverseSettlement,
   getSellerWallet,
   saveBankAccount,
-  requestWithdraw,
   listPendingWithdrawals,
-  approveWithdrawal,
   getTaxSummary,
   financeDomainStatus,
   VAT_RATE,
   WHT_RATE,
-  DEFAULT_GP_RATE,
 } from './FinanceService';
 export {
   holdEscrowOnPayment,
@@ -25,6 +22,7 @@ export {
   getSellerFinanceDashboard,
   getPlatformRevenue,
   startEscrowAutoCompleteJob,
+  reconcilePaidOrders,
 } from './services/EscrowService';
 export { getPlatformSettings, updatePlatformSettings } from './services/PlatformSettingsService';
 export {

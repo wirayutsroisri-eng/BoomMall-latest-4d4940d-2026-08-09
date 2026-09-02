@@ -34,6 +34,8 @@ import { FeedSeekBar } from './FeedSeekBar';
 import { FeedPinchZoomLayer } from './FeedPinchZoomLayer';
 import { FeedMediaRenderer } from './FeedMediaRenderer';
 import { ExpandableCaption } from './ExpandableCaption';
+import { useFeedItemSignals } from '@/modules/feed/data/useFeedItemSignals';
+import { PostProductBar } from './PostProductBar';
 import { IOS_SPRING, clampPagerX, snapPagerIndex } from './feedMotion';
 import { hasFeedMusic } from '@/modules/feed/domain/feedMusic';
 import { openFeedMediaViewer } from '@/modules/feed/state/feed-media-viewer-store';
@@ -247,6 +249,14 @@ export function FeedReelCard({
     setIsPaused(false);
     isScrubbingRef.current = false;
   }, [item.id]);
+
+  // Report what the viewer actually watched (impression → watch/skip).
+  useFeedItemSignals({
+    itemId: item.id,
+    rootId: item.rootPostId ?? item.id,
+    isActive: Boolean(isActive),
+    durationSec: duration,
+  });
 
   // Drive the seek bar from the player's real time updates.
   useEffect(() => {
@@ -677,6 +687,17 @@ export function FeedReelCard({
               onExpandedChange={setCaptionExpanded}
             />
 
+            {!captionExpanded ? (
+              <View style={styles.productBar}>
+                <PostProductBar
+                  products={item.products}
+                  itemId={item.id}
+                  rootId={item.rootPostId}
+                  tone="dark"
+                />
+              </View>
+            ) : null}
+
             {hasMusic && !captionExpanded ? (
               <Pressable onPress={openListenMode} hitSlop={6}>
                 <Text style={styles.music} numberOfLines={1}>
@@ -746,6 +767,7 @@ export function FeedReelCard({
 
 
 const styles = StyleSheet.create({
+  productBar: { marginTop: 8 },
   card: {
     width: '100%',
     backgroundColor: colors.brand.ink,

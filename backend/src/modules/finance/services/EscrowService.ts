@@ -9,6 +9,8 @@ import { prisma } from '../../../lib/prisma';
 import { AppError } from '../../../lib/errors';
 import { getPaymentGateway } from '../../ecommerce/PspGateway';
 import { quoteEscrow, toSatang, toThb } from '../domain/escrowMath';
+import { resolveEffectiveGpBps } from '../../ecommerce/GpLedgerService';
+import { effectiveTaxRates } from '../domain/taxPolicy';
 import { assertBankCoolingOff, assertWithdrawPin, bankCoolingRemainingMs, remainingLockMs } from './PaymentPinService';
 import { getPlatformSettings } from './PlatformSettingsService';
 import {
@@ -43,12 +45,19 @@ export async function ensureStore(storeId: string, name?: string) {
   });
 }
 
-export async function resolveStoreGpPercent(storeId: string) {
-  const [settings, store] = await Promise.all([
-    getPlatformSettings(),
-    prisma.store.findUnique({ where: { id: storeId } }),
-  ]);
-  return store?.customGpPercent ?? settings.defaultGpPercent;
+/**
+ * อัตรา GP มาจาก MarketplaceGpPolicy ที่เดียว (ผ่าน resolveEffectiveGpBps)
+ * ค่า PlatformSettings.defaultGpPercent เหลือไว้เป็น fallback เฉพาะตอนตาราง policy
+ * ยังไม่พร้อมเท่านั้น — ไม่ใช่แหล่งอัตราอีกต่อไป
+ */
+export async function resolveStoreGpPercent(storeId: string, channel?: string | null) {
+  try {
+    const resolved = await resolveEffectiveGpBps({ storeId, channel });
+    return resolved.bps / 100;
+  } catch {
+    const settings = await getPlatformSettings();
+    return settings.defaultGpPercent;
+  }
 }
 
 async function writeLedger(
@@ -104,21 +113,34 @@ export async function holdEscrowOnPayment(input: {
   merchandiseThb: number;
   shippingFeeThb?: number;
   storeName?: string;
+  /** อัตราที่ตอนคิดราคาใช้ไปแล้ว — ส่งมาเพื่อไม่ให้คิดใหม่แล้วได้คนละค่า */
+  gpPercent?: number;
+  channel?: string | null;
+  /** ทำงานร่วมธุรกรรมของผู้เรียก เพื่อให้ออเดอร์กับ escrow เกิดหรือไม่เกิดพร้อมกัน */
+  tx?: Tx;
 }) {
   const existing = await prisma.orderEscrow.findUnique({ where: { orderId: input.orderId } });
   if (existing) return existing;
 
   const settings = await getPlatformSettings();
   await ensureStore(input.storeId, input.storeName);
-  const gpPercent = await resolveStoreGpPercent(input.storeId);
+  const store = await prisma.store.findUnique({
+    where: { id: input.storeId },
+    select: { isCorporate: true },
+  });
+  const gpPercent = input.gpPercent ?? (await resolveStoreGpPercent(input.storeId, input.channel));
+  // VAT คิดตามวันที่จ่ายจริง และเฉพาะเมื่อจดทะเบียนแล้ว — ดู taxPolicy
+  const rates = effectiveTaxRates(settings, { sellerIsCorporate: Boolean(store?.isCorporate) });
   const quote = quoteEscrow({
     merchandiseThb: input.merchandiseThb,
     shippingFeeThb: input.shippingFeeThb,
     gpPercent,
+    vatPercent: rates.vatPercent,
+    whtPercent: rates.whtPercent,
   });
   const due = new Date(Date.now() + settings.autoCompleteDays * 24 * 3600_000);
 
-  return prisma.$transaction(async (tx) => {
+  const run = async (tx: Tx) => {
     const dup = await tx.orderEscrow.findUnique({ where: { orderId: input.orderId } });
     if (dup) return dup;
 
@@ -131,13 +153,15 @@ export async function holdEscrowOnPayment(input: {
         shippingFee: quote.satang.shipping,
         gpPercent: quote.gpPercent,
         gpAmount: quote.satang.gpAmount,
+        vatAmount: quote.satang.vatAmount,
+        whtAmount: quote.satang.whtAmount,
         netMerchantAmount: quote.satang.netMerchantAmount,
         releaseDueDate: due,
         releaseStatus: ESCROW.HELD,
       },
     });
 
-    const store = await tx.store.update({
+    const nextStore = await tx.store.update({
       where: { id: input.storeId },
       data: { pendingBalance: { increment: quote.satang.netMerchantAmount } },
     });
@@ -160,10 +184,12 @@ export async function holdEscrowOnPayment(input: {
       grossAmount: quote.satang.gross,
       gpPercent: quote.gpPercent,
       memo: 'hold · รอผู้ซื้อรับของหรือครบโฮลด์',
-      availableAfter: store.availableBalance,
+      availableAfter: nextStore.availableBalance,
     });
     return escrow;
-  });
+  };
+
+  return input.tx ? run(input.tx) : prisma.$transaction(run);
 }
 
 async function releaseHeldEscrow(orderId: string, reason: string) {
@@ -858,13 +884,83 @@ export async function markEscrowPaidOut(escrowId: string, proofOfTransfer: strin
   };
 }
 
-export function startEscrowAutoCompleteJob(intervalMs = 60 * 60_000) {
-  void autoCompleteDeliveredOrdersCronJob().catch((err) => {
-    console.error('[escrow] auto-complete', err);
+/**
+ * ตามเก็บออเดอร์ที่เก็บเงินสำเร็จแล้วแต่ลงบัญชีไม่สำเร็จ
+ *
+ * เงินเข้าบริษัทไปแล้วโดยที่ร้านยังไม่เห็นยอดคือสิ่งที่ยอมให้ค้างไม่ได้
+ * งานนี้จึงหาออเดอร์ที่จ่ายแล้วแต่ยังไม่มี escrow แล้วสร้างให้ครบ
+ */
+export async function reconcilePaidOrders(limit = 200) {
+  const candidates = await prisma.commerceOrder.findMany({
+    where: {
+      status: 'PAID',
+      merchantId: { not: null },
+      settlementStatus: { in: ['HELD', 'RECONCILE'] },
+    },
+    orderBy: { paidAt: 'asc' },
+    take: Math.min(Math.max(limit, 1), 500),
+    select: {
+      id: true,
+      merchantId: true,
+      merchandiseThb: true,
+      shippingFeeThb: true,
+      gpBps: true,
+    },
   });
-  return setInterval(() => {
-    void autoCompleteDeliveredOrdersCronJob().catch((err) => {
+  if (!candidates.length) return { checked: 0, repaired: 0 };
+
+  const existing = await prisma.orderEscrow.findMany({
+    where: { orderId: { in: candidates.map((order) => order.id) } },
+    select: { orderId: true },
+  });
+  const hasEscrow = new Set(existing.map((row) => row.orderId));
+
+  let repaired = 0;
+  for (const order of candidates) {
+    if (hasEscrow.has(order.id)) {
+      if (order.gpBps != null) {
+        await prisma.commerceOrder
+          .update({ where: { id: order.id }, data: { settlementStatus: 'HELD' } })
+          .catch(() => undefined);
+      }
+      continue;
+    }
+    try {
+      const escrow = await holdEscrowOnPayment({
+        orderId: order.id,
+        storeId: order.merchantId!,
+        merchandiseThb: order.merchandiseThb,
+        shippingFeeThb: order.shippingFeeThb,
+        gpPercent: order.gpBps != null ? order.gpBps / 100 : undefined,
+      });
+      await prisma.commerceOrder.update({
+        where: { id: order.id },
+        data: {
+          settlementStatus: 'HELD',
+          gpAmountThb: Math.round(escrow.gpAmount / 100),
+          netToMerchantThb: Math.round(escrow.netMerchantAmount / 100),
+        },
+      });
+      repaired += 1;
+    } catch (error) {
+      console.error('[escrow] reconcile failed', order.id, error);
+    }
+  }
+  return { checked: candidates.length, repaired };
+}
+
+export function startEscrowAutoCompleteJob(intervalMs = 60 * 60_000) {
+  const tick = async () => {
+    await autoCompleteDeliveredOrdersCronJob().catch((err) => {
       console.error('[escrow] auto-complete', err);
     });
+    // ต่อท้ายรอบเดียวกัน: ซ่อมออเดอร์ที่ลงบัญชีค้างไว้
+    await reconcilePaidOrders().catch((err) => {
+      console.error('[escrow] reconcile', err);
+    });
+  };
+  void tick();
+  return setInterval(() => {
+    void tick();
   }, intervalMs);
 }

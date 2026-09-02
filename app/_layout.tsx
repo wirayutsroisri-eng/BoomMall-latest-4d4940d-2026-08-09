@@ -6,6 +6,10 @@ import { CallOverlay } from '@/modules/chat/ui/CallOverlay';
 import { MusicMiniPlayer } from '@/modules/music/ui/MusicMiniPlayer';
 import { dismissibleModalOptions } from '@/shared/components/DragDownDismiss';
 import { colors } from '@/shared/theme/colors';
+import { installCrashReporter } from '@/shared/observability/crashReporter';
+
+// Installed at module load so an error thrown during the first render is caught.
+installCrashReporter();
 
 export default function RootLayout() {
   return (

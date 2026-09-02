@@ -10,6 +10,7 @@ import {
   shareFeedToChannel,
   type FeedShareChannel,
 } from '@/modules/feed/domain/share-clip';
+import { trackFeedSignal } from '@/modules/feed/data/feedEventQueue';
 
 type Props = {
   visible: boolean;
@@ -45,6 +46,9 @@ export function FeedShareSheet({ visible, item, onClose, onShared }: Props) {
   const run = async (channel: FeedShareChannel) => {
     void Haptics.selectionAsync();
     const result = await shareFeedToChannel(item, channel).catch(() => 'dismissed' as const);
+    if (result !== 'dismissed') {
+      trackFeedSignal({ itemId: item.id, rootId: item.rootPostId, type: 'engage', action: 'share_link' });
+    }
     if (result === 'copied') {
       setCopied(true);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
