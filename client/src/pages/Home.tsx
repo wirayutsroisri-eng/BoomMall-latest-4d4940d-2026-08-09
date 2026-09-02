@@ -13,6 +13,8 @@ import { Link } from "wouter";
 import { getLoginUrl } from "@/const";
 
 const PAGE_SIZE = 10;
+const RENDER_WINDOW = 2;
+const VISIBILITY_REFRESH_MS = 5 * 60 * 1000;
 type FeedMode = "for-you" | "following";
 
 export default function HomePage() {
@@ -28,6 +30,7 @@ export default function HomePage() {
   const [mockReady, setMockReady] = useState(!bypass);
   const feedRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const activeIndexRef = useRef(0);
   const [swipeState, setSwipeState] = useState<SwipeState>({ offset: 0, isDragging: false, isOpen: false });
   const [forceCloseSwipe, setForceCloseSwipe] = useState(0);
 
@@ -42,7 +45,7 @@ export default function HomePage() {
       seed: feedSeed,
       followedOnly: feedMode === "following",
     },
-    { staleTime: 0, gcTime: 0, enabled: !bypass, retry: false }
+    { staleTime: 60_000, gcTime: 5 * 60_000, enabled: !bypass, retry: false }
   );
 
   const switchFeedMode = (mode: FeedMode) => {
@@ -89,11 +92,17 @@ export default function HomePage() {
   }, [bypass]);
 
   useEffect(() => {
+    activeIndexRef.current = activeIndex;
+  }, [activeIndex]);
+
+  useEffect(() => {
     if (bypass) return;
+    let lastRefresh = Date.now();
     const onVisible = () => {
-      if (document.visibilityState === "visible") {
-        handleRefreshFeed();
-      }
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastRefresh < VISIBILITY_REFRESH_MS) return;
+      lastRefresh = Date.now();
+      handleRefreshFeed();
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
@@ -111,12 +120,15 @@ export default function HomePage() {
   }, [bypass, productsData, offset]);
 
   useEffect(() => {
+    const root = feedRef.current;
+    if (!root) return;
+
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
           if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
             const idx = Number(entry.target.getAttribute("data-index"));
-            if (!isNaN(idx) && idx !== activeIndex) {
+            if (!isNaN(idx) && idx !== activeIndexRef.current) {
               setForceCloseSwipe((n) => n + 1);
               setSwipeState({ offset: 0, isDragging: false, isOpen: false });
               setActiveIndex(idx);
@@ -124,7 +136,7 @@ export default function HomePage() {
           }
         }
       },
-      { threshold: [0.6], root: feedRef.current }
+      { threshold: [0.6], root }
     );
 
     itemRefs.current.forEach((el) => {
@@ -132,7 +144,7 @@ export default function HomePage() {
     });
 
     return () => observer.disconnect();
-  }, [allProducts.length, activeIndex]);
+  }, [allProducts.length]);
 
   const handleSwipeChange = useCallback((state: SwipeState) => {
     setSwipeState(state);
@@ -141,6 +153,16 @@ export default function HomePage() {
   const handleSwipeClose = useCallback(() => {
     setSwipeState({ offset: 0, isDragging: false, isOpen: false });
   }, []);
+
+  // Preload the next feed image so scroll feels smoother.
+  useEffect(() => {
+    const next = allProducts[activeIndex + 1];
+    const src = (next?.images as string[] | undefined)?.[0];
+    if (!src) return;
+    const img = new Image();
+    img.decoding = "async";
+    img.src = src;
+  }, [activeIndex, allProducts]);
 
   useEffect(() => {
     if (activeIndex < allProducts.length - 3) return;
@@ -268,29 +290,40 @@ export default function HomePage() {
 
       <div
         ref={feedRef}
-        className="h-full overflow-y-scroll snap-y snap-mandatory scrollbar-hide"
+        className="h-full overflow-y-scroll snap-y snap-mandatory scrollbar-hide overscroll-y-contain"
         style={{
           scrollSnapType: "y mandatory",
           overflow: swipeState.isOpen ? "hidden" : undefined,
+          WebkitOverflowScrolling: "touch",
         }}
       >
-        {allProducts.map((product, idx) => (
-          <div
-            key={`${product.id}-${idx}`}
-            ref={(el) => { itemRefs.current[idx] = el; }}
-            data-index={idx}
-          >
-            <VideoFeedItem
-              product={product}
-              isActive={idx === activeIndex}
-              onChat={(mode) => handleChat(product.id, mode)}
-              isChatPending={startConversation.isPending}
-              onSwipeChange={idx === activeIndex ? handleSwipeChange : undefined}
-              onSwipeClose={handleSwipeClose}
-              forceCloseKey={idx === activeIndex ? forceCloseSwipe : 0}
-            />
-          </div>
-        ))}
+        {allProducts.map((product, idx) => {
+          const inWindow = Math.abs(idx - activeIndex) <= RENDER_WINDOW;
+          return (
+            <div
+              key={product.id}
+              ref={(el) => { itemRefs.current[idx] = el; }}
+              data-index={idx}
+              className="h-[100dvh] w-full snap-start snap-always shrink-0"
+              style={inWindow ? undefined : { contentVisibility: "auto", containIntrinsicSize: "100dvh" }}
+            >
+              {inWindow ? (
+                <VideoFeedItem
+                  product={product}
+                  isActive={idx === activeIndex}
+                  showBackdrop={Math.abs(idx - activeIndex) <= 1}
+                  onChat={(mode) => handleChat(product.id, mode)}
+                  isChatPending={startConversation.isPending}
+                  onSwipeChange={idx === activeIndex ? handleSwipeChange : undefined}
+                  onSwipeClose={handleSwipeClose}
+                  forceCloseKey={idx === activeIndex ? forceCloseSwipe : 0}
+                />
+              ) : (
+                <div className="h-full w-full bg-black" aria-hidden />
+              )}
+            </div>
+          );
+        })}
 
         {!bypass && isLoading && offset > 0 && (
           <div className="h-20 flex items-center justify-center snap-start">

@@ -29,6 +29,8 @@ export type SwipeState = {
 interface VideoFeedItemProps {
   product: FeedProduct;
   isActive: boolean;
+  /** Render blurred backdrop + sharper foreground (only for active/nearby items). */
+  showBackdrop?: boolean;
   onChat: (chatMode: ChatMode) => void;
   isChatPending?: boolean;
   onSwipeChange?: (state: SwipeState) => void;
@@ -45,6 +47,7 @@ function supportsMode(listingType: string | undefined, mode: ChatMode): boolean 
 export default function VideoFeedItem({
   product,
   isActive,
+  showBackdrop = true,
   onChat,
   isChatPending,
   onSwipeChange,
@@ -126,23 +129,49 @@ export default function VideoFeedItem({
       {...(isActive ? swipe.handlers : {})}
     >
       {hasVideo ? (
-        <video
-          ref={videoRef}
-          src={product.videoUrl!}
-          className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-          loop
-          muted={muted}
-          playsInline
-          preload="metadata"
-          poster={images[0] ?? undefined}
-        />
+        <>
+          {showBackdrop && images[0] && (
+            <img
+              src={images[0]}
+              alt=""
+              aria-hidden
+              className="absolute inset-0 w-full h-full object-cover scale-110 blur-3xl opacity-50 brightness-75 pointer-events-none"
+              decoding="async"
+              draggable={false}
+            />
+          )}
+          <video
+            ref={videoRef}
+            src={product.videoUrl!}
+            className="absolute inset-0 z-[1] w-full h-full object-contain pointer-events-none"
+            loop
+            muted={muted}
+            playsInline
+            preload={isActive ? "auto" : "metadata"}
+            poster={images[0] ?? undefined}
+          />
+        </>
       ) : images[0] ? (
-        <img
-          src={images[0]}
-          alt={product.title}
-          className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-          draggable={false}
-        />
+        <>
+          {showBackdrop && (
+            <img
+              src={images[0]}
+              alt=""
+              aria-hidden
+              className="absolute inset-0 w-full h-full object-cover scale-110 blur-3xl opacity-50 brightness-75 pointer-events-none"
+              decoding="async"
+              draggable={false}
+            />
+          )}
+          <img
+            src={images[0]}
+            alt={product.title}
+            className="absolute inset-0 z-[1] w-full h-full object-contain pointer-events-none"
+            draggable={false}
+            decoding={isActive ? "sync" : "async"}
+            fetchPriority={isActive ? "high" : "low"}
+          />
+        </>
       ) : (
         <div className="absolute inset-0 flex items-center justify-center bg-zinc-900 pointer-events-none">
           <Package className="w-16 h-16 text-white/20" />
