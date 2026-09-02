@@ -29,7 +29,9 @@
 
 ```bash
 # 0) หลังบ้านต้องพร้อมก่อน — บิลด์ยิงเข้า production จริง
-npm --prefix backend run prisma:deploy
+#    ไม่ต้องรัน migration เอง: merge เข้า main แล้ว .github/workflows/deploy-backend.yml
+#    จะ build image → push ECR → roll ECS ให้ และคอนเทนเนอร์รัน migrate-deploy ตอนบูต
+#    (backend/Dockerfile → npm run start:prod)
 
 # 1) บิลด์
 npx eas login
@@ -74,7 +76,7 @@ npx eas submit --platform ios --profile preview --latest
 
 - [ ] `npx tsc --noEmit` และ `npm --prefix backend run typecheck` ผ่าน
 - [ ] `npx vitest run` ผ่านทั้งหมด
-- [ ] migration ขึ้น production แล้ว (`prisma:deploy`)
+- [ ] backend เวอร์ชันล่าสุดขึ้น production แล้ว (merge เข้า main → ดู GitHub Actions ผ่าน และ ECS service stable) migration รันเองตอนคอนเทนเนอร์บูต
 - [ ] env ฝั่ง production ครบ — รวม `FEED_CURSOR_SECRET`
 - [ ] `STORE_COMPLIANCE_MODE = true` ใน `src/shared/compliance/appStoreGates.ts` (ปิด fake checkout / calls / LIVE / music upload)
 - [ ] `UIBackgroundModes` มีแค่ `audio`
