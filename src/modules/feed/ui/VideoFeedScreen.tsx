@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Dimensions, Image, Pressable, StyleSheet, View } from 'react-native';
+import { Dimensions, Image, InteractionManager, Pressable, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,7 +17,9 @@ import { useFeedStore } from '@/modules/feed/state/feed-store';
 import { HomeFeedScreen } from './HomeFeedScreen';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const ENTER_MS = 260;
+const ENTER_MS = 300;
+/** กันรอ mount นานเกิน — ถ้าฟีดคลิปยังไม่นิ่งภายในเวลานี้ ก็เริ่มขยายเลย */
+const MOUNT_WAIT_MAX_MS = 420;
 const enterEasing = Easing.out(Easing.cubic);
 
 export function VideoFeedScreen() {
@@ -57,13 +59,39 @@ export function VideoFeedScreen() {
   useEffect(() => {
     setHeroCover(true);
     enter.value = 0;
-    const id = requestAnimationFrame(() => {
+    let started = false;
+    let firstFrame = 0;
+    let secondFrame = 0;
+    const startEnter = () => {
+      if (started) return;
+      started = true;
       enter.value = withTiming(1, { duration: ENTER_MS, easing: enterEasing }, (finished) => {
         if (finished) runOnJS(dropHeroCover)();
       });
+    };
+
+    // ไม่มี hero (เข้าตรงๆ ไม่ได้มาจากการ์ดในฟีด) → เฟดเข้าได้ทันที
+    if (!hasHero) {
+      startEnter();
+      return;
+    }
+
+    // มี hero: ระหว่างนี้โปสเตอร์ยังทับอยู่ตรงตำแหน่งเดิมในฟีดพอดี ผู้ใช้จึงไม่เห็นการรอ
+    // รอให้ฟีดคลิป (FlatList + player) mount/commit เสร็จก่อนค่อยขยาย — ถ้าขยายพร้อมกับ
+    // งาน mount อนิเมชันจะแย่ง UI thread กับการ commit view แล้วเฟรมตก (กระตุก)
+    const task = InteractionManager.runAfterInteractions(() => {
+      firstFrame = requestAnimationFrame(() => {
+        secondFrame = requestAnimationFrame(startEnter);
+      });
     });
-    return () => cancelAnimationFrame(id);
-  }, [dropHeroCover, enter]);
+    const fallback = setTimeout(startEnter, MOUNT_WAIT_MAX_MS);
+    return () => {
+      task.cancel();
+      cancelAnimationFrame(firstFrame);
+      cancelAnimationFrame(secondFrame);
+      clearTimeout(fallback);
+    };
+  }, [dropHeroCover, enter, hasHero]);
 
   const dismiss = useCallback(() => {
     if (router.canGoBack()) router.back();

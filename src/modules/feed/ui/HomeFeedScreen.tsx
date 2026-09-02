@@ -124,6 +124,8 @@ export function HomeFeedScreen({
     videoOnly ? Dimensions.get('window').height : 0,
   );
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
+  const activeItemIdRef = useRef<string | null>(null);
+  activeItemIdRef.current = activeItemId;
   const [playbackActiveItemId, setPlaybackActiveItemId] = useState<string | null>(null);
   const [playbackTab, setPlaybackTab] = useState<FeedTab>(tab);
   const isScrollingRef = useRef(false);
@@ -155,6 +157,9 @@ export function HomeFeedScreen({
   const sheetRef = useRef<BottomSheetModal>(null);
   const commentsSheetRef = useRef<BottomSheetModal>(null);
   const activeIndexRef = useRef(0);
+  /** initialFeedId ต้องมีผลครั้งเดียวตอน mount — ดู effect ที่เลือก active item ด้านล่าง */
+  const initialFeedIdUsedRef = useRef(false);
+  const lastLaneRef = useRef<FeedTab | null>(null);
   const listRefs = useRef<Partial<Record<FeedTab, FlatList<FeedItem> | null>>>({});
   const reelTab = onBoard ? 'foryou' : effectiveTab;
   const tabIndex = Math.max(0, laneOrder.indexOf(effectiveTab));
@@ -229,9 +234,22 @@ export function HomeFeedScreen({
 
   useEffect(() => {
     // Restore the previously active item for this tab (persisted across tab switches).
+    const laneChanged = lastLaneRef.current !== effectiveTab;
+    lastLaneRef.current = effectiveTab;
     const restored = activeItemByTabRef.current[effectiveTab];
-    const requested = initialFeedId && items.some((item) => item.id === initialFeedId) ? initialFeedId : null;
-    const candidate = requested ?? (restored && items.find((i) => i.id === restored) ? restored : items[0]?.id ?? null);
+    // initialFeedId ใช้ได้ครั้งเดียวตอนเปิดหน้าคลิปเท่านั้น — ถ้าปล่อยให้บังคับทุกครั้งที่
+    // `items` ถูกสร้างใหม่ (เช่น syncCommentsFromServer map ทับ state.items ตอนเปิดชีตคอมเมนต์)
+    // active จะเด้งกลับไปคลิปแรก → เสียงคลิปแรกแทรกขึ้นมา และคอมเมนต์เปิดผิดคลิป
+    const requested =
+      !initialFeedIdUsedRef.current && initialFeedId && items.some((item) => item.id === initialFeedId)
+        ? initialFeedId
+        : null;
+    if (requested) initialFeedIdUsedRef.current = true;
+    const current = activeItemIdRef.current;
+    // อยู่เลนเดิมและคลิปที่ดูอยู่ยังอยู่ในลิสต์ → ล็อกไว้ที่คลิปนั้น
+    const keepCurrent = !laneChanged && current && items.some((i) => i.id === current) ? current : null;
+    const candidate =
+      requested ?? keepCurrent ?? (restored && items.find((i) => i.id === restored) ? restored : items[0]?.id ?? null);
     setActiveItemId(candidate);
     activeIndexRef.current = candidate ? items.findIndex((i) => i.id === candidate) : 0;
   }, [effectiveTab, initialFeedId, items]);
