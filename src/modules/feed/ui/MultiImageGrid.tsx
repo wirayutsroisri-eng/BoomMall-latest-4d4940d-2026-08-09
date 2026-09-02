@@ -1,4 +1,4 @@
-import React, { memo, useMemo } from 'react';
+import React, { memo, useMemo, useRef } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { EditorMedia, OverlayObject, StickerOverlayObject, TextOverlayObject } from '@/modules/create/domain/editorComposition';
 import { LockedStickerOverlay } from '@/modules/create/ui/LockedStickerOverlay';
@@ -8,7 +8,7 @@ type Props = {
   uris: string[];
   width: number;
   height: number;
-  onPress: (index: number) => void;
+  onPress: (index: number, frame?: { x: number; y: number; width: number; height: number }) => void;
   mediaIds?: string[];
   overlays?: OverlayObject[];
   media?: EditorMedia[];
@@ -22,6 +22,7 @@ const GAP = 2;
 
 /** Facebook-style overview: at most four mounted images regardless of album size. */
 export const MultiImageGrid = memo(function MultiImageGrid({ uris, width, height, onPress, mediaIds, overlays = [], media, twoImageLayout = 'side-by-side' }: Props) {
+  const tileRefs = useRef<(View | null)[]>([]);
   const tiles = useMemo<Tile[]>(() => {
     const halfW = (width - GAP) / 2;
     const halfH = (height - GAP) / 2;
@@ -72,8 +73,16 @@ export const MultiImageGrid = memo(function MultiImageGrid({ uris, width, height
         return (
         <Pressable
           key={`${uris[index]}:${index}`}
+          ref={(r) => { tileRefs.current[index] = r; }}
           style={[styles.tile, style]}
-          onPress={() => onPress(index)}
+          onPress={() => {
+            const ref = tileRefs.current[index];
+            if (!ref) return onPress(index);
+            ref.measureInWindow((x, y, w, h) => {
+              if (!w || !h) return onPress(index);
+              onPress(index, { x, y, width: w, height: h });
+            });
+          }}
           accessibilityRole="imagebutton"
           accessibilityLabel={`เปิดรูป ${index + 1} จาก ${uris.length}`}
         >

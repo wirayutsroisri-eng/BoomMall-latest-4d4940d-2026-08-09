@@ -92,6 +92,8 @@ export const FeedPostCard = memo(function FeedPostCard({
   const playerRef = useRef<VideoPlayer | null>(null);
   const isScrubbingRef = useRef(false);
   const wasPlayingBeforeScrubRef = useRef(false);
+  const singleImageRef = useRef<View | null>(null);
+  const videoBoxRef = useRef<View | null>(null);
   const dateLabel = item.publishStatus === 'uploading'
     ? 'กำลังอัปโหลด…'
     : item.publishStatus === 'failed'
@@ -214,12 +216,24 @@ export const FeedPostCard = memo(function FeedPostCard({
   }, [active]);
 
   const openVideo = useCallback(() => {
-    router.push({
-      pathname: '/video-feed',
-      params: {
-        feedId: item.id,
-        startTime: String(currentTime),
-      },
+    const push = (origin?: { x: number; y: number; width: number; height: number }) => {
+      router.push({
+        pathname: '/video-feed',
+        params: {
+          feedId: item.id,
+          startTime: String(currentTime),
+          ...(origin
+            ? { ox: String(origin.x), oy: String(origin.y), ow: String(origin.width), oh: String(origin.height) }
+            : {}),
+        },
+      });
+    };
+    const ref = videoBoxRef.current;
+    if (!ref) return push();
+    // วัดตำแหน่งวิดีโอในฟีด — ให้หน้าคลิปขยายจากจุดนี้ (hero แบบ Facebook)
+    ref.measureInWindow((x, y, w, h) => {
+      if (!w || !h) return push();
+      push({ x, y, width: w, height: h });
     });
   }, [currentTime, item.id]);
 
@@ -253,12 +267,13 @@ export const FeedPostCard = memo(function FeedPostCard({
     }
   }, []);
 
-  const openImage = useCallback((index: number) => openFeedMediaViewer(
+  const openImage = useCallback((index: number, frame?: { x: number; y: number; width: number; height: number }) => openFeedMediaViewer(
     gallery,
     index,
     imageMedia.map((media) => media.id),
     item.overlays,
     imageMedia,
+    { attachedBackdrop: true, originFrame: frame },
   ), [gallery, imageMedia, item.overlays]);
 
   return (
@@ -318,7 +333,7 @@ export const FeedPostCard = memo(function FeedPostCard({
       </View> : null}
 
       {item.videoUri ? (
-        <View style={[styles.media, { height: feedVideoHeight }]}>
+        <View ref={videoBoxRef} style={[styles.media, { height: feedVideoHeight }]}>
           <FeedPinchZoomLayer resetKey={item.id} enabled={videoReady} contentGesture={videoTapGesture}>
             <FeedVideoLayer
               uri={item.videoUri}
@@ -360,7 +375,18 @@ export const FeedPostCard = memo(function FeedPostCard({
           />
         </View>
       ) : gallery.length === 1 ? (
-        <Pressable style={[styles.media, { height: singleImageHeight }]} onPress={() => openImage(0)}>
+        <Pressable
+          ref={singleImageRef}
+          style={[styles.media, { height: singleImageHeight }]}
+          onPress={() => {
+            const ref = singleImageRef.current;
+            if (!ref) return openImage(0);
+            ref.measureInWindow((x, y, w, h) => {
+              if (!w || !h) return openImage(0);
+              openImage(0, { x, y, width: w, height: h });
+            });
+          }}
+        >
           <Image
             source={{ uri: gallery[0] }}
             style={StyleSheet.absoluteFill}

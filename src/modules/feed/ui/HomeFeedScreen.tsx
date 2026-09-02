@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Dimensions,
   FlatList,
   Pressable,
   RefreshControl,
@@ -59,6 +60,7 @@ import { useFeedChromeStore } from '@/modules/feed/state/feed-chrome-store';
 import { syncFeedInterested, syncFeedLike, syncFeedNotInterested, syncFeedShare } from '@/modules/feed/data/feedEngageApi';
 import { recordActivity } from '@/modules/account/state/activity-store';
 import { MediaViewer } from './MediaViewer';
+import { mainTabBarHeight } from '@/shared/components/MainTabBar';
 
 /** ซ้าย → ขวา ตามหัวแท็บ: หางาน | ใกล้คุณ | กำลังติดตาม | สำหรับคุณ */
 const TAB_ORDER: FeedTab[] = ['board', 'nearby', 'following', 'foryou'];
@@ -69,6 +71,10 @@ const COMMENT_DOCK_ROW = 44;
 const COMMENT_DOCK_MIN = 68;
 /** `FeedSeekBar` ใช้ `bottom: 10 + bottomOffset` */
 const SEEK_BAR_BASE_BOTTOM = 10;
+/** ตรงกับ `styles.rootEmbedded` — คลิปในแท็บถูกเลื่อนขึ้น ต้องชดตอนวาง seek */
+const CHANNEL_EMBEDDED_LIFT = 40;
+/** ตำแหน่ง seek bar หน้าคลิป — ล็อกแล้ว อย่าขยับ */
+const CLIPS_SEEK_LIFT = 17;
 
 function openCreatorRoute(handle: string, feedId?: string) {
   const h = handle.replace(/^@/, '');
@@ -114,7 +120,9 @@ export function HomeFeedScreen({
   const startCall = useCallStore((s) => s.startCall);
   const setActive = useCallStore((s) => s.setActive);
 
-  const [viewportHeight, setViewportHeight] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(() =>
+    videoOnly ? Dimensions.get('window').height : 0,
+  );
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [playbackActiveItemId, setPlaybackActiveItemId] = useState<string | null>(null);
   const [playbackTab, setPlaybackTab] = useState<FeedTab>(tab);
@@ -350,6 +358,11 @@ export function HomeFeedScreen({
     COMMENT_DOCK_MIN,
     COMMENT_DOCK_PAD_TOP + COMMENT_DOCK_ROW + commentDockPadBottom,
   );
+  const tabBarHeight = mainTabBarHeight(insets.bottom);
+  const clipsSeekInset = Math.max(
+    0,
+    tabBarHeight - SEEK_BAR_BASE_BOTTOM - CHANNEL_EMBEDDED_LIFT + CLIPS_SEEK_LIFT,
+  );
   const reelBottomInset = videoOnly ? 76 + insets.bottom : channelEmbedded ? 40 : 0;
 
   const renderLaneItem = useCallback(
@@ -387,7 +400,7 @@ export function HomeFeedScreen({
         onCommitTabIndex={commitTabIndex}
         bottomMetaInset={reelBottomInset}
         bottomActionsInset={reelBottomInset}
-        bottomSeekInset={videoOnly ? commentDockHeight - SEEK_BAR_BASE_BOTTOM : channelEmbedded ? 5 : 0}
+        bottomSeekInset={videoOnly ? commentDockHeight - SEEK_BAR_BASE_BOTTOM : channelEmbedded ? clipsSeekInset : 0}
         initialPlaybackTime={videoOnly && item.id === initialFeedId ? initialPlaybackTime : 0}
       />
     ),
@@ -406,6 +419,7 @@ export function HomeFeedScreen({
       laneOrder.length,
       promotedMasters,
       commentDockHeight,
+      clipsSeekInset,
       reelBottomInset,
       initialFeedId,
       initialPlaybackTime,
@@ -684,7 +698,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface.canvas,
   },
   rootEmbedded: {
-    transform: [{ translateY: -40 }],
+    transform: [{ translateY: -CHANNEL_EMBEDDED_LIFT }],
   },
   feedClip: {
     flex: 1,

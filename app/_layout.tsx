@@ -32,10 +32,11 @@ export default function RootLayout() {
         <Stack.Screen
           name="video-feed"
           options={{
-            presentation: 'fullScreenModal',
-            animation: 'fade',
+            // transparentModal: ให้หน้าฟีดยังอยู่ข้างหลัง — ลากปิดแล้วเห็นฟีดโผล่ (พื้นดำจางใน VideoFeedScreen เอง)
+            presentation: 'transparentModal',
+            animation: 'none',
             gestureEnabled: false,
-            contentStyle: { backgroundColor: '#000' },
+            contentStyle: { backgroundColor: 'transparent' },
           }}
         />
         <Stack.Screen name="secondhand-create" options={{ presentation: 'fullScreenModal', ...dismissibleModalOptions, animation: 'slide_from_bottom' }} />

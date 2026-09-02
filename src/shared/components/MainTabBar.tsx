@@ -20,6 +20,13 @@ const LABELS: Record<string, string> = {
   profile: 'โปรไฟล์',
 };
 
+const TAB_BAR_ROW = 44;
+const TAB_BAR_MIN_SAFE = 8;
+
+export function mainTabBarHeight(insetsBottom: number) {
+  return TAB_BAR_ROW + Math.max(insetsBottom, TAB_BAR_MIN_SAFE);
+}
+
 /** Inbox keeps the tab bar; a thread (and group room) hides it for more chat space. */
 export function isChatWindow(pathname: string) {
   const parts = pathname.split('/').filter((p) => p && p !== '(tabs)');
@@ -73,12 +80,12 @@ export function MainTabBar({ state, descriptors, navigation }: BottomTabBarProps
         styles.wrap,
         clipsDark && styles.wrapDark,
         {
-          height: 44 + Math.max(insets.bottom, 8),
-          paddingBottom: Math.max(insets.bottom, 8),
+          height: mainTabBarHeight(insets.bottom),
+          paddingBottom: Math.max(insets.bottom, TAB_BAR_MIN_SAFE),
           transform: [{
             translateY: visibility.interpolate({
               inputRange: [0, 1],
-              outputRange: [44 + Math.max(insets.bottom, 8), 0],
+              outputRange: [mainTabBarHeight(insets.bottom), 0],
             }),
           }],
         },

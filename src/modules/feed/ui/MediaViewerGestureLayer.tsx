@@ -22,6 +22,8 @@ type Props = {
   onDismiss: () => void;
   onZoomChange: (zoomed: boolean) => void;
   zoomEnabled?: boolean;
+  /** หน้าฟีด: ลากปิดได้ทั้งขึ้นและลง (สไตล์ Facebook) — clips ใช้ลากลงอย่างเดียว */
+  bidirectionalDismiss?: boolean;
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -31,7 +33,7 @@ function clamp(value: number, min: number, max: number) {
 
 /** Gesture priority: zoomed image pan > pinch/double tap > vertical dismiss. */
 export function MediaViewerGestureLayer({
-  children, active, resetKey, dismissY, onDismiss, onZoomChange, zoomEnabled = true,
+  children, active, resetKey, dismissY, onDismiss, onZoomChange, zoomEnabled = true, bidirectionalDismiss = false,
 }: Props) {
   const scale = useSharedValue(1);
   const startScale = useSharedValue(1);
@@ -53,7 +55,8 @@ export function MediaViewerGestureLayer({
     tx.value = 0;
     ty.value = 0;
     zoomNotified.value = 0;
-    dismissY.value = 0;
+    // ไม่รีเซ็ต dismissY ตรงนี้ — parent ดูแลเองตอนเปิด
+    // รีเซ็ตตรงนี้จะดึงรูป+พื้นดำกลับกลางจอ 1 เฟรมตอนปิด (resetKey เปลี่ยนตอน visible พลิก)
     onZoomChange(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetKey]);
@@ -131,20 +134,30 @@ export function MediaViewerGestureLayer({
 
   const dismiss = Gesture.Pan()
     .enabled(active)
-    // ต้องลากลงชัดเจน (~18px) ก่อนจางพื้นดำ — กันแตะนิดเดียวแล้วดำหาย
-    .activeOffsetY(18)
+    // หน้าฟีด: ลากขึ้น/ลง ก็ปิดได้ — clips ยังลากลงอย่างเดียว
+    .activeOffsetY(bidirectionalDismiss ? [-10, 10] : 18)
     .failOffsetX([-24, 24])
     .onUpdate((event) => {
       if (scale.value > 1.03) return;
-      dismissY.value = Math.max(0, event.translationY);
+      if (bidirectionalDismiss) {
+        // ติดนิ้วตามตัวจริง ทั้งขึ้นและลง
+        dismissY.value = event.translationY;
+      } else {
+        dismissY.value = Math.max(0, event.translationY);
+      }
     })
     .onEnd((event) => {
       if (scale.value > 1.03) {
         dismissY.value = 0;
         return;
       }
-      if (dismissY.value > SCREEN_H * 0.16 || event.velocityY > 1050) {
-        dismissY.value = withTiming(SCREEN_H, { duration: 220 }, (done) => {
+      const distance = Math.abs(dismissY.value);
+      const velocity = Math.abs(event.velocityY);
+      const distThreshold = bidirectionalDismiss ? SCREEN_H * 0.12 : SCREEN_H * 0.16;
+      const velThreshold = bidirectionalDismiss ? 700 : 1050;
+      if (distance > distThreshold || velocity > velThreshold) {
+        const dir = dismissY.value >= 0 ? 1 : -1;
+        dismissY.value = withTiming(dir * SCREEN_H, { duration: 220 }, (done) => {
           if (done) runOnJS(finishDismiss)();
         });
       } else {

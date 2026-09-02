@@ -42,6 +42,10 @@ const ENTER_MS = 340;
 const EXIT_MS = 240;
 const enterEasing = Easing.bezier(0.22, 1, 0.36, 1);
 const exitEasing = Easing.bezier(0.4, 0, 0.2, 1);
+/** หน้าฟีด: ความเข้มสูงสุดของพื้นดำ (90% ตามสเปก) */
+const FEED_BLACK_OPACITY = 0.9;
+/** หน้าฟีด: จางตามนิ้ว — อย่าจบที่ dismiss threshold (0.16H) เพราะดำจะดับแล้วค่อยบินต่อ */
+const FEED_BLACK_DRAG_FADE = H * 0.42;
 
 function frame(item: MediaViewerItem) {
   const maxH = H * 0.88;
@@ -153,6 +157,8 @@ export const MediaViewer = memo(function MediaViewer() {
   const overlays = useFeedMediaViewerStore((s) => s.overlays);
   const media = useFeedMediaViewerStore((s) => s.media);
   const close = useFeedMediaViewerStore((s) => s.close);
+  const attachedBackdrop = useFeedMediaViewerStore((s) => s.attachedBackdrop);
+  const originFrame = useFeedMediaViewerStore((s) => s.originFrame);
   const feedItems = useFeedStore((s) => s.items);
   const insets = useSafeAreaInsets();
   const list = useRef<FlatList<MediaViewerItem>>(null);
@@ -161,42 +167,53 @@ export const MediaViewer = memo(function MediaViewer() {
   const [zoomed, setZoomed] = useState(false);
   const dismissY = useSharedValue(0);
   const enter = useSharedValue(0);
+  /** หน้าฟีด: พื้นดำโผล่หลังรูปเข้าที่ */
+  const feedBlack = useSharedValue(0);
+  /** 1 ระหว่างออก (กดปิด) — ระงับ enter-transform (ลอยขึ้น+โต) ไม่ให้กลับดึงลงตอนปิด */
+  const exiting = useSharedValue(0);
   const closingRef = useRef(false);
 
   const finishClose = useCallback(() => {
     closingRef.current = false;
-    dismissY.value = 0;
-    enter.value = 0;
+    // ห้ามรีเซ็ต transform ตอน Modal ยังโชว์ — จะกระตุกเฟรมเดียวตอนปิด
     close();
-  }, [close, dismissY, enter]);
+  }, [close]);
 
   const requestClose = useCallback(() => {
     if (closingRef.current) return;
     closingRef.current = true;
+    exiting.value = 1;
+    feedBlack.value = withTiming(0, { duration: EXIT_MS, easing: exitEasing });
     enter.value = withTiming(0, { duration: EXIT_MS, easing: exitEasing }, (finished) => {
       if (finished) runOnJS(finishClose)();
     });
-  }, [enter, finishClose]);
+  }, [enter, exiting, feedBlack, finishClose]);
 
   useEffect(() => {
     if (!visible) {
       closingRef.current = false;
-      enter.value = 0;
-      dismissY.value = 0;
       return;
     }
     closingRef.current = false;
+    exiting.value = 0;
     setIndex(initialIndex);
     setZoomed(false);
     dismissY.value = 0;
     enter.value = 0;
+    feedBlack.value = 0;
     // รอ Modal mount แล้วค่อย animate — กันเฟรมแรกกระพริบ
     const t = requestAnimationFrame(() => {
-      enter.value = withTiming(1, { duration: ENTER_MS, easing: enterEasing });
       list.current?.scrollToIndex({ index: initialIndex, animated: false });
+      if (attachedBackdrop) {
+        // ดำขึ้นพร้อมรูป — วิ่งคู่กัน 340ms curve เดียว ไม่ตามหลังรูป
+        enter.value = withTiming(1, { duration: ENTER_MS, easing: enterEasing });
+        feedBlack.value = withTiming(1, { duration: ENTER_MS, easing: enterEasing });
+      } else {
+        enter.value = withTiming(1, { duration: ENTER_MS, easing: enterEasing });
+      }
     });
     return () => cancelAnimationFrame(t);
-  }, [dismissY, enter, initialIndex, visible]);
+  }, [attachedBackdrop, dismissY, enter, exiting, feedBlack, initialIndex, visible]);
 
   useEffect(() => {
     if (!visible) return;
@@ -209,6 +226,15 @@ export const MediaViewer = memo(function MediaViewer() {
     (e: NativeSyntheticEvent<NativeScrollEvent>) => setIndex(Math.round(e.nativeEvent.contentOffset.x / W)),
     [],
   );
+
+  // Hero transition (หน้าฟีด): รูปจากตำแหน่งในฟีดขยายขึ้นมา และปิดวิ่งกลับที่เดิม
+  const heroItem = items[initialIndex] ?? items[0];
+  const heroFrame = heroItem ? frame(heroItem) : { width: W, height: H * 0.88 };
+  const heroActive = !!(attachedBackdrop && originFrame && index === initialIndex);
+  const heroDx = originFrame ? originFrame.x + originFrame.width / 2 - W / 2 : 0;
+  const heroDy = originFrame ? originFrame.y + originFrame.height / 2 - H / 2 : 0;
+  const heroSx = originFrame && heroFrame.width ? originFrame.width / heroFrame.width : 1;
+  const heroSy = originFrame && heroFrame.height ? originFrame.height / heroFrame.height : 1;
 
   // ลากลงปิด: จางทั้งชั้น (ดำยังอยู่ใต้จนกว่าจะปิด) — ไม่ผูกดำกับ enter
   const shellStyle = useAnimatedStyle(() => ({
@@ -231,7 +257,51 @@ export const MediaViewer = memo(function MediaViewer() {
     };
   });
 
-  const chromeStyle = useAnimatedStyle(() => ({ opacity: enter.value }));
+  const chromeStyle = useAnimatedStyle(() => {
+    const dragFade = attachedBackdrop
+      ? interpolate(Math.abs(dismissY.value), [0, 70], [1, 0], 'clamp')
+      : 1;
+    return { opacity: enter.value * dragFade };
+  });
+
+  const feedTravelStyle = useAnimatedStyle(() => {
+    const progress = enter.value;
+    const t = 1 - progress; // 1 = ที่ origin, 0 = ที่ final
+    const dragScale = interpolate(Math.abs(dismissY.value), [0, H * 0.6], [1, 0.92], 'clamp');
+    if (heroActive) {
+      // Hero: origin -> final (เปิด) / final -> origin (ปิด) — รูปติดตำแหน่งต้นทาง
+      return {
+        transform: [
+          { translateX: heroDx * t },
+          { translateY: dismissY.value + heroDy * t },
+          { scaleX: (1 + (heroSx - 1) * t) * dragScale },
+          { scaleY: (1 + (heroSy - 1) * t) * dragScale },
+        ],
+      };
+    }
+    const enterOffset = interpolate(progress, [0, 1], [28, 0], 'clamp');
+    const enterScale = interpolate(progress, [0, 1], [0.9, 1], 'clamp');
+    // ตอนกดปิด (exiting) ระงับ enter-transform ไม่ให้ดึงรูปลง 28px — เหลือแค่ fade
+    return {
+      transform: [
+        { translateY: dismissY.value + (exiting.value ? 0 : enterOffset) },
+        { scale: (exiting.value ? 1 : enterScale) * dragScale },
+      ],
+    };
+  });
+
+  const feedImageStyle = useAnimatedStyle(() => ({
+    // Hero: รูปโผล่เต็มตั้งแต่เริ่ม (ทับ thumbnail ด้านหลัง) — ไม่ fade
+    opacity: heroActive ? 1 : enter.value,
+  }));
+
+  /** พื้นดำล็อกเต็มจอ — จางตามระยะลาก (ทั้งขึ้น/ลง) ไม่ scale ตามรูป */
+  const feedBlackStyle = useAnimatedStyle(() => ({
+    opacity:
+      FEED_BLACK_OPACITY *
+      feedBlack.value *
+      interpolate(Math.abs(dismissY.value), [0, FEED_BLACK_DRAG_FADE], [1, 0], 'clamp'),
+  }));
 
   if (!items.length) return null;
 
@@ -243,18 +313,25 @@ export const MediaViewer = memo(function MediaViewer() {
     <Modal
       visible={visible}
       transparent
-      animationType="fade"
+      animationType={attachedBackdrop ? 'none' : 'fade'}
       presentationStyle="overFullScreen"
       statusBarTranslucent
       onRequestClose={requestClose}
     >
-      <StatusBar barStyle="light-content" backgroundColor="#000" />
-      <Animated.View style={[styles.shell, shellStyle]}>
-        <GestureHandlerRootView style={styles.root}>
-          {/* พื้นดำทึบเต็มจอตลอด — ไม่ animate opacity ของชั้นนี้ตอนเปิด */}
-          <View style={styles.blackLock} pointerEvents="none" />
+      <StatusBar barStyle="light-content" backgroundColor={attachedBackdrop ? 'transparent' : '#000'} translucent={attachedBackdrop} />
+      <Animated.View style={[styles.shell, attachedBackdrop && styles.shellClear, !attachedBackdrop && shellStyle]}>
+        <GestureHandlerRootView style={[styles.root, attachedBackdrop && styles.rootClear]}>
+          {attachedBackdrop ? (
+            <Animated.View pointerEvents="none" style={[styles.feedBlack, feedBlackStyle]} />
+          ) : (
+            <View style={styles.blackLock} pointerEvents="none" />
+          )}
 
-          <Animated.View style={[styles.pager, contentStyle]} pointerEvents="box-none">
+          <Animated.View
+            style={[styles.pager, attachedBackdrop ? feedTravelStyle : contentStyle]}
+            pointerEvents="box-none"
+          >
+            <Animated.View style={[styles.pager, attachedBackdrop ? feedImageStyle : undefined]} pointerEvents="box-none">
             <FlatList
               ref={list}
               data={items}
@@ -266,7 +343,7 @@ export const MediaViewer = memo(function MediaViewer() {
               initialNumToRender={1}
               maxToRenderPerBatch={1}
               windowSize={3}
-              removeClippedSubviews
+              removeClippedSubviews={!attachedBackdrop}
               keyExtractor={(item) => item.id}
               getItemLayout={(_, i) => ({ length: W, offset: W * i, index: i })}
               onMomentumScrollEnd={settle}
@@ -279,7 +356,7 @@ export const MediaViewer = memo(function MediaViewer() {
                   (o): o is StickerOverlayObject => o.type === 'sticker' && o.mediaId === mediaId,
                 );
                 return (
-                  <View style={styles.page}>
+                  <View style={[styles.page, attachedBackdrop && styles.pageClear]}>
                     <Pressable style={StyleSheet.absoluteFill} onPress={requestClose} />
                     <View style={frame(item)}>
                       <MediaViewerGestureLayer
@@ -289,12 +366,17 @@ export const MediaViewer = memo(function MediaViewer() {
                         onDismiss={finishClose}
                         onZoomChange={item.type === 'image' ? setZoomed : () => undefined}
                         zoomEnabled={item.type === 'image'}
+                        bidirectionalDismiss={attachedBackdrop}
                       >
                         {item.type === 'video' ? (
                           <MediaVideoPlayer item={item} active={i === index} />
                         ) : (
                           <>
-                            <Image source={{ uri: item.uri }} style={styles.image} resizeMode="contain" />
+                            <Image
+                              source={{ uri: item.uri }}
+                              style={[styles.image, attachedBackdrop && styles.imageClear]}
+                              resizeMode="contain"
+                            />
                             {texts.length ? (
                               <TextOverlayRenderer
                                 overlays={texts}
@@ -317,6 +399,7 @@ export const MediaViewer = memo(function MediaViewer() {
                 );
               }}
             />
+            </Animated.View>
           </Animated.View>
 
           <Animated.View style={[styles.top, { paddingTop: insets.top + 6 }, chromeStyle]} pointerEvents="box-none">
@@ -409,9 +492,15 @@ export const MediaViewer = memo(function MediaViewer() {
 
 const styles = StyleSheet.create({
   shell: { flex: 1 },
+  shellClear: { backgroundColor: 'transparent' },
   root: { flex: 1, backgroundColor: '#000' },
+  rootClear: { backgroundColor: 'transparent' },
   blackLock: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
+    backgroundColor: '#000',
+  },
+  feedBlack: {
+    ...StyleSheet.absoluteFill,
     backgroundColor: '#000',
   },
   pager: { flex: 1 },
@@ -422,12 +511,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#000',
   },
+  pageClear: { backgroundColor: 'transparent' },
   image: { width: '100%', height: '100%', backgroundColor: '#000' },
+  imageClear: { backgroundColor: 'transparent' },
   top: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
+    zIndex: 3,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -436,7 +528,7 @@ const styles = StyleSheet.create({
   close: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   counter: { color: '#fff', fontSize: 15, fontWeight: '800' },
   video: { flex: 1, backgroundColor: '#000' },
-  videoTap: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  videoTap: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
   play: {
     width: 68,
     height: 68,
