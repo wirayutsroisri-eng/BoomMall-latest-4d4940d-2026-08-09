@@ -30,6 +30,7 @@ import {
 
 import { ProductVideoThumb } from '@/modules/store/ui/sell/ProductVideoThumb';
 import { colors } from '@/shared/theme/colors';
+import { ProductTagPicker, type TaggedProduct } from './ProductTagPicker';
 import { useAuthStore } from '@/modules/auth/state/auth-store';
 import { useModerationStore } from '@/modules/safety/state/moderation-store';
 import { scanKeywordsOnServer } from '@/modules/safety/syncModerationContentBlocks';
@@ -154,6 +155,7 @@ export function ContentPublishScreen() {
   const [location, setLocation] = useState<string | null>(draft.publishLocation);
   const [privacy] = useState('ทุกคนสามารถดูโพสต์นี้ได้');
   const [linkLabel, setLinkLabel] = useState<string | null>(draft.publishLinkLabel);
+  const [taggedProducts, setTaggedProducts] = useState<TaggedProduct[]>([]);
   const [publishing, setPublishing] = useState(false);
   const publishingRef = useRef(false);
   const clientPostIdRef = useRef<string | null>(null);
@@ -339,6 +341,7 @@ export function ContentPublishScreen() {
       intent: 'content',
       editorMedia: mediaItems,
       overlays: draft.overlays,
+      products: taggedProducts.map((product) => ({ productId: product.productId })),
     });
 
     clearDraft();
@@ -588,6 +591,12 @@ export function ContentPublishScreen() {
               );
             })}
           </ScrollView>
+        </View>
+
+        <View style={styles.divider} />
+
+        <View style={styles.locationBlock}>
+          <ProductTagPicker value={taggedProducts} onChange={setTaggedProducts} />
         </View>
 
         <View style={styles.divider} />

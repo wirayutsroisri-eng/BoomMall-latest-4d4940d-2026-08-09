@@ -95,6 +95,22 @@ export function fetchCommerceCatalog(merchantId?: string) {
   return req<{ ok: true; data: CatalogBundle[] }>(`/api/v1/commerce/catalog${q}`);
 }
 
+/** Product picker in the post composer — search the signed-in shop's own catalog. */
+export function searchOwnCatalog(query: string, limit = 20) {
+  const params = new URLSearchParams();
+  const q = query.trim();
+  if (q) params.set('q', q);
+  params.set('limit', String(limit));
+  return req<{ ok: true; data: CatalogBundle[] }>(`/api/v1/commerce/catalog?${params.toString()}`);
+}
+
+/** Public read for a product pinned to someone else's post. */
+export function fetchCatalogBundle(productId: string) {
+  return req<{ ok: true; data: CatalogBundle }>(
+    `/api/v1/commerce/catalog/${encodeURIComponent(productId)}`,
+  );
+}
+
 export function upsertCommerceProduct(bundle: CatalogBundle) {
   return req<{ ok: true; data: CatalogBundle }>('/api/v1/commerce/catalog', {
     method: 'PUT',

@@ -11,7 +11,6 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { AppError } from '../../lib/errors';
 import { getGpPolicy } from './GpLedgerService';
-import { releaseSettlement, reverseSettlement } from '../finance/FinanceService';
 
 export const SETTLEMENT = {
   HELD: 'HELD',
@@ -95,45 +94,61 @@ async function pushAudit(input: {
   }
 }
 
+/**
+ * Books one captured order.
+ *
+ * The buyer pays goods + shipping, so cash in must equal what the seller is owed
+ * plus what the platform keeps — otherwise the shipping fee the seller receives
+ * has no counterpart in the platform's own ledger.
+ */
 export async function recordPaidOrderBooks(input: {
   orderId: string;
   merchantId?: string | null;
   merchandiseThb: number;
-  gpAmountThb: number;
+  shippingFeeThb?: number;
+  /** สิ่งที่แพลตฟอร์มเก็บจริง = GP + VAT − หัก ณ ที่จ่าย */
+  platformTakeThb: number;
   netToMerchantThb: number;
+  tx?: Tx;
 }) {
   const gmv = Math.max(0, Math.round(input.merchandiseThb));
-  const gp = Math.max(0, Math.round(input.gpAmountThb));
+  const shipping = Math.max(0, Math.round(input.shippingFeeThb ?? 0));
+  const take = Math.max(0, Math.round(input.platformTakeThb));
   const net = Math.max(0, Math.round(input.netToMerchantThb));
   if (gmv <= 0) return;
-  await prisma.$transaction((tx) =>
-    writeLines(tx, [
-      {
-        account: THB_ACCOUNT.PLATFORM_CASH,
-        side: 'DEBIT',
-        amountThb: gmv,
-        orderId: input.orderId,
-        merchantId: input.merchantId,
-        memo: 'buyer_psp_capture',
-      },
-      {
-        account: THB_ACCOUNT.MERCHANT_HELD,
-        side: 'CREDIT',
-        amountThb: net,
-        orderId: input.orderId,
-        merchantId: input.merchantId,
-        memo: 'seller_net_held',
-      },
-      {
-        account: THB_ACCOUNT.PLATFORM_GP,
-        side: 'CREDIT',
-        amountThb: gp,
-        orderId: input.orderId,
-        merchantId: input.merchantId,
-        memo: 'platform_gp',
-      },
-    ]),
-  );
+
+  const lines: LedgerLine[] = [
+    {
+      account: THB_ACCOUNT.PLATFORM_CASH,
+      side: 'DEBIT',
+      amountThb: gmv + shipping,
+      orderId: input.orderId,
+      merchantId: input.merchantId,
+      memo: 'buyer_psp_capture',
+    },
+    {
+      account: THB_ACCOUNT.MERCHANT_HELD,
+      side: 'CREDIT',
+      amountThb: net,
+      orderId: input.orderId,
+      merchantId: input.merchantId,
+      memo: 'seller_net_held',
+    },
+    {
+      account: THB_ACCOUNT.PLATFORM_GP,
+      side: 'CREDIT',
+      amountThb: take,
+      orderId: input.orderId,
+      merchantId: input.merchantId,
+      memo: 'platform_take_gp_vat',
+    },
+  ];
+
+  if (input.tx) {
+    await writeLines(input.tx, lines);
+    return;
+  }
+  await prisma.$transaction((tx) => writeLines(tx, lines));
 }
 
 function canComplete(row: {
@@ -324,7 +339,7 @@ export async function resolveReturn(input: {
     });
   });
 
-  await reverseSettlement(order.id).catch(() => undefined);
+  // การดึงยอดคืนจากกระเป๋าร้านทำโดย EscrowService (REFUND_DEDUCT) — ที่นี่ลงสมุดกลางอย่างเดียว
 
   await pushAudit({
     actor: input.actor,
@@ -377,7 +392,8 @@ export async function releaseDueOrders(now = new Date()) {
         data: { settlementStatus: SETTLEMENT.RELEASE_ELIGIBLE },
       });
     });
-    await releaseSettlement(order.id).catch(() => undefined);
+    // ยอดจริงถูกปล่อยโดย EscrowService (escrow เป็นเจ้าของกระเป๋าร้าน)
+    // สมุดกลางตรงนี้ทำหน้าที่บันทึกฝั่งแพลตฟอร์มอย่างเดียว
   }
 
   return { released: due.length };
@@ -460,6 +476,81 @@ export async function createWeeklyPayoutBatch(input: { actor: string }) {
   });
 
   return prisma.payoutBatch.findUniqueOrThrow({ where: { id: batchId } });
+}
+
+/**
+ * ปิดรอบจ่าย — เงินออกจากบริษัทจริงแล้ว
+ *
+ * ต้องแนบหลักฐานการโอนเสมอ ระบบไม่เดาว่าโอนสำเร็จเอง และเรียกซ้ำได้โดยไม่ลงบัญชีซ้ำ
+ */
+export async function markPayoutBatchPaid(input: {
+  batchId: string;
+  actor: string;
+  proof: string;
+}) {
+  const proof = input.proof?.trim();
+  if (!proof) {
+    throw new AppError('VALIDATION', 'แนบหลักฐานการโอนก่อนปิดรอบจ่าย', 400);
+  }
+  const batch = await prisma.payoutBatch.findUnique({ where: { id: input.batchId } });
+  if (!batch) throw new AppError('NOT_FOUND', 'payout batch not found', 404);
+  if (batch.status === 'COMPLETED') return batch;
+  if (batch.status !== 'QUEUED') {
+    throw new AppError('VALIDATION', `cannot complete a ${batch.status} batch`, 400);
+  }
+
+  const orders = await prisma.commerceOrder.findMany({
+    where: { payoutBatchId: input.batchId, settlementStatus: SETTLEMENT.IN_PAYOUT },
+  });
+
+  const completed = await prisma.$transaction(async (tx) => {
+    for (const order of orders) {
+      const net = order.netToMerchantThb ?? 0;
+      await writeLines(tx, [
+        {
+          account: THB_ACCOUNT.MERCHANT_QUEUED,
+          side: 'DEBIT',
+          amountThb: net,
+          orderId: order.id,
+          merchantId: order.merchantId,
+          batchId: input.batchId,
+          memo: 'payout_transferred',
+        },
+        {
+          account: THB_ACCOUNT.PLATFORM_CASH,
+          side: 'CREDIT',
+          amountThb: net,
+          orderId: order.id,
+          merchantId: order.merchantId,
+          batchId: input.batchId,
+          memo: 'cash_out_to_seller',
+        },
+      ]);
+      await tx.commerceOrder.update({
+        where: { id: order.id },
+        data: { settlementStatus: SETTLEMENT.PAID_OUT },
+      });
+    }
+    return tx.payoutBatch.update({
+      where: { id: input.batchId },
+      data: {
+        status: 'COMPLETED',
+        completedAt: new Date(),
+        note: `${batch.note ?? ''} · proof:${proof}`.trim(),
+      },
+    });
+  });
+
+  await pushAudit({
+    actor: input.actor,
+    action: 'payout.batch.paid',
+    entityType: 'payout_batch',
+    entityId: input.batchId,
+    amountThb: batch.totalThb,
+    detail: { orderCount: orders.length, proof },
+  });
+
+  return completed;
 }
 
 export async function listPayoutBatches(limit = 20) {

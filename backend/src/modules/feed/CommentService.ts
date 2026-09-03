@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { prisma } from '../../lib/prisma';
 import { AppError } from '../../lib/errors';
+import { guardUserContent } from './moderation/guardUserContent';
 import { snowflakeIdForApi } from '../../config/snowflake';
 
 export type CommentDto = {
@@ -82,6 +83,12 @@ export async function addComment(input: {
     throw new AppError('VALIDATION', 'postId, authorId, body required', 400);
   }
   if (body.length > 2000) throw new AppError('VALIDATION', 'comment too long', 400);
+  await guardUserContent({
+    text: body,
+    authorId: input.authorId,
+    entityType: 'COMMENT',
+    entityId: input.postId,
+  });
 
   if (await prismaReady()) {
     const row = await prisma.socialComment.create({

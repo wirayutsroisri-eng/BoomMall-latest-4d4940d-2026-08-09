@@ -1,4 +1,4 @@
-import type { FeedComment, FeedItem } from '../domain/types';
+import type { FeedComment, FeedItem, FeedPostProduct } from '../domain/types';
 import type { SocialCommentDto } from './feedEngageApi';
 import { inferBoardSide } from '@/modules/matching/domain/board-side';
 import { isDemoCatalogFeedItem, isLiveUgcFeedItem, mediaUriLooksLive } from '../domain/isLiveUgcFeedItem';
@@ -22,6 +22,11 @@ export type SocialPostDto = {
   likeCount: number;
   commentCount?: number;
   shareCount?: number;
+  rootPostId?: string | null;
+  sharedPostId?: string | null;
+  shareKind?: string | null;
+  productCount?: number;
+  products?: FeedPostProduct[];
   lat?: number | null;
   lng?: number | null;
   locationLabel?: string | null;
@@ -253,6 +258,8 @@ export function socialPostToFeedItem(
     likes: post.likeCount ?? 0,
     comments: post.commentCount ?? 0,
     shares: post.shareCount ?? 0,
+    rootPostId: post.rootPostId ?? post.id,
+    products: post.products?.length ? post.products : undefined,
     isLive: false,
     musicTitle: media.musicTitle?.trim() || '',
     gradient: ['#0B3D2E', '#1A7A55'],

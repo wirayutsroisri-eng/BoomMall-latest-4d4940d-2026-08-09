@@ -2,6 +2,8 @@ import './utils/bigint';
 import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
+import { rateLimits } from './middleware/rateLimit';
+import { clientErrorRouter } from './modules/observability/clientErrorRoutes';
 import morgan from 'morgan';
 import { loadEnv } from './config/env';
 import { getPrismaPoolInfo } from './lib/prisma';
@@ -94,6 +96,12 @@ export function createApp() {
     }
   });
 
+  // Public app surface is rate limited per user (or per IP when anonymous).
+  // Admin and webhook routes are exempt — they authenticate differently.
+  app.use('/api/v1/feed', rateLimits.general);
+  app.use('/api/v1/commerce', rateLimits.general);
+  app.use('/api/v1/chat-domain', rateLimits.general);
+
   app.use('/api/v1/admin', adminRouter);
   app.use('/api/v1/admin/moderation', moderationAdminRouter);
   // Alias paths from product spec
@@ -106,7 +114,7 @@ export function createApp() {
   app.use('/api/v1', recommendationAppRouter);
 
   /** Domain services */
-  app.use('/api/v1/auth', authDomainRouter);
+  app.use('/api/v1/auth', rateLimits.auth, authDomainRouter);
   app.use('/api/v1/admin/ecommerce', ecommerceDomainRouter);
   app.use('/api/promotions', sellerPromotionRouter);
   app.use('/api/v1/promotions', sellerPromotionRouter);
@@ -115,7 +123,7 @@ export function createApp() {
   app.use('/api/v1/admin/chat-domain', chatDomainRouter);
   app.use('/api/v1/chat-domain', chatAppRouter);
   app.use('/api/v1/feed', feedAppRouter);
-  app.use('/api/v1/media-assets', mediaAssetRouter);
+  app.use('/api/v1/media-assets', rateLimits.upload, mediaAssetRouter);
   app.use('/api/v1/stories', storyRouter);
   app.use('/api/v1/friends', friendRouter);
   app.use('/api/v1/admin/feed-domain', feedDomainRouter);
@@ -132,6 +140,7 @@ export function createApp() {
 
   app.use('/api/v1/chat', chatIngestRouter);
   app.use('/api/v1/moderation', moderationPublicRouter);
+  app.use('/api/v1/client-errors', clientErrorRouter);
   app.use(errorHandler);
   return app;
 }

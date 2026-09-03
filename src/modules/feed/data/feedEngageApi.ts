@@ -85,6 +85,7 @@ export async function publishSocialPost(input: {
   tags?: string[];
   linkUrl?: string;
   lane?: string;
+  products?: Array<{ productId: string; skuId?: string; mediaId?: string; x?: number; y?: number }>;
 }): Promise<SocialPostDto | null> {
   const base = getApiBase();
   if (!base) throw new Error('FEED_API_UNAVAILABLE');

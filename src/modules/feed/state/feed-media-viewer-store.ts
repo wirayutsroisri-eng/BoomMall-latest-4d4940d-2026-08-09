@@ -28,6 +28,10 @@ export type OpenMediaViewerInput = {
   mediaIds?: string[];
   overlays?: OverlayObject[];
   media?: EditorMedia[];
+  /** หน้าฟีดเท่านั้น — พื้นดำติดรูป ไม่ใช้กับ preview หน้าคลิป */
+  attachedBackdrop?: boolean;
+  /** หน้าฟีดเท่านั้น — ตำแหน่ง/ขนาดรูปต้นทางในฟีด (window coords) สำหรับ hero transition */
+  originFrame?: { x: number; y: number; width: number; height: number };
 };
 
 type State = {
@@ -38,6 +42,8 @@ type State = {
   mediaIds: string[];
   overlays: OverlayObject[];
   media: EditorMedia[];
+  attachedBackdrop: boolean;
+  originFrame?: { x: number; y: number; width: number; height: number };
   open: (input: OpenMediaViewerInput) => void;
   close: () => void;
 };
@@ -50,13 +56,20 @@ export const useFeedMediaViewerStore = create<State>((set) => ({
   mediaIds: [],
   overlays: [],
   media: [],
-  open: ({ items, initialIndex = 0, sourcePostId, mediaIds = [], overlays = [], media = [] }) => set({
+  attachedBackdrop: false,
+  originFrame: undefined,
+  open: ({ items, initialIndex = 0, sourcePostId, mediaIds = [], overlays = [], media = [], attachedBackdrop = false, originFrame }) => set({
     visible: items.length > 0,
     items,
     initialIndex: Math.max(0, Math.min(items.length - 1, initialIndex)),
     sourcePostId,
     mediaIds, overlays, media,
+    attachedBackdrop,
+    originFrame,
   }),
+  // ห้ามรีเซ็ต attachedBackdrop/originFrame ตรงนี้ — Modal ยังโชว์อยู่ 1-2 เฟรมหลัง visible=false
+  // ถ้ารีเซ็ต viewer จะพลิกไปโหมดพื้นดำทึบ (blackLock) → จอดำวาบตอนปัดขึ้น/กดกากบาท
+  // open() ครั้งถัดไป set ค่าใหม่ทับเสมอ
   close: () => set({ visible: false, sourcePostId: undefined }),
 }));
 
@@ -64,7 +77,14 @@ export function openMediaViewer(input: OpenMediaViewerInput) {
   useFeedMediaViewerStore.getState().open(input);
 }
 
-export function openFeedMediaViewer(uris: string[], initialIndex: number, mediaIds?: string[], overlays?: OverlayObject[], media?: EditorMedia[]) {
+export function openFeedMediaViewer(
+  uris: string[],
+  initialIndex: number,
+  mediaIds?: string[],
+  overlays?: OverlayObject[],
+  media?: EditorMedia[],
+  options?: { attachedBackdrop?: boolean; originFrame?: { x: number; y: number; width: number; height: number } },
+) {
   openMediaViewer({
     items: uris.map((uri, index) => ({
       id: mediaIds?.[index] ?? `${uri}:${index}`,
@@ -77,5 +97,7 @@ export function openFeedMediaViewer(uris: string[], initialIndex: number, mediaI
     mediaIds,
     overlays,
     media,
+    attachedBackdrop: options?.attachedBackdrop,
+    originFrame: options?.originFrame,
   });
 }

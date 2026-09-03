@@ -29,6 +29,13 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    # Placeholders only — nothing here is a real credential. Unit tests never
+    # open a database connection; a few service modules construct a
+    # PrismaClient (lazy-connect) at import time, and config/env.ts validates
+    # these two vars eagerly just to build that connection string.
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci_placeholder
+      ADMIN_API_KEY: ci-placeholder
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

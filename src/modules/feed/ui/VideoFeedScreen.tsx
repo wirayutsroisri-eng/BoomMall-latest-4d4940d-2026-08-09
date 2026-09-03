@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect } from 'react';
-import { Dimensions, Pressable, StyleSheet, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Dimensions, Image, InteractionManager, Pressable, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,33 +13,85 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { DragDownDismiss } from '@/shared/components/DragDownDismiss';
+import { useFeedStore } from '@/modules/feed/state/feed-store';
 import { HomeFeedScreen } from './HomeFeedScreen';
 
-const SCREEN_WIDTH = Dimensions.get('window').width;
-const ENTER_MS = 360;
-const enterEasing = Easing.bezier(0.22, 1, 0.36, 1);
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const ENTER_MS = 300;
+/** กันรอ mount นานเกิน — ถ้าฟีดคลิปยังไม่นิ่งภายในเวลานี้ ก็เริ่มขยายเลย */
+const MOUNT_WAIT_MAX_MS = 420;
+const enterEasing = Easing.out(Easing.cubic);
 
 export function VideoFeedScreen() {
   const insets = useSafeAreaInsets();
   const scrollY = useSharedValue(0);
   const swipeX = useSharedValue(0);
+  /** ระยะลากลงจาก DragDownDismiss — ใช้จางพื้นดำให้เห็นฟีดข้างหลัง */
+  const dragY = useSharedValue(0);
   const closing = useSharedValue(false);
-  /** 0→1 หลัง mount — ใช้ขยายเข้าจอ ไม่ใส่ opacity ค้างบน VideoView */
+  /** 0→1 หลัง mount — ขยายกรอบโปสเตอร์ ไม่ scale VideoView (พื้นผิววิดีโอไม่ตาม transform) */
   const enter = useSharedValue(0);
-  const entered = useSharedValue(false);
-  const { feedId, startTime } = useLocalSearchParams<{ feedId?: string; startTime?: string }>();
+  const [heroCover, setHeroCover] = useState(true);
+  const { feedId, startTime, ox, oy, ow, oh } = useLocalSearchParams<{
+    feedId?: string;
+    startTime?: string;
+    ox?: string;
+    oy?: string;
+    ow?: string;
+    oh?: string;
+  }>();
   const initialPlaybackTime = Number.isFinite(Number(startTime)) ? Math.max(0, Number(startTime)) : 0;
 
+  // Hero: ตำแหน่งวิดีโอในฟีด — หน้าคลิปขยายจากจุดนี้เป็นเต็มจอ (แบบ Facebook)
+  const originW = Number(ow);
+  const originH = Number(oh);
+  const hasHero = Number.isFinite(Number(ox)) && Number.isFinite(Number(oy)) && originW > 0 && originH > 0;
+  const originX = hasHero ? Number(ox) : 0;
+  const originY = hasHero ? Number(oy) : 0;
+  const posterUri = useFeedStore((s) => {
+    if (!feedId) return undefined;
+    const item = s.items.find((entry) => entry.id === feedId);
+    return item?.mediaAssets?.find((asset) => asset.type === 'video')?.thumbnailUrl;
+  });
+
+  const dropHeroCover = useCallback(() => setHeroCover(false), []);
+
   useEffect(() => {
-    entered.value = false;
+    setHeroCover(true);
     enter.value = 0;
-    const id = requestAnimationFrame(() => {
+    let started = false;
+    let firstFrame = 0;
+    let secondFrame = 0;
+    const startEnter = () => {
+      if (started) return;
+      started = true;
       enter.value = withTiming(1, { duration: ENTER_MS, easing: enterEasing }, (finished) => {
-        if (finished) entered.value = true;
+        if (finished) runOnJS(dropHeroCover)();
+      });
+    };
+
+    // ไม่มี hero (เข้าตรงๆ ไม่ได้มาจากการ์ดในฟีด) → เฟดเข้าได้ทันที
+    if (!hasHero) {
+      startEnter();
+      return;
+    }
+
+    // มี hero: ระหว่างนี้โปสเตอร์ยังทับอยู่ตรงตำแหน่งเดิมในฟีดพอดี ผู้ใช้จึงไม่เห็นการรอ
+    // รอให้ฟีดคลิป (FlatList + player) mount/commit เสร็จก่อนค่อยขยาย — ถ้าขยายพร้อมกับ
+    // งาน mount อนิเมชันจะแย่ง UI thread กับการ commit view แล้วเฟรมตก (กระตุก)
+    const task = InteractionManager.runAfterInteractions(() => {
+      firstFrame = requestAnimationFrame(() => {
+        secondFrame = requestAnimationFrame(startEnter);
       });
     });
-    return () => cancelAnimationFrame(id);
-  }, [enter, entered]);
+    const fallback = setTimeout(startEnter, MOUNT_WAIT_MAX_MS);
+    return () => {
+      task.cancel();
+      cancelAnimationFrame(firstFrame);
+      cancelAnimationFrame(secondFrame);
+      clearTimeout(fallback);
+    };
+  }, [dropHeroCover, enter, hasHero]);
 
   const dismiss = useCallback(() => {
     if (router.canGoBack()) router.back();
@@ -82,16 +134,7 @@ export function VideoFeedScreen() {
     });
 
   const swipeStyle = useAnimatedStyle(() => {
-    // idle หลังเข้าจอแล้ว: ไม่มี opacity/transform — กัน VideoView ทับชีตคอมเมนต์
-    if (swipeX.value === 0 && entered.value) {
-      return {};
-    }
-    if (swipeX.value === 0) {
-      // ตอนกำลังเข้าจอ: ขยายจาก 0.88 → 1 (ไม่มี opacity flash)
-      return {
-        transform: [{ scale: interpolate(enter.value, [0, 1], [0.88, 1], 'clamp') }],
-      };
-    }
+    if (swipeX.value === 0) return {};
     return {
       opacity: interpolate(swipeX.value, [0, SCREEN_WIDTH], [1, 0.88], 'clamp'),
       transform: [
@@ -101,19 +144,48 @@ export function VideoFeedScreen() {
     };
   });
 
+  /** กรอบโปสเตอร์ขยายจากตำแหน่งวิดีโอในฟีด → เต็มจอ — ไม่แตะ VideoView */
+  const heroClipStyle = useAnimatedStyle(() => ({
+    left: interpolate(enter.value, [0, 1], [originX, 0], 'clamp'),
+    top: interpolate(enter.value, [0, 1], [originY, 0], 'clamp'),
+    width: interpolate(enter.value, [0, 1], [originW, SCREEN_WIDTH], 'clamp'),
+    height: interpolate(enter.value, [0, 1], [originH, SCREEN_HEIGHT], 'clamp'),
+    opacity: interpolate(enter.value, [0.82, 1], [1, 0], 'clamp'),
+  }));
+
+  const chromeStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(enter.value, [0.7, 1], [0, 1], 'clamp'),
+  }));
+
+  /** VideoView อยู่เต็มจอข้างใต้ — โชว์ตอนกรอบขยายเกือบจบ กันวิดีโอโผล่รอบโปสเตอร์ */
+  const playerRevealStyle = useAnimatedStyle(() => ({
+    opacity: hasHero ? interpolate(enter.value, [0.78, 1], [0, 1], 'clamp') : enter.value,
+  }));
+
+  /** พื้นดำหลังคลิป — ขึ้นเนียนตอนเข้า และจางตอนลากลง/ปัดขวา ให้เห็นฟีดข้างหลัง */
+  const backdropStyle = useAnimatedStyle(() => ({
+    opacity:
+      enter.value *
+      interpolate(dragY.value, [0, SCREEN_HEIGHT * 0.5], [1, 0], 'clamp') *
+      interpolate(swipeX.value, [0, SCREEN_WIDTH], [1, 0], 'clamp'),
+  }));
+
   return (
     <View style={styles.routeRoot}>
+      <Animated.View pointerEvents="none" style={[styles.backdrop, backdropStyle]} />
       <GestureDetector gesture={swipeBackGesture}>
         <Animated.View style={[styles.root, swipeStyle]}>
-          <DragDownDismiss onDismiss={dismiss} scrollY={scrollY} style={styles.root}>
-            <HomeFeedScreen
-              channelEmbedded
-              videoOnly
-              initialFeedId={feedId}
-              initialPlaybackTime={initialPlaybackTime}
-              verticalScrollY={scrollY}
-            />
-            <View style={[styles.header, { top: insets.top + 8 }]} pointerEvents="box-none">
+          <DragDownDismiss onDismiss={dismiss} scrollY={scrollY} dragY={dragY} style={styles.root}>
+            <Animated.View style={[styles.root, playerRevealStyle]}>
+              <HomeFeedScreen
+                channelEmbedded
+                videoOnly
+                initialFeedId={feedId}
+                initialPlaybackTime={initialPlaybackTime}
+                verticalScrollY={scrollY}
+              />
+            </Animated.View>
+            <Animated.View style={[styles.header, { top: insets.top + 8 }, chromeStyle]} pointerEvents="box-none">
               <Pressable
                 style={styles.button}
                 onPress={closeToRight}
@@ -132,18 +204,41 @@ export function VideoFeedScreen() {
               >
                 <Ionicons name="search" size={27} color="#fff" />
               </Pressable>
-            </View>
+            </Animated.View>
           </DragDownDismiss>
         </Animated.View>
       </GestureDetector>
+      {hasHero && heroCover ? (
+        <Animated.View pointerEvents="none" style={[styles.heroClip, heroClipStyle]}>
+          {posterUri ? (
+            <Image source={{ uri: posterUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          ) : (
+            <View style={styles.heroFallback} />
+          )}
+        </Animated.View>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  // ดำทึบทันทีตั้งแต่เฟรมแรก — ไม่โปร่งใสให้ฟีดโผล่
-  routeRoot: { flex: 1, backgroundColor: '#000' },
-  root: { flex: 1, backgroundColor: '#000' },
+  // โปร่งใส — ฟีดข้างหลังโผล่ผ่าน backdrop ที่จางตามการลาก (transparentModal)
+  routeRoot: { flex: 1, backgroundColor: 'transparent' },
+  root: { flex: 1, backgroundColor: 'transparent' },
+  backdrop: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: '#000',
+  },
+  heroClip: {
+    position: 'absolute',
+    overflow: 'hidden',
+    backgroundColor: '#050706',
+    zIndex: 20,
+  },
+  heroFallback: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: '#050706',
+  },
   header: {
     position: 'absolute',
     left: 14,

@@ -642,6 +642,18 @@ model SocialPost {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  /// Share/repost lineage — a share is a post pointing at another post, never a media copy.
+  /// sharedPostId = the post that was tapped; rootPostId = the original content (chains stay flat).
+  sharedPostId String?
+  rootPostId   String?
+  /// REPOST (no added text) | QUOTE (author added text)
+  shareKind    String?
+  repostCount  Int     @default(0)
+  mentionCount Int     @default(0)
+
+  /// Shoppable posts — how many real products are pinned to this post.
+  productCount Int @default(0)
+
   mediaAssets MediaAsset[]
   comments    SocialComment[]
 
@@ -649,6 +661,208 @@ model SocialPost {
   @@index([authorId, createdAt])
   @@index([status, createdAt])
   @@index([lane, createdAt])
+  @@index([rootPostId, createdAt])
+  @@index([sharedPostId])
+}
+
+// ─── Feed Serving V2 ───────────────────────────────────────────────────────
+
+/// Immutable snapshot of the whole feed algorithm. Publishing never overwrites
+/// a version — it creates a new one, so rollback is a pointer move.
+model FeedConfigVersion {
+  id            String    @id @default(uuid())
+  version       Int       @unique
+  /// DRAFT | PUBLISHED | ARCHIVED
+  status        String    @default("DRAFT")
+  note          String?
+  /// Personalization weights + discovery switches (shape of FeedPersonalizationConfigDto)
+  rankingJson   Json      @default("{}")
+  /// Slot rules: adDensity, minAdSpacing, creatorSpacing, maxPerRootPost, ...
+  composerJson  Json      @default("{}")
+  /// Ad delivery rules: pacing, frequency caps
+  adJson        Json      @default("{}")
+  parentVersion Int?
+  createdBy     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  publishedAt   DateTime?
+  publishedBy   String?
+
+  @@index([status, version])
+}
+
+/// A/B assignment is deterministic: hash(salt + viewerKey) → variant, stable per session.
+model FeedExperiment {
+  id           String    @id @default(uuid())
+  key          String    @unique
+  /// DRAFT | RUNNING | STOPPED
+  status       String    @default("DRAFT")
+  salt         String
+  /// [{ key, weight, configVersion }]
+  variantsJson Json      @default("[]")
+  /// home | clips | null = every surface
+  surface      String?
+  startAt      DateTime?
+  endAt        DateTime?
+  createdBy    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([status])
+}
+
+/// Feature flags + kill switches, read through a short-lived cache.
+model FeedFlag {
+  key         String   @id
+  enabled     Boolean  @default(false)
+  /// 0–100 percentage rollout applied on top of `enabled`
+  rolloutPct  Int      @default(0)
+  payloadJson Json     @default("{}")
+  updatedBy   String?
+  updatedAt   DateTime @updatedAt
+}
+
+/// Raw viewer signals. Pruned after 30 days — the ranker reads the rollup, never this.
+model FeedEvent {
+  id            String   @id @default(uuid())
+  sessionId     String
+  userId        String?
+  /// The post as it appeared in the feed (a share has its own id)
+  itemId        String
+  /// The original content id, so a share's watch time rolls up to the source
+  rootId        String?
+  /// organic | ad
+  itemKind      String   @default("organic")
+  slot          Int      @default(0)
+  /// impression | watch | skip | engage
+  type          String
+  /// like | comment | save | repost | share_chat | share_link | profile | product | mention_tap
+  action        String?
+  watchMs       Int      @default(0)
+  videoMs       Int      @default(0)
+  dwellMs       Int      @default(0)
+  completed     Boolean  @default(false)
+  rankToken     String?
+  configVersion Int?
+  variant       String?
+  seq           Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  @@unique([sessionId, itemId, type, seq])
+  @@index([itemId, createdAt])
+  @@index([rootId, createdAt])
+  @@index([createdAt])
+}
+
+/// Hourly rollup of FeedEvent — the feature table the ranker actually reads.
+model PostMetricsRollup {
+  postId       String
+  day          DateTime @db.Date
+  impressions  Int      @default(0)
+  watchMsSum   BigInt   @default(0)
+  completes    Int      @default(0)
+  skips        Int      @default(0)
+  likes        Int      @default(0)
+  comments     Int      @default(0)
+  shares       Int      @default(0)
+  ctr          Float    @default(0)
+  qualityScore Float    @default(0)
+  updatedAt    DateTime @updatedAt
+
+  @@id([postId, day])
+  @@index([day])
+}
+
+/// Proof of every ad served — pacing, cross-device frequency caps and billing read this.
+model AdDelivery {
+  id          String    @id @default(uuid())
+  campaignId  String
+  creativeId  String
+  userId      String?
+  sessionId   String
+  slot        Int       @default(0)
+  servedAt    DateTime  @default(now())
+  impressedAt DateTime?
+  clickedAt   DateTime?
+  costThb     BigInt    @default(0)
+
+  @@index([campaignId, servedAt])
+  @@index([userId, servedAt])
+}
+
+/// Durable copy of the Redis seen-set, keyed by root content so reshares never repeat.
+model FeedSeen {
+  userId     String
+  /// home | clips
+  surface    String
+  rootPostId String
+  seenAt     DateTime @default(now())
+
+  @@id([userId, surface, rootPostId])
+  @@index([seenAt])
+}
+
+/// Tagged people on a post or comment. Stores offsets, never the rendered name.
+model PostMention {
+  id         String   @id @default(uuid())
+  /// POST | COMMENT
+  entityType String   @default("POST")
+  entityId   String
+  userId     String
+  byUserId   String
+  /// BODY (inline @mention) | PHOTO (tag placed on media)
+  source     String   @default("BODY")
+  start      Int?
+  len        Int?
+  mediaId    String?
+  x          Float?
+  y          Float?
+  /// ACTIVE | REMOVED_BY_TAGGEE
+  status     String   @default("ACTIVE")
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([userId, createdAt])
+}
+
+/// Short, measurable outbound share link backing /s/:shortId and its OG preview.
+model ShareLink {
+  id          String    @id @default(uuid())
+  shortId     String    @unique
+  postId      String
+  ownerId     String?
+  /// line | facebook | messenger | whatsapp | copy | more
+  channel     String    @default("copy")
+  clickCount  Int       @default(0)
+  lastClickAt DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([postId, createdAt])
+  @@index([ownerId, createdAt])
+}
+
+/// A product pinned to a post ("ปักตะกร้า").
+/// Price and stock are never copied here — they are read live from CommerceSku
+/// so a post can never advertise a price the shop no longer sells at.
+model PostProduct {
+  id         String   @id @default(uuid())
+  postId     String
+  productId  String
+  skuId      String?
+  /// Seller at pin time — the future commission payee, kept even if the shop is renamed.
+  sellerId   String
+  /// Which media item the pin sits on, and where (0–1 of width/height).
+  mediaId    String?
+  x          Float?
+  y          Float?
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@unique([postId, productId])
+  @@index([postId, sortOrder])
+  @@index([productId, createdAt])
+  @@index([sellerId, createdAt])
 }
 
 model Story {
@@ -795,6 +1009,9 @@ model CommerceStock {
 model CommerceOrder {
   id                String    @id @default(cuid())
   buyerId           String
+  /// Which post sent this buyer here, and whose pin it was — the commission trail.
+  sourcePostId      String?
+  sourceCreatorId   String?
   merchantId        String?
   /// PENDING_PAYMENT | PAID | SHIPPED | DELIVERED | COMPLETED | CANCELLED | REFUNDED | FAILED
   status            String    @default("PENDING_PAYMENT")
@@ -1163,7 +1380,20 @@ model WithdrawalRequest {
 /// บัญชีกลางแพลตฟอร์ม + กติกา escrow
 model PlatformSettings {
   id                 String   @id @default("GLOBAL")
+  /// เลิกใช้เป็นแหล่งอัตรา — อัตราจริงมาจาก MarketplaceGpPolicy คงไว้เพื่อความเข้ากันได้
   defaultGpPercent   Float    @default(5) @map("default_gp_percent")
+  /// VAT บนค่า GP (%) — มีผลเมื่อ vatRegistered = true และถึง vatEffectiveFrom แล้วเท่านั้น
+  vatPercent         Float     @default(0) @map("vat_percent")
+  /// บริษัทจดทะเบียน VAT แล้วหรือยัง — ตอนนี้ยังเป็นบัญชีบุคคลธรรมดา
+  vatRegistered      Boolean   @default(false) @map("vat_registered")
+  /// เริ่มคิด VAT ตั้งแต่วันนี้ — ออเดอร์ก่อนหน้านี้ไม่ถูกคิดย้อนหลัง
+  vatEffectiveFrom   DateTime? @map("vat_effective_from")
+  /// เลขประจำตัวผู้เสียภาษีของผู้รับเงิน (บุคคลธรรมดาหรือนิติบุคคล) — ใช้บนใบเสร็จ
+  companyTaxId       String?   @map("company_tax_id")
+  /// ชื่อผู้รับเงินตามที่จดทะเบียน — ใช้บนใบเสร็จ/ใบกำกับ
+  companyLegalName   String?   @map("company_legal_name")
+  /// หัก ณ ที่จ่ายบนค่า GP (%) สำหรับร้านนิติบุคคล — 0 = ยังไม่เปิด
+  whtPercent         Float     @default(0) @map("wht_percent")
   autoCompleteDays   Int      @default(7) @map("auto_complete_days")
   /// MANUAL = แอดมินโอนแนบสลิป | AUTO = โอนผ่าน Payout Gateway เมื่อเข้าเงื่อนไข
   payoutMode         String   @default("MANUAL") @map("payout_mode")
@@ -1218,6 +1448,10 @@ model OrderEscrow {
   shippingFee       Int       @default(0) @map("shipping_fee")
   gpPercent         Float     @map("gp_percent")
   gpAmount          Int       @map("gp_amount")
+  /// VAT บนค่า GP (สตางค์) — ค่าธรรมเนียมแพลตฟอร์มเป็นบริการที่ต้องมี VAT
+  vatAmount         Int       @default(0) @map("vat_amount")
+  /// หัก ณ ที่จ่ายบนค่า GP (สตางค์) — เฉพาะร้านนิติบุคคล ร้านเก็บไว้นำส่งสรรพากร
+  whtAmount         Int       @default(0) @map("wht_amount")
   netMerchantAmount Int       @map("net_merchant_amount")
   releaseDueDate    DateTime? @map("release_due_date")
   /// HELD | RELEASED | CANCELLED | REFUNDED

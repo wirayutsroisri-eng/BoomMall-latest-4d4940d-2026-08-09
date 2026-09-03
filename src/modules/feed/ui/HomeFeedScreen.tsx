@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Dimensions,
   FlatList,
   Pressable,
   RefreshControl,
@@ -27,6 +28,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
+import { trackFeedSignal } from '@/modules/feed/data/feedEventQueue';
 import { ContentRefreshOverlay } from '@/shared/components/ContentRefreshOverlay';
 import { withMinimumDuration } from '@/shared/utils/minimumDuration';
 import { useCallStore } from '@/modules/chat/state/call-store';
@@ -59,6 +61,7 @@ import { useFeedChromeStore } from '@/modules/feed/state/feed-chrome-store';
 import { syncFeedInterested, syncFeedLike, syncFeedNotInterested, syncFeedShare } from '@/modules/feed/data/feedEngageApi';
 import { recordActivity } from '@/modules/account/state/activity-store';
 import { MediaViewer } from './MediaViewer';
+import { mainTabBarHeight } from '@/shared/components/MainTabBar';
 
 /** ซ้าย → ขวา ตามหัวแท็บ: หางาน | ใกล้คุณ | กำลังติดตาม | สำหรับคุณ */
 const TAB_ORDER: FeedTab[] = ['board', 'nearby', 'following', 'foryou'];
@@ -69,6 +72,10 @@ const COMMENT_DOCK_ROW = 44;
 const COMMENT_DOCK_MIN = 68;
 /** `FeedSeekBar` ใช้ `bottom: 10 + bottomOffset` */
 const SEEK_BAR_BASE_BOTTOM = 10;
+/** ตรงกับ `styles.rootEmbedded` — คลิปในแท็บถูกเลื่อนขึ้น ต้องชดตอนวาง seek */
+const CHANNEL_EMBEDDED_LIFT = 40;
+/** ตำแหน่ง seek bar หน้าคลิป — ล็อกแล้ว อย่าขยับ */
+const CLIPS_SEEK_LIFT = 17;
 
 function openCreatorRoute(handle: string, feedId?: string) {
   const h = handle.replace(/^@/, '');
@@ -114,8 +121,12 @@ export function HomeFeedScreen({
   const startCall = useCallStore((s) => s.startCall);
   const setActive = useCallStore((s) => s.setActive);
 
-  const [viewportHeight, setViewportHeight] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(() =>
+    videoOnly ? Dimensions.get('window').height : 0,
+  );
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
+  const activeItemIdRef = useRef<string | null>(null);
+  activeItemIdRef.current = activeItemId;
   const [playbackActiveItemId, setPlaybackActiveItemId] = useState<string | null>(null);
   const [playbackTab, setPlaybackTab] = useState<FeedTab>(tab);
   const isScrollingRef = useRef(false);
@@ -147,6 +158,9 @@ export function HomeFeedScreen({
   const sheetRef = useRef<BottomSheetModal>(null);
   const commentsSheetRef = useRef<BottomSheetModal>(null);
   const activeIndexRef = useRef(0);
+  /** initialFeedId ต้องมีผลครั้งเดียวตอน mount — ดู effect ที่เลือก active item ด้านล่าง */
+  const initialFeedIdUsedRef = useRef(false);
+  const lastLaneRef = useRef<FeedTab | null>(null);
   const listRefs = useRef<Partial<Record<FeedTab, FlatList<FeedItem> | null>>>({});
   const reelTab = onBoard ? 'foryou' : effectiveTab;
   const tabIndex = Math.max(0, laneOrder.indexOf(effectiveTab));
@@ -221,9 +235,22 @@ export function HomeFeedScreen({
 
   useEffect(() => {
     // Restore the previously active item for this tab (persisted across tab switches).
+    const laneChanged = lastLaneRef.current !== effectiveTab;
+    lastLaneRef.current = effectiveTab;
     const restored = activeItemByTabRef.current[effectiveTab];
-    const requested = initialFeedId && items.some((item) => item.id === initialFeedId) ? initialFeedId : null;
-    const candidate = requested ?? (restored && items.find((i) => i.id === restored) ? restored : items[0]?.id ?? null);
+    // initialFeedId ใช้ได้ครั้งเดียวตอนเปิดหน้าคลิปเท่านั้น — ถ้าปล่อยให้บังคับทุกครั้งที่
+    // `items` ถูกสร้างใหม่ (เช่น syncCommentsFromServer map ทับ state.items ตอนเปิดชีตคอมเมนต์)
+    // active จะเด้งกลับไปคลิปแรก → เสียงคลิปแรกแทรกขึ้นมา และคอมเมนต์เปิดผิดคลิป
+    const requested =
+      !initialFeedIdUsedRef.current && initialFeedId && items.some((item) => item.id === initialFeedId)
+        ? initialFeedId
+        : null;
+    if (requested) initialFeedIdUsedRef.current = true;
+    const current = activeItemIdRef.current;
+    // อยู่เลนเดิมและคลิปที่ดูอยู่ยังอยู่ในลิสต์ → ล็อกไว้ที่คลิปนั้น
+    const keepCurrent = !laneChanged && current && items.some((i) => i.id === current) ? current : null;
+    const candidate =
+      requested ?? keepCurrent ?? (restored && items.find((i) => i.id === restored) ? restored : items[0]?.id ?? null);
     setActiveItemId(candidate);
     activeIndexRef.current = candidate ? items.findIndex((i) => i.id === candidate) : 0;
   }, [effectiveTab, initialFeedId, items]);
@@ -275,6 +302,12 @@ export function HomeFeedScreen({
         return;
       }
       openComments(feedId);
+      trackFeedSignal({
+        itemId: feedId,
+        rootId: allItemsRef.current.find((i) => i.id === feedId)?.rootPostId,
+        type: 'engage',
+        action: 'comment',
+      });
       requestAnimationFrame(() => commentsSheetRef.current?.present());
     },
     [authHydrated, authenticated, openComments],
@@ -297,6 +330,9 @@ export function HomeFeedScreen({
       const nextLiked = !item.liked;
       toggleLike(item.id);
       void syncFeedLike(item.id, nextLiked);
+      if (nextLiked) {
+        trackFeedSignal({ itemId: item.id, rootId: item.rootPostId, type: 'engage', action: 'like' });
+      }
     },
     [authHydrated, authenticated, toggleLike],
   );
@@ -350,6 +386,11 @@ export function HomeFeedScreen({
     COMMENT_DOCK_MIN,
     COMMENT_DOCK_PAD_TOP + COMMENT_DOCK_ROW + commentDockPadBottom,
   );
+  const tabBarHeight = mainTabBarHeight(insets.bottom);
+  const clipsSeekInset = Math.max(
+    0,
+    tabBarHeight - SEEK_BAR_BASE_BOTTOM - CHANNEL_EMBEDDED_LIFT + CLIPS_SEEK_LIFT,
+  );
   const reelBottomInset = videoOnly ? 76 + insets.bottom : channelEmbedded ? 40 : 0;
 
   const renderLaneItem = useCallback(
@@ -387,7 +428,7 @@ export function HomeFeedScreen({
         onCommitTabIndex={commitTabIndex}
         bottomMetaInset={reelBottomInset}
         bottomActionsInset={reelBottomInset}
-        bottomSeekInset={videoOnly ? commentDockHeight - SEEK_BAR_BASE_BOTTOM : channelEmbedded ? 5 : 0}
+        bottomSeekInset={videoOnly ? commentDockHeight - SEEK_BAR_BASE_BOTTOM : channelEmbedded ? clipsSeekInset : 0}
         initialPlaybackTime={videoOnly && item.id === initialFeedId ? initialPlaybackTime : 0}
       />
     ),
@@ -406,6 +447,7 @@ export function HomeFeedScreen({
       laneOrder.length,
       promotedMasters,
       commentDockHeight,
+      clipsSeekInset,
       reelBottomInset,
       initialFeedId,
       initialPlaybackTime,
@@ -684,7 +726,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface.canvas,
   },
   rootEmbedded: {
-    transform: [{ translateY: -40 }],
+    transform: [{ translateY: -CHANNEL_EMBEDDED_LIFT }],
   },
   feedClip: {
     flex: 1,

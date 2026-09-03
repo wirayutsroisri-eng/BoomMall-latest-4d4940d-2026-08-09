@@ -6,10 +6,28 @@ import { Router } from 'express';
 import { requireAdmin, adminHasPermission } from '../../../middleware/adminAuth';
 import type { AuthedRequest } from '../../../middleware/adminAuth';
 import { requireUserOrDevHeader } from '../../../middleware/userAuth';
+import { rateLimits } from '../../../middleware/rateLimit';
 import type { UserAuthedRequest } from '../../../middleware/userAuth';
 import { createSocialPost, listSocialPosts, socialFeedDomainExtras, toggleSocialPostLike, recordFeedSignal, bumpShareCount, updateSocialPost, deleteSocialPost, updateSecondhandListingStatus } from '../SocialPostService';
 import { addComment, listComments, toggleCommentLike } from '../CommentService';
 import { contentFeedDomainStatus } from '../ContentFeedService';
+import {
+  createDraft,
+  ensureSeedVersion,
+  killSwitch,
+  listConfigAudit,
+  listConfigVersions,
+  listExperiments,
+  listFlags,
+  publishVersion,
+  rollbackTo,
+  setFlag,
+  updateDraft,
+  upsertExperiment,
+  isFlagEnabled,
+} from '../serving/FeedConfigVersionService';
+import { ingestFeedEvents } from '../serving/FeedEventService';
+import { detachProductFromPost, listPostProducts } from '../PostProductService';
 import { listFollowing } from '../../auth/FollowService';
 import { sendPushToUsers } from '../../notify/PushService';
 import { listActiveInventory } from '../../ecommerce/AdInventoryService';
@@ -96,7 +114,7 @@ feedAppRouter.patch('/posts/:id/secondhand-status', requireUserOrDevHeader, asyn
   } catch (error) { next(error); }
 });
 
-feedAppRouter.post('/posts', requireUserOrDevHeader, async (req: UserAuthedRequest, res, next) => {
+feedAppRouter.post('/posts', rateLimits.write, requireUserOrDevHeader, async (req: UserAuthedRequest, res, next) => {
   try {
     const body = req.body ?? {};
     res.status(201).json({
@@ -111,6 +129,7 @@ feedAppRouter.post('/posts', requireUserOrDevHeader, async (req: UserAuthedReque
         tags: Array.isArray(body.tags) ? body.tags.map(String) : undefined,
         linkUrl: body.linkUrl ? String(body.linkUrl) : undefined,
         lane: body.lane ? String(body.lane) : undefined,
+        products: body.products,
       }),
     });
   } catch (e) {
@@ -177,6 +196,7 @@ feedAppRouter.get('/posts/:id/comments', async (req, res, next) => {
 
 feedAppRouter.post(
   '/posts/:id/comments',
+  rateLimits.write,
   requireUserOrDevHeader,
   async (req: UserAuthedRequest, res, next) => {
     try {
@@ -231,6 +251,74 @@ feedAppRouter.post('/signals', requireUserOrDevHeader, async (req: UserAuthedReq
   }
 });
 
+/**
+ * Feed Serving V2 — viewer signals (impression / watch / skip / engage).
+ *
+ * Always answers 202 so a client can clear its queue: while the `feed_events`
+ * flag is off the batch is acknowledged and discarded rather than retried, and
+ * an anonymous viewer is accepted without a token.
+ */
+feedAppRouter.post('/events', rateLimits.events, async (req: UserAuthedRequest, res, next) => {
+  try {
+    const header = req.header('authorization') ?? '';
+    const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+    if (token) {
+      try {
+        const { verifyAppJwt } = await import('../../auth/JwtService');
+        req.user = await verifyAppJwt(token);
+      } catch {
+        /* anonymous signals are still useful */
+      }
+    }
+    const sessionId = String(req.body?.feedSessionId ?? req.body?.sessionId ?? '').trim();
+    if (!sessionId) throw new AppError('VALIDATION', 'feedSessionId required', 400);
+
+    const enabled = await isFlagEnabled('feed_events', req.user?.sub ?? sessionId);
+    if (!enabled) {
+      res.status(202).json({ ok: true, enabled: false, accepted: 0, dropped: 0 });
+      return;
+    }
+
+    const result = await ingestFeedEvents({
+      sessionId,
+      userId: req.user?.sub ?? null,
+      events: req.body?.events,
+    });
+    res.status(202).json({ ok: true, enabled: true, ...result });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** ปักตะกร้า — live price and stock for the products pinned to a post. */
+feedAppRouter.get('/posts/:id/products', async (req, res, next) => {
+  try {
+    const id = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
+    res.json({ ok: true, data: await listPostProducts(id) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+feedAppRouter.delete(
+  '/posts/:id/products/:productId',
+  requireUserOrDevHeader,
+  async (req: UserAuthedRequest, res, next) => {
+    try {
+      const id = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
+      const productId = String(
+        Array.isArray(req.params.productId) ? req.params.productId[0] : req.params.productId,
+      );
+      res.json({
+        ok: true,
+        data: await detachProductFromPost({ postId: id, productId, authorId: req.user!.sub }),
+      });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
 feedAppRouter.get('/sponsored', async (_req, res, next) => {
   try {
     res.json({ ok: true, data: await listActiveInventory('SPONSORED_FEED') });
@@ -269,6 +357,115 @@ feedDomainRouter.get('/status', async (_req: AuthedRequest, res, next) => {
   } catch (e) {
     next(e);
   }
+});
+
+/**
+ * Feed Serving V2 control plane. Read is open to any feed admin; every mutation
+ * needs `feed:write` and lands in the admin audit log.
+ */
+function requireFeedWrite(req: AuthedRequest) {
+  if (!adminHasPermission(req.adminRole, 'feed:write', req.adminDesk)) {
+    throw new AppError('FORBIDDEN', 'Missing permission: feed:write', 403);
+  }
+  return req.adminActor ?? 'admin';
+}
+
+feedDomainRouter.get('/config/versions', async (_req: AuthedRequest, res, next) => {
+  try {
+    await ensureSeedVersion();
+    res.json({ ok: true, data: await listConfigVersions() });
+  } catch (e) { next(e); }
+});
+
+feedDomainRouter.post('/config/draft', async (req: AuthedRequest, res, next) => {
+  try {
+    const actor = requireFeedWrite(req);
+    const body = req.body ?? {};
+    const data = body.version
+      ? await updateDraft({ actor, version: Number(body.version), note: body.note, ranking: body.ranking, composer: body.composer, ad: body.ad })
+      : await createDraft({ actor, fromVersion: body.fromVersion ? Number(body.fromVersion) : undefined, note: body.note, ranking: body.ranking, composer: body.composer, ad: body.ad });
+    res.json({ ok: true, data });
+  } catch (e) { next(e); }
+});
+
+feedDomainRouter.post('/config/publish', async (req: AuthedRequest, res, next) => {
+  try {
+    const actor = requireFeedWrite(req);
+    const version = Number(req.body?.version);
+    if (!Number.isFinite(version)) throw new AppError('VALIDATION', 'version required', 400);
+    res.json({ ok: true, data: await publishVersion({ actor, version }) });
+  } catch (e) { next(e); }
+});
+
+feedDomainRouter.post('/config/rollback', async (req: AuthedRequest, res, next) => {
+  try {
+    const actor = requireFeedWrite(req);
+    const version = Number(req.body?.toVersion ?? req.body?.version);
+    if (!Number.isFinite(version)) throw new AppError('VALIDATION', 'toVersion required', 400);
+    res.json({ ok: true, data: await rollbackTo({ actor, version }) });
+  } catch (e) { next(e); }
+});
+
+feedDomainRouter.get('/config/audit', async (_req: AuthedRequest, res, next) => {
+  try {
+    res.json({ ok: true, data: await listConfigAudit() });
+  } catch (e) { next(e); }
+});
+
+feedDomainRouter.get('/flags', async (_req: AuthedRequest, res, next) => {
+  try {
+    res.json({ ok: true, data: await listFlags() });
+  } catch (e) { next(e); }
+});
+
+feedDomainRouter.post('/flags', async (req: AuthedRequest, res, next) => {
+  try {
+    const actor = requireFeedWrite(req);
+    const key = String(req.body?.key ?? '').trim();
+    if (!key) throw new AppError('VALIDATION', 'key required', 400);
+    const data = await setFlag({
+      actor,
+      key,
+      enabled: Boolean(req.body?.enabled),
+      rolloutPct: req.body?.rolloutPct != null ? Number(req.body.rolloutPct) : undefined,
+      payload: req.body?.payload,
+    });
+    res.json({ ok: true, data });
+  } catch (e) { next(e); }
+});
+
+feedDomainRouter.post('/kill-switch', async (req: AuthedRequest, res, next) => {
+  try {
+    const actor = requireFeedWrite(req);
+    const scope = String(req.body?.scope ?? '').trim();
+    if (!scope) throw new AppError('VALIDATION', 'scope required', 400);
+    res.json({ ok: true, data: await killSwitch({ actor, scope }) });
+  } catch (e) { next(e); }
+});
+
+feedDomainRouter.get('/experiments', async (_req: AuthedRequest, res, next) => {
+  try {
+    res.json({ ok: true, data: await listExperiments() });
+  } catch (e) { next(e); }
+});
+
+feedDomainRouter.post('/experiments', async (req: AuthedRequest, res, next) => {
+  try {
+    const actor = requireFeedWrite(req);
+    const key = String(req.body?.key ?? '').trim();
+    if (!key) throw new AppError('VALIDATION', 'key required', 400);
+    const data = await upsertExperiment({
+      actor,
+      key,
+      status: req.body?.status,
+      salt: req.body?.salt,
+      surface: req.body?.surface ?? null,
+      variants: req.body?.variants,
+      startAt: req.body?.startAt ?? null,
+      endAt: req.body?.endAt ?? null,
+    });
+    res.json({ ok: true, data });
+  } catch (e) { next(e); }
 });
 
 feedDomainRouter.get('/posts', async (req: AuthedRequest, res, next) => {

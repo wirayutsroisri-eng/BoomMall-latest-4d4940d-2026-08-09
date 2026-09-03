@@ -35,6 +35,24 @@ export type FeedProduct = {
   tags: string[];
 };
 
+/** สินค้าที่ "ปักตะกร้า" ไว้กับโพสต์ — ราคา/สต็อกอ่านสดจากคลัง ไม่ใช่ค่าที่แช่ไว้ในโพสต์ */
+export type FeedPostProduct = {
+  productId: string;
+  skuId?: string | null;
+  sellerId: string;
+  shopName: string;
+  title: string;
+  priceThb: number;
+  currency: string;
+  available: number;
+  inStock: boolean;
+  /** false เมื่อสินค้าถูกซ่อน/ลบหลังปัก — UI ต้องขึ้นว่า "ไม่พร้อมขาย" */
+  active: boolean;
+  mediaId?: string | null;
+  x?: number | null;
+  y?: number | null;
+};
+
 export type FeedItem = {
   id: string;
   /** Client id before server publish (feed-user-*) — used to load orphaned comments. */
@@ -63,6 +81,10 @@ export type FeedItem = {
   likes: number;
   comments: number;
   shares: number;
+  /** ต้นฉบับของคอนเทนต์ — โพสต์ปกติชี้ที่ตัวเอง, โพสต์ที่แชร์ชี้ที่ต้นทาง */
+  rootPostId?: string;
+  /** สินค้าที่ปักไว้กับโพสต์นี้ */
+  products?: FeedPostProduct[];
   /** ยอดเหรียญที่คลิปนี้ได้รับ (วอลเล็ตทิป) */
   tips?: number;
   /** เหรียญที่ "เรา" ส่งให้คลิปนี้ในเซสชันนี้ */

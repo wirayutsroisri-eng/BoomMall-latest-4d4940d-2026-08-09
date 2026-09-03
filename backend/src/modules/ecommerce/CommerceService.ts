@@ -9,7 +9,7 @@ import { prisma } from '../../lib/prisma';
 import { AppError } from '../../lib/errors';
 import { getPaymentGateway } from './PspGateway';
 import { notifySeller } from './ProductPromotionService';
-import { quoteOrderGp, recordPaidOrderGp } from './GpLedgerService';
+import { quoteOrderGp, resolveEffectiveGpBps, recordPaidOrderGp } from './GpLedgerService';
 import {
   confirmOrder as confirmSettlement,
   getMerchantLedger,
@@ -265,13 +265,25 @@ export async function listCatalogBundles(opts?: {
   merchantId?: string;
   includeHidden?: boolean;
   limit?: number;
+  /** Free-text filter for the product picker in the post composer. */
+  q?: string;
 }) {
   const limit = Math.min(opts?.limit ?? 200, 500);
+  const q = opts?.q?.trim();
   const rows = await prisma.commerceProduct.findMany({
     where: {
       ...(opts?.ownerUserId ? { ownerUserId: opts.ownerUserId } : {}),
       ...(opts?.merchantId ? { merchantId: opts.merchantId } : {}),
       ...(opts?.includeHidden ? {} : { status: 'ACTIVE' }),
+      ...(q
+        ? {
+            OR: [
+              { title: { contains: q, mode: 'insensitive' as const } },
+              { masterSku: { contains: q, mode: 'insensitive' as const } },
+              { shopName: { contains: q, mode: 'insensitive' as const } },
+            ],
+          }
+        : {}),
     },
     include: { variants: { include: { stock: true } } },
     orderBy: { updatedAt: 'desc' },
@@ -423,10 +435,18 @@ export async function payOrder(input: {
       })
     : null;
   const merchantId = order.merchantId ?? product?.merchantId ?? undefined;
+  // อัตราเดียว ตัดสินครั้งเดียว แล้วส่งต่อให้ escrow ใช้ค่าเดียวกัน
+  const { bps: gpBps } = await resolveEffectiveGpBps({
+    storeId: merchantId,
+    merchantId,
+    channel: product?.channel,
+    amountThb: order.merchandiseThb,
+  });
   const quote = await quoteOrderGp({
     amountThb: order.merchandiseThb,
     merchantId,
     channel: product?.channel,
+    gpBps,
   });
 
   const gateway = getPaymentGateway();
@@ -441,6 +461,7 @@ export async function payOrder(input: {
     sourceToken: input.sourceToken,
   });
 
+  // เฟส 1 — เงินถูกตัดแล้ว ออเดอร์ต้องเป็น PAID ให้ได้ ห้ามล้ม
   await prisma.$transaction(async (tx) => {
     await reservePaidOrder(
       { id: order.id, merchantId: merchantId ?? order.merchantId, linesJson: lines },
@@ -462,28 +483,46 @@ export async function payOrder(input: {
     });
   });
 
-  try {
-    await recordPaidOrderBooks({
-      orderId: order.id,
-      merchantId,
-      merchandiseThb: order.merchandiseThb,
-      gpAmountThb: Number(quote.gpAmountThb),
-      netToMerchantThb: Number(quote.netToMerchantThb),
-    });
-  } catch {
-    /* books best-effort after capture */
-  }
-
+  // เฟส 2 — escrow + สมุดกลาง อยู่ในธุรกรรมเดียวกัน และ escrow เป็นเจ้าของตัวเลขจริง
+  // (คิดเป็นสตางค์) ออเดอร์จึงเก็บค่าที่ escrow คำนวณ ไม่ใช่ค่าที่ประมาณไว้ก่อนหน้า
   if (merchantId) {
     try {
-      await holdEscrowOnPayment({
-        orderId: order.id,
-        storeId: merchantId,
-        merchandiseThb: order.merchandiseThb,
-        shippingFeeThb: order.shippingFeeThb,
+      await prisma.$transaction(async (tx) => {
+        const escrow = await holdEscrowOnPayment({
+          orderId: order.id,
+          storeId: merchantId,
+          merchandiseThb: order.merchandiseThb,
+          shippingFeeThb: order.shippingFeeThb,
+          gpPercent: gpBps / 100,
+          channel: product?.channel,
+          tx,
+        });
+        const platformTakeThb =
+          (escrow.gpAmount + (escrow.vatAmount ?? 0) - (escrow.whtAmount ?? 0)) / 100;
+        await recordPaidOrderBooks({
+          orderId: order.id,
+          merchantId,
+          merchandiseThb: order.merchandiseThb,
+          shippingFeeThb: order.shippingFeeThb,
+          platformTakeThb,
+          netToMerchantThb: escrow.netMerchantAmount / 100,
+          tx,
+        });
+        await tx.commerceOrder.update({
+          where: { id: order.id },
+          data: {
+            gpAmountThb: Math.round(escrow.gpAmount / 100),
+            netToMerchantThb: Math.round(escrow.netMerchantAmount / 100),
+          },
+        });
       });
-    } catch {
-      /* wallet escrow best-effort — settleOrder is idempotent */
+    } catch (error) {
+      // เงินเข้าบริษัทแล้วแต่ลงบัญชีไม่สำเร็จ — ทำเครื่องหมายไว้ให้งานตามเก็บซ่อม
+      // ห้ามเงียบ และห้ามโยนกลับไปหาผู้ซื้อ เพราะออเดอร์จ่ายสำเร็จไปแล้ว
+      console.error('[commerce] settlement failed after capture', order.id, error);
+      await prisma.commerceOrder
+        .update({ where: { id: order.id }, data: { settlementStatus: 'RECONCILE' } })
+        .catch(() => undefined);
     }
   }
 

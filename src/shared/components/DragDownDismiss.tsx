@@ -39,6 +39,8 @@ type Props = {
   rootInModal?: boolean;
   /** Present the sheet from the bottom with an iOS-like spring. */
   animateIn?: boolean;
+  /** Optional external shared value used as the drag offset — ให้ caller ผูก backdrop/effects กับระยะลากได้ */
+  dragY?: SharedValue<number>;
 };
 
 /**
@@ -58,8 +60,10 @@ export function DragDownDismiss({
   dimPressToDismiss,
   rootInModal = false,
   animateIn = false,
+  dragY,
 }: Props) {
-  const dismissY = useSharedValue(0);
+  const internalDismissY = useSharedValue(0);
+  const dismissY = dragY ?? internalDismissY;
   const onDismissRef = useRef(onDismiss);
   onDismissRef.current = onDismiss;
 

@@ -171,94 +171,11 @@ export async function settleOrder(orderId: string, sellerId: string, grossAmount
   return { idempotent: true, escrow, wallet: mapWallet(wallet) };
 }
 
-/** ย้าย pending → available หลังครบเงื่อนไขปล่อยยอด (เช่น 7 วัน) */
-export async function releaseSettlement(orderId: string) {
-  const settled = await prisma.financeWalletTransaction.findUnique({
-    where: { orderId_type: { orderId, type: TX.SETTLEMENT } },
-  });
-  if (!settled) return { skipped: true as const };
-  const already = await prisma.financeWalletTransaction.findUnique({
-    where: { orderId_type: { orderId, type: TX.RELEASE } },
-  });
-  if (already) return { skipped: true as const };
-
-  await prisma.$transaction(async (tx) => {
-    const wallet = await tx.sellerWallet.findUniqueOrThrow({ where: { id: settled.walletId } });
-    if (wallet.pendingBalance < settled.netAmount) {
-      throw new AppError('CONFLICT', 'pending balance lower than settlement net', 409);
-    }
-    await tx.financeWalletTransaction.create({
-      data: {
-        id: randomUUID(),
-        walletId: wallet.id,
-        sellerId: settled.sellerId,
-        orderId,
-        type: TX.RELEASE,
-        grossAmount: 0,
-        gpFee: 0,
-        vatAmount: 0,
-        whtAmount: 0,
-        netAmount: settled.netAmount,
-        gpRateBps: settled.gpRateBps,
-        memo: 'release_to_available',
-      },
-    });
-    await tx.sellerWallet.update({
-      where: { id: wallet.id },
-      data: {
-        pendingBalance: { decrement: settled.netAmount },
-        availableBalance: { increment: settled.netAmount },
-      },
-    });
-  });
-  return { skipped: false as const };
-}
-
-/** คืนสินค้า — ดึงยอด pending กลับถ้ายังไม่ปล่อย */
-export async function reverseSettlement(orderId: string) {
-  const settled = await prisma.financeWalletTransaction.findUnique({
-    where: { orderId_type: { orderId, type: TX.SETTLEMENT } },
-  });
-  if (!settled) return { skipped: true as const };
-  const released = await prisma.financeWalletTransaction.findUnique({
-    where: { orderId_type: { orderId, type: TX.RELEASE } },
-  });
-  if (released) {
-    throw new AppError('CONFLICT', 'settlement already released — open a dispute', 409);
-  }
-  const reversed = await prisma.financeWalletTransaction.findUnique({
-    where: { orderId_type: { orderId, type: TX.REVERSAL } },
-  });
-  if (reversed) return { skipped: true as const };
-
-  await prisma.$transaction(async (tx) => {
-    const wallet = await tx.sellerWallet.findUniqueOrThrow({ where: { id: settled.walletId } });
-    if (wallet.pendingBalance < settled.netAmount) {
-      throw new AppError('CONFLICT', 'pending balance lower than settlement net', 409);
-    }
-    await tx.financeWalletTransaction.create({
-      data: {
-        id: randomUUID(),
-        walletId: wallet.id,
-        sellerId: settled.sellerId,
-        orderId,
-        type: TX.REVERSAL,
-        grossAmount: settled.grossAmount,
-        gpFee: settled.gpFee,
-        vatAmount: settled.vatAmount,
-        whtAmount: settled.whtAmount,
-        netAmount: settled.netAmount,
-        gpRateBps: settled.gpRateBps,
-        memo: 'return_reverse_pending',
-      },
-    });
-    await tx.sellerWallet.update({
-      where: { id: wallet.id },
-      data: { pendingBalance: { decrement: settled.netAmount } },
-    });
-  });
-  return { skipped: false as const };
-}
+/**
+ * การปล่อยยอดและการดึงยอดคืนทำที่ EscrowService (releaseEscrow / processRefundAfterReturn)
+ * โดยอ้าง OrderEscrow เป็นหลัก ฟังก์ชันชุดเดิมที่อ้าง FinanceWalletTransaction
+ * ถูกถอดออกเพราะไม่มีใครเขียนรายการชนิด SETTLEMENT อีกแล้ว
+ */
 
 export async function saveBankAccount(
   sellerId: string,
@@ -290,65 +207,11 @@ export async function saveBankAccount(
   return mapWallet(row);
 }
 
-export async function requestWithdraw(sellerId: string, amountThb: number) {
-  const amount = toSatang(amountThb);
-  if (amount <= 0) throw new AppError('VALIDATION', 'amount must be > 0', 400);
-  const wallet = await ensureSellerWallet(sellerId);
-  if (!wallet.bankAccountNo) {
-    throw new AppError('VALIDATION', 'ผูกบัญชีธนาคารก่อนถอน', 400);
-  }
-  if (wallet.availableBalance < amount) {
-    throw new AppError('VALIDATION', 'ยอดพร้อมถอนไม่พอ', 400);
-  }
-
-  const row = await prisma.$transaction(async (tx) => {
-    const fresh = await tx.sellerWallet.findUniqueOrThrow({ where: { id: wallet.id } });
-    if (fresh.availableBalance < amount) {
-      throw new AppError('VALIDATION', 'ยอดพร้อมถอนไม่พอ', 400);
-    }
-    const wd = await tx.withdrawalRequest.create({
-      data: {
-        id: randomUUID(),
-        walletId: wallet.id,
-        sellerId,
-        amount,
-        status: WD.PENDING,
-        bankName: fresh.bankName,
-        bankAccountNo: fresh.bankAccountNo,
-        bankAccountName: fresh.bankAccountName,
-      },
-    });
-    await tx.financeWalletTransaction.create({
-      data: {
-        id: randomUUID(),
-        walletId: wallet.id,
-        sellerId,
-        withdrawalId: wd.id,
-        type: TX.WITHDRAW,
-        grossAmount: 0,
-        gpFee: 0,
-        vatAmount: 0,
-        whtAmount: 0,
-        netAmount: amount,
-        gpRateBps: 0,
-        memo: 'withdraw_request · สำรองยอด ยังไม่โอน',
-      },
-    });
-    // ล็อกยอดทันทีกันถอนซ้ำ
-    await tx.sellerWallet.update({
-      where: { id: wallet.id },
-      data: { availableBalance: { decrement: amount } },
-    });
-    return wd;
-  });
-
-  return {
-    id: row.id,
-    amount: toThb(row.amount),
-    status: row.status,
-    createdAt: row.createdAt.toISOString(),
-  };
-}
+/**
+ * หมายเหตุ: การขอถอนของจริงอยู่ที่ EscrowService.requestWithdrawal
+ * ซึ่งหักทั้ง Store.availableBalance และ sellerWallet พร้อมล็อกแถวกันถอนซ้อน
+ * ฟังก์ชันเดิมตรงนี้หักแค่ sellerWallet จึงถูกถอดออกทั้งหมด
+ */
 
 export async function listPendingWithdrawals() {
   const [queue, recentAuto] = await Promise.all([

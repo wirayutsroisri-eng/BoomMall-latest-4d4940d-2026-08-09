@@ -39,7 +39,7 @@ const DOCS: Record<
       },
       {
         h: '6. ติดต่อ',
-        p: 'สอบถามเรื่องความเป็นส่วนตัว: privacy@boommall.app',
+        p: 'สอบถามเรื่องความเป็นส่วนตัว: privacy@boommall.app\nแจ้งปัญหาการใช้งานหรือรายงานเนื้อหา: support@boommall.app (ตอบกลับภายใน 24 ชั่วโมง)',
       },
     ],
   },

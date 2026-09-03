@@ -8,6 +8,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { prisma } from '../../lib/prisma';
 import { AppError } from '../../lib/errors';
+import { guardUserContent } from './moderation/guardUserContent';
+import {
+  attachProductsToPost,
+  listPostProductsForPosts,
+  normalizePostProductInput,
+  type PostProductDto,
+} from './PostProductService';
 import { attachMediaAssetsToPost, readyMediaAssetsForPublish } from '../media/MediaAssetService';
 import { assertPublishMediaContract, buildCanonicalPostMedia } from '../media/mediaAssetContract';
 import { mediaStorageProvider } from '../media/storage';
@@ -37,6 +44,13 @@ export type SocialPostDto = {
   createdAt: string;
   liked?: boolean;
   saved?: boolean;
+  /** Products pinned to this post — live price/stock, never a copy. */
+  products?: PostProductDto[];
+  productCount?: number;
+  /** Share lineage — a plain post is its own root. */
+  rootPostId?: string | null;
+  sharedPostId?: string | null;
+  shareKind?: string | null;
 };
 
 export type SecondhandListingStatus = 'ACTIVE' | 'RESERVED' | 'SOLD' | 'HIDDEN' | 'REMOVED' | 'EXPIRED';
@@ -94,10 +108,14 @@ export async function createSocialPost(input: {
   tags?: string[];
   linkUrl?: string;
   lane?: string;
+  /** ปักตะกร้า — real catalog products the author owns. */
+  products?: unknown;
 }): Promise<SocialPostDto> {
   const body = input.body.trim();
   if (!input.authorId || !body) throw new AppError('VALIDATION', 'authorId and body required', 400);
   if (body.length > 4000) throw new AppError('VALIDATION', 'body too long', 400);
+  // Apple 1.2: objectionable material is filtered before it reaches the feed.
+  await guardUserContent({ text: body, authorId: input.authorId, entityType: 'POST' });
   const lane = ['nearby', 'following', 'foryou', 'board'].includes(String(input.lane ?? ''))
     ? String(input.lane)
     : 'foryou';
@@ -139,6 +157,17 @@ export async function createSocialPost(input: {
         await tx.mediaAsset.updateMany({
           where: { id: { in: mediaAssetIds }, ownerId: input.authorId, status: 'READY' },
           data: { postId: created.id },
+        });
+      }
+      const pinned = normalizePostProductInput(input.products);
+      if (pinned.length) {
+        // Silently drops products the author does not own — a pin can never
+        // point at someone else's shop.
+        await attachProductsToPost({
+          postId: created.id,
+          authorId: input.authorId,
+          products: pinned,
+          tx,
         });
       }
       return created;
@@ -441,6 +470,15 @@ export async function listSocialPosts(
     } catch {
       /* author snapshot in mediaJson is enough */
     }
+    // Shoppable posts: attach live catalog data in one round trip per page.
+    const shoppableIds = rows.filter((row) => (row.productCount ?? 0) > 0).map((row) => row.id);
+    if (shoppableIds.length) {
+      const byPost = await listPostProductsForPosts(shoppableIds);
+      mapped = mapped.map((post) =>
+        byPost.has(post.id) ? { ...post, products: byPost.get(post.id) } : post,
+      );
+    }
+
     if (tagInterest.size || creatorInterest.size) {
       mapped = mapped
         .map((post, index) => ({
@@ -686,6 +724,10 @@ function mapPost(row: {
   tagsJson?: unknown;
   linkUrl?: string | null;
   lane?: string;
+  productCount?: number;
+  rootPostId?: string | null;
+  sharedPostId?: string | null;
+  shareKind?: string | null;
   createdAt: Date;
 }): SocialPostDto {
   const media = row.mediaJson;
@@ -709,6 +751,10 @@ function mapPost(row: {
     tags: asTags(row.tagsJson),
     linkUrl: row.linkUrl ?? null,
     lane: row.lane ?? 'foryou',
+    productCount: row.productCount ?? 0,
+    rootPostId: row.rootPostId ?? row.id,
+    sharedPostId: row.sharedPostId ?? null,
+    shareKind: row.shareKind ?? null,
     createdAt: row.createdAt.toISOString(),
   };
 }

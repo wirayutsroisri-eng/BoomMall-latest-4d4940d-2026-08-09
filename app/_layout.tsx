@@ -6,6 +6,10 @@ import { CallOverlay } from '@/modules/chat/ui/CallOverlay';
 import { MusicMiniPlayer } from '@/modules/music/ui/MusicMiniPlayer';
 import { dismissibleModalOptions } from '@/shared/components/DragDownDismiss';
 import { colors } from '@/shared/theme/colors';
+import { installCrashReporter } from '@/shared/observability/crashReporter';
+
+// Installed at module load so an error thrown during the first render is caught.
+installCrashReporter();
 
 export default function RootLayout() {
   return (
@@ -32,10 +36,11 @@ export default function RootLayout() {
         <Stack.Screen
           name="video-feed"
           options={{
-            presentation: 'fullScreenModal',
-            animation: 'fade',
+            // transparentModal: ให้หน้าฟีดยังอยู่ข้างหลัง — ลากปิดแล้วเห็นฟีดโผล่ (พื้นดำจางใน VideoFeedScreen เอง)
+            presentation: 'transparentModal',
+            animation: 'none',
             gestureEnabled: false,
-            contentStyle: { backgroundColor: '#000' },
+            contentStyle: { backgroundColor: 'transparent' },
           }}
         />
         <Stack.Screen name="secondhand-create" options={{ presentation: 'fullScreenModal', ...dismissibleModalOptions, animation: 'slide_from_bottom' }} />

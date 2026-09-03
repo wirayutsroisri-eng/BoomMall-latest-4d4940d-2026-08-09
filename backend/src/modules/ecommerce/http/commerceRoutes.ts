@@ -40,7 +40,7 @@ import {
 import { recordAnalyticsEvent, summarizeAnalytics } from '../EventService';
 import { listActiveInventory, type AdPlacement } from '../AdInventoryService';
 import { quoteOrderGp, resolveGpBps } from '../GpLedgerService';
-import { createWeeklyPayoutBatch, getPlatformBooks, listPayoutBatches } from '../SettlementService';
+import { createWeeklyPayoutBatch, getPlatformBooks, listPayoutBatches, markPayoutBatchPaid } from '../SettlementService';
 import {
   cancelOrderBeforeShip,
   confirmOrderReceived,
@@ -98,7 +98,12 @@ function asBundle(body: unknown): CatalogBundle {
 commerceAppRouter.get('/catalog', requireUserOrDevHeader, async (req: UserAuthedRequest, res, next) => {
   try {
     const owner = await commerceOwner(req);
-    res.json({ ok: true, data: await listCatalogBundles({ ownerUserId: owner.userId }) });
+    const q = typeof req.query.q === 'string' ? req.query.q : undefined;
+    const limit = req.query.limit != null ? Number(req.query.limit) : undefined;
+    res.json({
+      ok: true,
+      data: await listCatalogBundles({ ownerUserId: owner.userId, q, limit }),
+    });
   } catch (e) {
     next(e);
   }
@@ -750,6 +755,23 @@ commerceAdminRouter.put('/finance/settings', async (req: AuthedRequest, res, nex
       ok: true,
       data: await updatePlatformSettings({
         defaultGpPercent: body.defaultGpPercent != null ? Number(body.defaultGpPercent) : undefined,
+        vatPercent: body.vatPercent != null ? Number(body.vatPercent) : undefined,
+        vatRegistered: body.vatRegistered != null ? Boolean(body.vatRegistered) : undefined,
+        vatEffectiveFrom:
+          body.vatEffectiveFrom === undefined
+            ? undefined
+            : body.vatEffectiveFrom
+              ? String(body.vatEffectiveFrom)
+              : null,
+        companyTaxId:
+          body.companyTaxId === undefined ? undefined : body.companyTaxId ? String(body.companyTaxId) : null,
+        companyLegalName:
+          body.companyLegalName === undefined
+            ? undefined
+            : body.companyLegalName
+              ? String(body.companyLegalName)
+              : null,
+        whtPercent: body.whtPercent != null ? Number(body.whtPercent) : undefined,
         autoCompleteDays: body.autoCompleteDays != null ? Number(body.autoCompleteDays) : undefined,
         payoutMode: body.payoutMode != null ? String(body.payoutMode) : undefined,
         autoPayoutMaxLimit:
@@ -974,6 +996,32 @@ commerceAdminRouter.post(
       res.json({
         ok: true,
         data: await createWeeklyPayoutBatch({ actor: req.adminActor ?? 'admin' }),
+      });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+commerceAdminRouter.post(
+  '/payouts/batches/:id/complete',
+  async (req: AuthedRequest, res, next) => {
+    try {
+      const canWrite =
+        adminHasPermission(req.adminRole, 'finance:write', req.adminDesk) ||
+        adminHasPermission(req.adminRole, 'marketplace:write', req.adminDesk);
+      if (!canWrite) {
+        next(new AppError('FORBIDDEN', 'Missing permission: finance:write', 403));
+        return;
+      }
+      const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      res.json({
+        ok: true,
+        data: await markPayoutBatchPaid({
+          batchId: String(id),
+          actor: req.adminActor ?? 'admin',
+          proof: String(req.body?.proof ?? ''),
+        }),
       });
     } catch (e) {
       next(e);

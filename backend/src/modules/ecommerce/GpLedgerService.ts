@@ -281,6 +281,49 @@ export async function resolveGpBps(opts?: {
   return policy.defaultGpBps;
 }
 
+/**
+ * The one place a GP rate is decided.
+ *
+ * Precedence: the shop's own override → the policy's per-merchant override →
+ * the channel rate → the platform default. Every caller — order pricing, escrow,
+ * reporting — must go through this so an order can never be booked at one rate
+ * and settled at another.
+ */
+export async function resolveEffectiveGpBps(input: {
+  storeId?: string | null;
+  merchantId?: string | null;
+  channel?: string | null;
+  amountThb?: number;
+}): Promise<{ bps: number; source: 'store' | 'merchant_override' | 'channel' | 'default' | 'disabled' }> {
+  const policy = await getGpPolicy();
+  if (!policy.enabled) return { bps: 0, source: 'disabled' };
+  if (input.amountThb != null && input.amountThb < policy.minOrderThb) {
+    return { bps: 0, source: 'disabled' };
+  }
+
+  const storeId = input.storeId?.trim() || input.merchantId?.trim() || '';
+  if (storeId) {
+    try {
+      const store = await prisma.store.findUnique({
+        where: { id: storeId },
+        select: { customGpPercent: true },
+      });
+      if (store?.customGpPercent != null) {
+        return { bps: clampBps(store.customGpPercent * 100, policy.defaultGpBps), source: 'store' };
+      }
+    } catch {
+      // No store row yet (first sale): fall through to the policy.
+    }
+    const hit = policy.merchantOverrides.find((o) => o.merchantId === storeId);
+    if (hit) return { bps: hit.gpBps, source: 'merchant_override' };
+  }
+
+  const channel = String(input.channel ?? '').toUpperCase();
+  if (channel === 'B2B' && policy.b2bGpBps != null) return { bps: policy.b2bGpBps, source: 'channel' };
+  if (channel === 'B2C' && policy.b2cGpBps != null) return { bps: policy.b2cGpBps, source: 'channel' };
+  return { bps: policy.defaultGpBps, source: 'default' };
+}
+
 export function quoteGp(amountThb: bigint, gpBps = DEFAULT_GP_BPS): Omit<GpQuote, 'orderId'> {
   if (amountThb < 0n) throw new AppError('VALIDATION', 'amountThb must be >= 0', 400);
   if (gpBps < 0 || gpBps > 10_000) throw new AppError('VALIDATION', 'gpBps out of range', 400);

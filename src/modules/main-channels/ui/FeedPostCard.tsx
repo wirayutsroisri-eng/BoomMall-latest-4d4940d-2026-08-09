@@ -17,6 +17,7 @@ import type { FeedItem } from '@/modules/feed/domain/types';
 import { FeedPinchZoomLayer } from '@/modules/feed/ui/FeedPinchZoomLayer';
 import { FeedSeekBar } from '@/modules/feed/ui/FeedSeekBar';
 import { FeedVideoLayer } from '@/modules/feed/ui/FeedVideoLayer';
+import { PostProductBar } from '@/modules/feed/ui/PostProductBar';
 import { MultiImageGrid } from '@/modules/feed/ui/MultiImageGrid';
 import { openFeedMediaViewer } from '@/modules/feed/state/feed-media-viewer-store';
 import { useLoyaltyStore } from '@/modules/loyalty/state/loyalty-store';
@@ -92,6 +93,8 @@ export const FeedPostCard = memo(function FeedPostCard({
   const playerRef = useRef<VideoPlayer | null>(null);
   const isScrubbingRef = useRef(false);
   const wasPlayingBeforeScrubRef = useRef(false);
+  const singleImageRef = useRef<View | null>(null);
+  const videoBoxRef = useRef<View | null>(null);
   const dateLabel = item.publishStatus === 'uploading'
     ? 'กำลังอัปโหลด…'
     : item.publishStatus === 'failed'
@@ -214,12 +217,24 @@ export const FeedPostCard = memo(function FeedPostCard({
   }, [active]);
 
   const openVideo = useCallback(() => {
-    router.push({
-      pathname: '/video-feed',
-      params: {
-        feedId: item.id,
-        startTime: String(currentTime),
-      },
+    const push = (origin?: { x: number; y: number; width: number; height: number }) => {
+      router.push({
+        pathname: '/video-feed',
+        params: {
+          feedId: item.id,
+          startTime: String(currentTime),
+          ...(origin
+            ? { ox: String(origin.x), oy: String(origin.y), ow: String(origin.width), oh: String(origin.height) }
+            : {}),
+        },
+      });
+    };
+    const ref = videoBoxRef.current;
+    if (!ref) return push();
+    // วัดตำแหน่งวิดีโอในฟีด — ให้หน้าคลิปขยายจากจุดนี้ (hero แบบ Facebook)
+    ref.measureInWindow((x, y, w, h) => {
+      if (!w || !h) return push();
+      push({ x, y, width: w, height: h });
     });
   }, [currentTime, item.id]);
 
@@ -253,12 +268,13 @@ export const FeedPostCard = memo(function FeedPostCard({
     }
   }, []);
 
-  const openImage = useCallback((index: number) => openFeedMediaViewer(
+  const openImage = useCallback((index: number, frame?: { x: number; y: number; width: number; height: number }) => openFeedMediaViewer(
     gallery,
     index,
     imageMedia.map((media) => media.id),
     item.overlays,
     imageMedia,
+    { attachedBackdrop: true, originFrame: frame },
   ), [gallery, imageMedia, item.overlays]);
 
   return (
@@ -317,8 +333,14 @@ export const FeedPostCard = memo(function FeedPostCard({
         ) : null}
       </View> : null}
 
+      {item.products?.length ? (
+        <View style={styles.productBlock}>
+          <PostProductBar products={item.products} itemId={item.id} rootId={item.rootPostId} />
+        </View>
+      ) : null}
+
       {item.videoUri ? (
-        <View style={[styles.media, { height: feedVideoHeight }]}>
+        <View ref={videoBoxRef} style={[styles.media, { height: feedVideoHeight }]}>
           <FeedPinchZoomLayer resetKey={item.id} enabled={videoReady} contentGesture={videoTapGesture}>
             <FeedVideoLayer
               uri={item.videoUri}
@@ -360,7 +382,18 @@ export const FeedPostCard = memo(function FeedPostCard({
           />
         </View>
       ) : gallery.length === 1 ? (
-        <Pressable style={[styles.media, { height: singleImageHeight }]} onPress={() => openImage(0)}>
+        <Pressable
+          ref={singleImageRef}
+          style={[styles.media, { height: singleImageHeight }]}
+          onPress={() => {
+            const ref = singleImageRef.current;
+            if (!ref) return openImage(0);
+            ref.measureInWindow((x, y, w, h) => {
+              if (!w || !h) return openImage(0);
+              openImage(0, { x, y, width: w, height: h });
+            });
+          }}
+        >
           <Image
             source={{ uri: gallery[0] }}
             style={StyleSheet.absoluteFill}
@@ -442,6 +475,7 @@ const styles = StyleSheet.create({
   meta: { color: '#707A75', fontSize: 12, marginTop: 2 },
   metaFailed: { color: '#C62828', fontWeight: '800' },
   captionBlock: { paddingHorizontal: 12, paddingBottom: 10 },
+  productBlock: { paddingHorizontal: 12, paddingBottom: 10 },
   caption: { color: '#202824', fontSize: 15, lineHeight: 21 },
   moreText: { color: '#65716B', fontSize: 13, fontWeight: '700', marginTop: 3 },
   typeBadge: { alignSelf: 'flex-start', marginLeft: 14, marginBottom: 8, backgroundColor: '#DDF3EA', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 999 },
