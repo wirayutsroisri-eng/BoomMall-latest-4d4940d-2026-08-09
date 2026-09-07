@@ -176,6 +176,8 @@ type ChatState = {
     lastReadAt?: string;
     lastDeliveredAt?: string;
     kind: 'read' | 'delivered';
+    /** Reader that produced the receipt — ignored when it is this device's own user. */
+    userId?: string;
   }) => void;
   retryFailedMessage: (conversationId: string, messageId: string) => void;
   setActiveConversation: (id: string | null) => void;
@@ -1075,6 +1077,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   applyReceipt: (payload) => {
+    // A socket fanout also reaches the device that produced the receipt. Never let
+    // our own read/delivery mark OUR outgoing messages as read (creates a false
+    // "อ่านแล้ว" that the peer never sent).
+    if (payload.userId && payload.userId === currentChatUserId()) return;
     const conversation = get().conversations.find(
       (c) => c.id === payload.conversationId || c.remoteId === payload.conversationId,
     );
