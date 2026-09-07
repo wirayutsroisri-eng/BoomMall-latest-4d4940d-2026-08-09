@@ -720,6 +720,14 @@ export function ConversationScreen({ conversationId, backContext, noteId, orderI
         <Pressable onPress={goBack} hitSlop={10}>
           <Ionicons name="chevron-back" size={26} color={colors.text.primary} />
         </Pressable>
+        <Avatar
+          uri={conversation.avatarUri}
+          initial={conversation.peerName.slice(0, 1)}
+          backgroundColor={conversation.avatarColor}
+          size={34}
+          radius={17}
+          borderWidth={0}
+        />
         <View style={styles.headerBody}>
           <Text style={styles.name} numberOfLines={1}>
             {conversation.kind === 'official' ? '✓ ' : ''}

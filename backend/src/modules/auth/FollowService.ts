@@ -12,11 +12,83 @@ export type FollowDto = {
   createdAt: string;
 };
 
+export type RelationshipState = {
+  isFollowing: boolean;
+  isFollower: boolean;
+  isFriend: boolean;
+  friendRequestStatus: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED' | null;
+  canMessage: boolean;
+  followersCount: number;
+  followingCount: number;
+};
+
 type Store = { follows: FollowDto[] };
 const DATA_FILE = path.join(process.cwd(), 'data', 'follows.json');
 
 function normalizeHandle(handle: string) {
   return handle.replace(/^@/, '').trim().toLowerCase();
+}
+
+function pairKey(a: string, b: string) {
+  return [a, b].sort().join(':');
+}
+
+function privacyValue(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {} as Record<string, unknown>;
+  return value as Record<string, unknown>;
+}
+
+export async function getRelationshipState(
+  viewerId: string,
+  targetId: string,
+  targetPrivacyJson?: unknown,
+  targetHandle?: string | null,
+): Promise<RelationshipState> {
+  if (!viewerId || !targetId || viewerId === targetId) {
+    return {
+      isFollowing: false,
+      isFollower: false,
+      isFriend: false,
+      friendRequestStatus: null,
+      canMessage: false,
+      followersCount: 0,
+      followingCount: 0,
+    };
+  }
+
+  const normalizedTargetHandle = normalizeHandle(targetHandle ?? '');
+  const [following, follower, viewerContact, targetContact, request, followersCount, followingCount] = await Promise.all([
+    prisma.follow.findFirst({ where: { followerId: viewerId, OR: [{ followingId: targetId }, ...(normalizedTargetHandle ? [{ followingHandle: normalizedTargetHandle }] : [])] } }),
+    prisma.follow.findUnique({ where: { followerId_followingId: { followerId: targetId, followingId: viewerId } } }),
+    prisma.contact.findUnique({ where: { userId_contactId: { userId: viewerId, contactId: targetId } }, select: { id: true } }),
+    prisma.contact.findUnique({ where: { userId_contactId: { userId: targetId, contactId: viewerId } }, select: { id: true } }),
+    prisma.friendRequest.findUnique({ where: { pairKey: pairKey(viewerId, targetId) }, select: { status: true } }),
+    prisma.follow.count({ where: { OR: [{ followingId: targetId }, ...(normalizedTargetHandle ? [{ followingHandle: normalizedTargetHandle }] : [])] } }),
+    prisma.follow.count({ where: { followerId: targetId } }),
+  ]);
+
+  const isFollowing = Boolean(following);
+  const isFollower = Boolean(follower);
+  const isFriend = Boolean(viewerContact && targetContact);
+  const friendRequestStatus = request?.status === 'PENDING' || (request?.status === 'ACCEPTED' && isFriend)
+    ? request.status as RelationshipState['friendRequestStatus']
+    : null;
+  const privacy = privacyValue(targetPrivacyJson);
+  const whoCanMessage = privacy.whoCanMessage === 'nobody'
+    ? 'nobody'
+    : privacy.whoCanMessage === 'followers'
+      ? 'followers'
+      : 'everyone';
+
+  return {
+    isFollowing,
+    isFollower,
+    isFriend,
+    friendRequestStatus,
+    canMessage: whoCanMessage === 'everyone' || (whoCanMessage === 'followers' && (isFollowing || isFriend)),
+    followersCount: Math.max(0, followersCount),
+    followingCount: Math.max(0, followingCount),
+  };
 }
 
 function readStore(): Store {

@@ -7,11 +7,14 @@ import {
   type CommerceRequestKind,
 } from '@/modules/commerce/domain/commerceRequest';
 import type { MasterSku, SkuVariant, WarehouseStock } from '@/modules/commerce/domain/types';
+import type { ShopInfo } from '@/modules/shop/domain/shopInfo';
 
 export type CatalogBundle = {
   product: MasterSku;
   variants: SkuVariant[];
   stock: WarehouseStock[];
+  /** Public shop identity attached by the Backend read endpoints. */
+  shop?: ShopInfo | null;
 };
 
 export type CommerceShippingSnapshot = {

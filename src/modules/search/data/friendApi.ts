@@ -8,6 +8,7 @@ export type FriendProfile = {
   handle: string | null;
   displayName: string;
   avatarUrl: string | null;
+  coverUrl?: string | null;
   bio: string | null;
   trust?: TrustInfo | null;
 };

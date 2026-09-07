@@ -41,6 +41,24 @@ export async function requireAuth(req: AuthenticatedRequest, _res: Response, nex
 
 export const requireUser = requireAuth;
 
+/**
+ * Optional JWT identity for public resources that can enrich their response
+ * when a signed-in viewer is present (for example, a public profile).
+ */
+export async function optionalUser(req: AuthenticatedRequest, _res: Response, next: NextFunction) {
+  const token = bearerToken(req);
+  if (!token) {
+    next();
+    return;
+  }
+  try {
+    req.user = await verifyAppJwt(token);
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
 /** JWT first; `x-user-id` only when ALLOW_DEV_AUTH=1 or non-production. */
 export async function requireUserOrDevHeader(
   req: AuthenticatedRequest,

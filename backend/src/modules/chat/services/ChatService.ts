@@ -5,7 +5,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { prisma } from '../../../lib/prisma';
 import { AppError } from '../../../lib/errors';
 import { pendingDepth, popPendingBatch } from '../cache/messageCache';
@@ -34,6 +34,7 @@ type JsonConversation = {
   lastMessageAt?: string | null;
   contextProductId?: string | null;
   contextOrderId?: string | null;
+  directKey?: string | null;
   participants: JsonParticipant[];
 };
 
@@ -297,8 +298,39 @@ export async function ensureDirectConversation(input: {
   if (!input.userId || !input.peerUserId) {
     throw new AppError('VALIDATION', 'userId and peerUserId required', 400);
   }
+  if (input.userId === input.peerUserId) {
+    throw new AppError('INVALID_TARGET', 'ไม่สามารถสร้างแชทกับตัวเองได้', 400);
+  }
   const ids = [input.userId, input.peerUserId].sort();
+  const directKey = createHash('sha256').update(ids.join(':')).digest('hex');
   if (await prismaChatReady()) {
+    const peer = await prisma.userProfile.findUnique({
+      where: { userId: input.peerUserId },
+      select: { userId: true, privacyJson: true },
+    });
+    if (!peer) throw new AppError('NOT_FOUND', 'ไม่พบผู้ใช้ปลายทาง', 404);
+    const privacy = peer.privacyJson && typeof peer.privacyJson === 'object' && !Array.isArray(peer.privacyJson)
+      ? peer.privacyJson as Record<string, unknown>
+      : {};
+    if (privacy.whoCanMessage === 'nobody') {
+      throw new AppError('FORBIDDEN', 'ผู้ใช้นี้ไม่เปิดรับข้อความ', 403);
+    }
+    if (privacy.whoCanMessage === 'followers') {
+      const allowed = await prisma.follow.findUnique({
+        where: { followerId_followingId: { followerId: input.userId, followingId: input.peerUserId } },
+        select: { id: true },
+      });
+      const friend = await prisma.contact.findUnique({
+        where: { userId_contactId: { userId: input.userId, contactId: input.peerUserId } },
+        select: { id: true },
+      });
+      if (!allowed && !friend) throw new AppError('FORBIDDEN', 'ต้องติดตามผู้ใช้นี้ก่อนจึงจะส่งข้อความได้', 403);
+    }
+    const keyed = await prisma.chatConversation.findFirst({
+      where: { directKey, type: 'DIRECT' },
+      include: { participants: true },
+    });
+    if (keyed && keyed.participants.length === 2) return mapConversation(keyed);
     const existing = await prisma.chatConversation.findFirst({
       where: {
         type: 'DIRECT',
@@ -312,17 +344,31 @@ export async function ensureDirectConversation(input: {
       include: { participants: true },
     });
     if (existing && existing.participants.length === 2) return mapConversation(existing);
-    const created = await prisma.chatConversation.create({
-      data: {
-        type: 'DIRECT',
-        title: input.title ?? 'แชทส่วนตัว',
-        participants: {
-          create: ids.map((userId) => ({ userId, role: 'MEMBER' })),
+    try {
+      const created = await prisma.chatConversation.create({
+        data: {
+          type: 'DIRECT',
+          directKey,
+          title: input.title ?? 'แชทส่วนตัว',
+          participants: {
+            create: ids.map((userId) => ({ userId, role: 'MEMBER' })),
+          },
         },
-      },
-      include: { participants: true },
-    });
-    return mapConversation(created);
+        include: { participants: true },
+      });
+      return mapConversation(created);
+    } catch (error) {
+      // Two simultaneous taps can race between the lookup and create. The
+      // unique directKey makes the loser recover the winner's conversation.
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') {
+        const raced = await prisma.chatConversation.findFirst({
+          where: { directKey, type: 'DIRECT' },
+          include: { participants: true },
+        });
+        if (raced) return mapConversation(raced);
+      }
+      throw error;
+    }
   }
   const store = readJson();
   const found = store.conversations.find(
@@ -340,6 +386,7 @@ export async function ensureDirectConversation(input: {
     shopId: null,
     shopName: null,
     title: input.title ?? 'แชทส่วนตัว',
+    directKey,
     updatedAt: new Date().toISOString(),
     participants: ids.map((userId) => ({ userId, role: 'MEMBER' })),
   };

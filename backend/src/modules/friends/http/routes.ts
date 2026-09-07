@@ -10,6 +10,7 @@ import {
   respondFriendRequest,
   searchPeople,
   sendFriendRequest,
+  unfriend,
 } from '../FriendService';
 
 export const friendRouter = Router();
@@ -56,4 +57,10 @@ friendRouter.post('/requests/:id/respond', async (req: UserAuthedRequest, res, n
 });
 friendRouter.get('/contacts', async (req: UserAuthedRequest, res, next) => {
   try { res.json({ ok: true, data: await listContacts(req.user!.sub) }); } catch (e) { next(e); }
+});
+friendRouter.delete('/contacts/:contactId', async (req: UserAuthedRequest, res, next) => {
+  try {
+    const contactId = Array.isArray(req.params.contactId) ? req.params.contactId[0] : req.params.contactId;
+    res.json({ ok: true, data: await unfriend(req.user!.sub, String(contactId)) });
+  } catch (e) { next(e); }
 });

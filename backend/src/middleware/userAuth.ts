@@ -7,6 +7,7 @@ export {
   authedUserId,
   requireAuth,
   requireUser,
+  optionalUser,
   requireUserOrDevHeader,
   type AuthenticatedRequest,
   type UserAuthedRequest,

@@ -146,6 +146,7 @@ type ChatState = {
     peerHandle: string,
     avatarColor: string,
     contentRef?: ContentReferenceCard,
+    identity?: { peerUserId?: string; avatarUri?: string },
   ) => string;
   /** Customer → shop thread in the same Chat tab inbox (Facebook Page / Marketplace). */
   startShopConversation: (input: {
@@ -238,6 +239,7 @@ function mapRemoteConversation(
   return {
     id: row.id,
     remoteId: row.id,
+    peerUserId: peerId,
     shopId: row.shopId ?? undefined,
     inboxRole: incomingToMyShop ? 'seller' : row.type === 'SHOP' ? 'buyer' : undefined,
     peerName,
@@ -580,18 +582,37 @@ export const useChatStore = create<ChatState>((set, get) => ({
   getConversation: (id) =>
     get().conversations.find((c) => c.id === id || c.remoteId === id),
 
-  startConversationWithCreator: (peerName, peerHandle, avatarColor, contentRef) => {
+  startConversationWithCreator: (peerName, peerHandle, avatarColor, contentRef, identity) => {
     const target = normalizeHandle(peerHandle);
-    const remotePeerId = contentRef?.peerUserId?.trim() || target;
+    const remotePeerId = identity?.peerUserId?.trim() || contentRef?.peerUserId?.trim() || target;
     const isSecondhandCard = Boolean(contentRef?.id.startsWith('secondhand-'));
-    const existing = get().conversations.find((c) => normalizeHandle(c.peerHandle) === target);
+    const existing = get().conversations.find(
+      (c) => c.peerUserId === remotePeerId || normalizeHandle(c.peerHandle) === target,
+    );
 
     if (existing) {
+      set((state) => ({
+        conversations: state.conversations.map((row) => row.id === existing.id
+          ? {
+              ...row,
+              peerUserId: identity?.peerUserId || row.peerUserId || remotePeerId,
+              peerName,
+              peerHandle,
+              avatarUri: identity?.avatarUri ?? row.avatarUri,
+            }
+          : row),
+      }));
       if (contentRef) {
         get().attachContentReference(existing.id, contentRef);
         if (isSecondhandCard) void persistSecondhandCard(remotePeerId, peerName, contentRef).then((remoteId) => {
           if (!remoteId) return;
           set((state) => ({ conversations: state.conversations.map((row) => row.id === existing.id ? { ...row, remoteId } : row) }));
+        });
+      }
+      if (!existing.remoteId) {
+        void ensureDirectChat(remotePeerId, peerName).then(response => {
+          const remote = response?.data ?? response;
+          if (remote?.id) set(state => ({ conversations: state.conversations.map(c => c.id === existing.id ? { ...c, remoteId: remote.id } : c) }));
         });
       }
       set((state) => ({ conversations: bumpConversation(state.conversations, existing.id) }));
@@ -620,6 +641,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     const conversation: Conversation = {
       id,
+      peerUserId: remotePeerId,
       peerName,
       peerHandle,
       lastMessage,
@@ -627,6 +649,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isHidden: false,
       updatedAt: 'ตอนนี้',
       avatarColor,
+      avatarUri: identity?.avatarUri,
       kind: 'official',
     };
     set((state) => ({

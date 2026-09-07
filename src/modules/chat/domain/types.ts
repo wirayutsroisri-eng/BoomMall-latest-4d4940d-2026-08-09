@@ -204,6 +204,8 @@ export type ConversationKind = 'friend' | 'group' | 'official';
 
 export type Conversation = {
   id: string;
+  /** Canonical peer user id from the profile/chat backend. */
+  peerUserId?: string;
   peerName: string;
   peerHandle: string;
   lastMessage: string;

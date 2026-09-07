@@ -12,6 +12,7 @@ const profileSelect = {
   handle: true,
   displayName: true,
   avatarUrl: true,
+  coverUrl: true,
   bio: true,
   privacyJson: true,
 } as const;
@@ -25,6 +26,7 @@ function publicProfile(row: Awaited<ReturnType<typeof prisma.userProfile.findFir
     handle: typeof profile.handle === 'string' ? profile.handle : null,
     displayName: typeof profile.displayName === 'string' ? profile.displayName : 'ผู้ใช้ BoomMall',
     avatarUrl: typeof profile.avatarUrl === 'string' ? profile.avatarUrl : null,
+    coverUrl: typeof profile.coverUrl === 'string' ? profile.coverUrl : null,
     bio: typeof profile.bio === 'string' ? profile.bio : null,
     trust,
   };
@@ -206,4 +208,30 @@ export async function listContacts(userId: string) {
   });
   const trustMap = await computeTrusts(rows.map((row) => row.contact.userId));
   return rows.map((row) => ({ id: row.id.toString(), nickname: row.nickname, isFavorite: row.isFavorite, createdAt: row.createdAt.toISOString(), profile: publicProfile(row.contact as never, trustMap.get(row.contact.userId) ?? DEFAULT_TRUST) }));
+}
+
+/** Remove both directional contact rows without changing follow state. */
+export async function unfriend(userId: string, contactId: string) {
+  if (!contactId || userId === contactId) {
+    throw new AppError('VALIDATION', 'ไม่สามารถเลิกเป็นเพื่อนกับตัวเองได้', 400);
+  }
+  await prisma.userProfile.findUniqueOrThrow({ where: { userId: contactId }, select: { userId: true } });
+  const key = pairKey(userId, contactId);
+  await prisma.$transaction(async (tx) => {
+    await tx.contact.deleteMany({
+      where: {
+        OR: [
+          { userId, contactId },
+          { userId: contactId, contactId: userId },
+        ],
+      },
+    });
+    // An accepted request is historical state, but keeping it ACCEPTED would
+    // prevent either account from sending a new request after an unfriend.
+    await tx.friendRequest.updateMany({
+      where: { pairKey: key, status: 'ACCEPTED' },
+      data: { status: 'CANCELLED', respondedAt: new Date() },
+    });
+  });
+  return { ok: true as const };
 }

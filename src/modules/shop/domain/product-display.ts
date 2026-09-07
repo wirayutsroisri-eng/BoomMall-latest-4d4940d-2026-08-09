@@ -37,10 +37,6 @@ export function ratingOf(seed: string) {
   return (4.5 + (hashSeed(seed) % 5) * 0.1).toFixed(1);
 }
 
-export function shopAvatarUri(shopKey: string) {
-  return `https://i.pravatar.cc/150?u=boommall-shop-${encodeURIComponent(shopKey)}`;
-}
-
 export function conditionBadge(master: MasterSku) {
   return conditionLabel(channelToCondition(master.channel));
 }
@@ -161,10 +157,6 @@ export function masonryThumbHeight(id: string) {
 
 export function promoShareProduct(input: { title: string; price: string; shopName: string }) {
   return `🔥 ${input.title}\n${input.price}\nร้าน ${input.shopName}\nสั่งบน BoomMall`;
-}
-
-export function promoShareShop(shopName: string) {
-  return `ร้าน ${shopName} บน BoomMall — อะไหล่รถไฟฟ้า / มอเตอร์ไซค์`;
 }
 
 export function variantImageUri(master: MasterSku, variant: SkuVariant | null) {

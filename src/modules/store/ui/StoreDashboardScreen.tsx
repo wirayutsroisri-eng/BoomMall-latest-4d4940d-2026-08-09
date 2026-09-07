@@ -13,7 +13,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
 import { masterContentImage } from '@/modules/commerce/data/catalog';
@@ -32,6 +31,8 @@ import { useCategoriesStore } from '@/modules/store/state/categories-store';
 import { useStockAlertsStore } from '@/modules/store/state/stock-alerts-store';
 import { useWarehouseStore } from '@/modules/warehouse/state/warehouse-store';
 import { useAuthStore } from '@/modules/auth/state/auth-store';
+import { shareShopNative } from '@/modules/shop/domain/shop-share';
+import { fetchShop } from '@/modules/shop/data/shopApi';
 import type { Listing } from '@/modules/warehouse/domain/types';
 import { ProductQuickPreviewSheet } from '@/modules/store/ui/warehouse/ProductQuickPreviewSheet';
 import { PromoteProductSheet } from '@/modules/store/ui/PromoteProductSheet';
@@ -546,8 +547,16 @@ export function StoreDashboardScreen() {
 
   const shareStore = async () => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    await Clipboard.setStringAsync('https://boommall.app/shop/boomev_chanthaburi');
-    Alert.alert('คัดลอกลิงก์แล้ว', 'ลิงก์หน้าร้านถูกคัดลอกแล้ว พร้อมแชร์');
+    // V2: canonical slug + displayName come from the Backend Shop API.
+    try {
+      const shop = await fetchShop(myShopId);
+      await shareShopNative({
+        slug: shop?.slug || myShopId,
+        displayName: shop?.displayName || '',
+      });
+    } catch {
+      await shareShopNative({ slug: myShopId, displayName: '' });
+    }
   };
 
   const openToneFilter = () => {

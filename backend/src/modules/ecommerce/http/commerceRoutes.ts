@@ -39,6 +39,7 @@ import {
 } from '../shipping/CourierWebhookService';
 import { recordAnalyticsEvent, summarizeAnalytics } from '../EventService';
 import { listActiveInventory, type AdPlacement } from '../AdInventoryService';
+import { getShopsByMerchantIds } from '../../shop/ShopIdentityService';
 import { quoteOrderGp, resolveGpBps } from '../GpLedgerService';
 import { createWeeklyPayoutBatch, getPlatformBooks, listPayoutBatches, markPayoutBatchPaid } from '../SettlementService';
 import {
@@ -66,6 +67,19 @@ import {
 
 export const commerceAppRouter = Router();
 export const commerceAdminRouter = Router();
+
+async function attachOwnShop(bundles: CatalogBundle[], shopId: string): Promise<CatalogBundle[]> {
+  const shops = await getShopsByMerchantIds([shopId]);
+  const shop = shops.get(shopId) ?? null;
+  return bundles.map((bundle) => ({ ...bundle, shop }));
+}
+
+async function attachProductShop(bundle: CatalogBundle): Promise<CatalogBundle> {
+  const merchantId = String((bundle.product as { ownerShopId?: unknown }).ownerShopId ?? '').trim();
+  if (!merchantId) return bundle;
+  const shops = await getShopsByMerchantIds([merchantId]);
+  return { ...bundle, shop: shops.get(merchantId) ?? null };
+}
 
 async function commerceOwner(req: UserAuthedRequest) {
   const userId = authedUserId(req);
@@ -100,9 +114,10 @@ commerceAppRouter.get('/catalog', requireUserOrDevHeader, async (req: UserAuthed
     const owner = await commerceOwner(req);
     const q = typeof req.query.q === 'string' ? req.query.q : undefined;
     const limit = req.query.limit != null ? Number(req.query.limit) : undefined;
+    const bundles = await listCatalogBundles({ ownerUserId: owner.userId, q, limit });
     res.json({
       ok: true,
-      data: await listCatalogBundles({ ownerUserId: owner.userId, q, limit }),
+      data: await attachOwnShop(bundles, owner.shopId),
     });
   } catch (e) {
     next(e);
@@ -117,7 +132,7 @@ commerceAppRouter.get('/catalog/:id', async (req, res, next) => {
       res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'product not found' } });
       return;
     }
-    res.json({ ok: true, data: row });
+    res.json({ ok: true, data: await attachProductShop(row) });
   } catch (e) {
     next(e);
   }

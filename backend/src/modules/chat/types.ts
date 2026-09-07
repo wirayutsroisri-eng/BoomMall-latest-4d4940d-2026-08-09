@@ -44,6 +44,7 @@ export type ShopConversationDto = {
   lastMessageAt?: string | null;
   contextProductId?: string | null;
   contextOrderId?: string | null;
+  directKey?: string | null;
   participants: Array<{
     userId: string;
     role: string;

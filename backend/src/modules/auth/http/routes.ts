@@ -6,7 +6,7 @@ import {
   listAdminPermissions,
 } from '../../../middleware/adminAuth';
 import type { AuthedRequest } from '../../../middleware/adminAuth';
-import { requireUser } from '../../../middleware/userAuth';
+import { optionalUser, requireUser } from '../../../middleware/userAuth';
 import type { UserAuthedRequest } from '../../../middleware/userAuth';
 import {
   acceptEula,
@@ -156,10 +156,10 @@ authDomainRouter.get('/me', requireUser, async (req: UserAuthedRequest, res, nex
   }
 });
 
-authDomainRouter.get('/profiles/:userId', async (req, res, next) => {
+authDomainRouter.get('/profiles/:userId', optionalUser, async (req: UserAuthedRequest, res, next) => {
   try {
     const userId = Array.isArray(req.params.userId) ? req.params.userId[0] : req.params.userId;
-    const profile = await getProfile(String(userId));
+    const profile = await getProfile(String(userId), req.user?.sub);
     const data = profile
       ? {
           userId: profile.userId,
@@ -171,6 +171,7 @@ authDomainRouter.get('/profiles/:userId', async (req, res, next) => {
           avatarUrl: profile.avatarUrl,
           coverUrl: profile.coverUrl,
           updatedAt: profile.updatedAt,
+          relationship: profile.relationship,
         }
       : null;
     res.json({ ok: true, data });

@@ -1,10 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Dimensions,
   FlatList,
-  Image,
   Pressable,
-  Share,
   StyleSheet,
   Text,
   View,
@@ -14,7 +12,14 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { masterContentImage } from '@/modules/commerce/data/catalog';
 import { useInventoryStore } from '@/modules/commerce/state/inventory-store';
-import { formatTHB, ratingOf, shopAvatarUri, shopKeyOf, promoShareShop } from '@/modules/shop/domain/product-display';
+import { formatTHB, ratingOf, shopKeyOf } from '@/modules/shop/domain/product-display';
+import { shareShopNative } from '@/modules/shop/domain/shop-share';
+import { useShopIdentity } from '@/modules/shop/state/useShopIdentity';
+import { fetchShop, fetchShopProducts } from '@/modules/shop/data/shopApi';
+import { shopInitial, type ShopInfo } from '@/modules/shop/domain/shopInfo';
+import type { CatalogBundle } from '@/modules/commerce/data/commerceApi';
+import type { MasterSku, SkuVariant } from '@/modules/commerce/domain/types';
+import { Avatar } from '@/shared/components/Avatar';
 import { useChatStore } from '@/modules/chat/state/chat-store';
 import { jumpToChatThread } from '@/shared/navigation/safeNavigate';
 import { colors } from '@/shared/theme/colors';
@@ -34,29 +39,80 @@ export function ShopStorefrontScreen() {
   const key = typeof shopKey === 'string' ? shopKey : '';
 
   const masters = useInventoryStore((s) => s.masters);
-  const variants = useInventoryStore((s) => s.variants);
+  const localVariants = useInventoryStore((s) => s.variants);
+  const startShopConversation = useChatStore((s) => s.startShopConversation);
 
-  const products = useMemo(
-    () => masters.filter((m) => shopKeyOf(m) === key),
-    [masters, key],
+  // Backend-first: identity + ACTIVE products for ANY shop (own or other users).
+  const [serverBundles, setServerBundles] = useState<CatalogBundle[] | null>(null);
+  const [serverShop, setServerShop] = useState<ShopInfo | null>(null);
+  const [offline, setOffline] = useState(false);
+
+  useEffect(() => {
+    if (!key) {
+      setOffline(true);
+      return;
+    }
+    let cancelled = false;
+    setServerBundles(null);
+    setServerShop(null);
+    setOffline(false);
+    Promise.all([
+      fetchShop(key).catch(() => null),
+      fetchShopProducts(key).catch(() => null),
+    ]).then(([shop, result]) => {
+      if (cancelled) return;
+      if (shop && result) {
+        setServerShop(shop);
+        setServerBundles(result.products ?? []);
+      } else {
+        setOffline(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [key]);
+
+  // Offline/degraded path → same shop's synced catalog (identity falls back to product shopName).
+  const localProducts = useMemo(
+    () => (offline ? masters.filter((m) => shopKeyOf(m) === key) : []),
+    [masters, key, offline],
+  );
+  const remoteProducts: MasterSku[] = useMemo(
+    () => (serverBundles ?? []).map((b) => b.product as MasterSku),
+    [serverBundles],
+  );
+  const remoteVariants: SkuVariant[] = useMemo(
+    () => (serverBundles ?? []).flatMap((b) => b.variants as SkuVariant[]),
+    [serverBundles],
   );
 
-  const shopName = products[0]?.shopName ?? key;
+  const products = remoteProducts.length ? remoteProducts : localProducts;
+  const visibleVariants = remoteProducts.length ? remoteVariants : localVariants;
+  const loading = !serverBundles && !offline;
+  const fallbackName = products[0]?.shopName ?? key;
+  const identity = useShopIdentity(serverShop, fallbackName);
   const verified = products.some((m) => m.channel !== 'C2C');
-  const startShopConversation = useChatStore((s) => s.startShopConversation);
 
   const openShopChat = () => {
     const shopId = products[0]?.ownerShopId?.trim() || key;
     const conversationId = startShopConversation({
       shopId,
-      shopName,
+      shopName: identity.displayName,
       sellerId: shopId,
     });
     jumpToChatThread(conversationId);
   };
 
+  const share = () => {
+    void shareShopNative({
+      slug: identity.slug || key,
+      displayName: identity.displayName,
+    });
+  };
+
   const priceOf = (id: string, base: number) => {
-    const vs = variants.filter((v) => v.masterSkuId === id);
+    const vs = visibleVariants.filter((v) => v.masterSkuId === id);
     return vs.length ? Math.min(...vs.map((v) => v.price)) : base;
   };
 
@@ -71,15 +127,9 @@ export function ShopStorefrontScreen() {
           <Ionicons name="chevron-back" size={24} color={colors.text.primary} />
         </Pressable>
         <Text style={styles.topTitle} numberOfLines={1}>
-          {shopName}
+          {identity.displayName}
         </Text>
-        <Pressable
-          hitSlop={8}
-          accessibilityLabel="แชร์ร้านค้า"
-          onPress={() => {
-            void Share.share({ title: shopName, message: promoShareShop(shopName) });
-          }}
-        >
+        <Pressable hitSlop={8} accessibilityLabel="แชร์ร้านค้า" onPress={share}>
           <Ionicons name="share-outline" size={22} color={colors.text.primary} />
         </Pressable>
       </View>
@@ -93,16 +143,23 @@ export function ShopStorefrontScreen() {
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         ListHeaderComponent={
           <View style={styles.hero}>
-            <Image source={{ uri: shopAvatarUri(key) }} style={styles.avatar} />
-            <View style={{ flex: 1 }}>
+            <Avatar
+              uri={identity.avatarUrl}
+              initial={shopInitial(identity.displayName)}
+              size={52}
+              radius={26}
+              borderWidth={0}
+              backgroundColor={colors.brand.primary}
+            />
+            <View style={{ flex: 1, minWidth: 0 }}>
               <View style={styles.nameRow}>
                 <Text style={styles.name} numberOfLines={1}>
-                  {shopName}
+                  {identity.displayName}
                 </Text>
                 {verified ? <Ionicons name="checkmark-circle" size={16} color={colors.accent.info} /> : null}
               </View>
               <Text style={styles.meta}>
-                ★ {ratingOf(key)} · {products.length} สินค้า
+                ★ {ratingOf(identity.slug || key)} · {products.length} สินค้า
               </Text>
             </View>
             <Pressable style={styles.chatBtn} onPress={openShopChat} accessibilityLabel="แชทร้าน">
@@ -111,7 +168,9 @@ export function ShopStorefrontScreen() {
             </Pressable>
           </View>
         }
-        ListEmptyComponent={<Text style={styles.empty}>ร้านนี้ยังไม่มีสินค้า</Text>}
+        ListEmptyComponent={
+          <Text style={styles.empty}>{loading ? 'กำลังโหลด…' : 'ร้านนี้ยังไม่มีสินค้า'}</Text>
+        }
         renderItem={({ item }) => {
           const price = priceOf(item.id, item.basePrice);
           const media = item.media?.length
@@ -160,7 +219,6 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     marginBottom: 10,
   },
-  avatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: '#DDD' },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   name: { flexShrink: 1, fontSize: 16, fontWeight: '800', color: colors.text.primary },
   meta: { marginTop: 2, fontSize: 12, fontWeight: '600', color: colors.text.secondary },

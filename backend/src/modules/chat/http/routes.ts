@@ -100,11 +100,6 @@ export function createChatRoutes(_socketGateway?: SocketGateway) {
       const body = req.body ?? {};
       const userId = authedUserId(req);
       const peerUserId = String(body.peerUserId ?? '');
-      const contact = await prisma.contact.findUnique({
-        where: { userId_contactId: { userId, contactId: peerUserId } },
-        select: { id: true },
-      });
-      if (!contact) throw new AppError('FORBIDDEN', 'ต้องเป็นเพื่อนกันก่อนเริ่ม Direct Chat', 403);
       res.status(201).json({
         ok: true,
         data: await ensureDirectConversation({

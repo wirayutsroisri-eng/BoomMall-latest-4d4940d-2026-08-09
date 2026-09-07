@@ -115,6 +115,8 @@ enum ChatMessageStatus {
 model ChatConversation {
   id               String               @id @default(uuid())
   type             ChatConversationType @default(SHOP)
+  /// Stable unordered user pair for a context-free direct conversation.
+  directKey        String?              @unique
   /// Shop / seller external id (USER_SHOP)
   shopId           String?
   shopName         String?

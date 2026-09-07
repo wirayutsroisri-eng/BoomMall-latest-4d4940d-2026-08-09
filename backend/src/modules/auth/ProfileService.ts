@@ -9,6 +9,7 @@ import { currentMediaUrl } from '../media/publicMediaUrl';
 import { validateUsername } from './UsernamePolicy';
 import { snowflakeIdForApi } from '../../config/snowflake';
 import { computeTrust, computeTrusts, DEFAULT_TRUST, type TrustInfo } from '../profile/TrustService';
+import { getRelationshipState, type RelationshipState } from './FollowService';
 
 export const EULA_CHAT_C4 = 'APP_STORE_C4_CHAT';
 export const EULA_MARKETPLACE = 'MARKETPLACE_TERMS';
@@ -34,6 +35,7 @@ export type ProfileDto = {
   email?: string | null;
   privacy?: ProfilePrivacy;
   trust?: TrustInfo | null;
+  relationship?: RelationshipState;
   updatedAt: string;
 };
 
@@ -189,11 +191,16 @@ export async function upsertProfile(input: {
   });
 }
 
-export async function getProfile(userId: string): Promise<ProfileDto | null> {
+export async function getProfile(userId: string, viewerId?: string): Promise<ProfileDto | null> {
   return database(async () => {
     const row = await prisma.userProfile.findUnique({ where: { userId } });
     if (!row) return null;
-    return mapProfile(row, await computeTrust(userId));
+    const profile = mapProfile(row, await computeTrust(userId));
+    if (!viewerId || viewerId === userId) return profile;
+    return {
+      ...profile,
+      relationship: await getRelationshipState(viewerId, userId, row.privacyJson, row.handle),
+    };
   });
 }
 

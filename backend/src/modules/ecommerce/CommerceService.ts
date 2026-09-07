@@ -34,6 +34,8 @@ export type CatalogBundle = {
   product: Record<string, unknown>;
   variants: Array<Record<string, unknown>>;
   stock: StockRow[];
+  /** Public shop identity embedded by read endpoints (never persisted in payload). */
+  shop?: import('../shop/ShopIdentityService').PublicShopDto | null;
 };
 
 export type OrderLine = {

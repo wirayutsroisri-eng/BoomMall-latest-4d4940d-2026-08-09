@@ -21,12 +21,41 @@ async function req(method: string, path: string, body?: unknown) {
   }
 }
 
+export type RelationshipState = {
+  isFollowing: boolean;
+  isFollower: boolean;
+  isFriend: boolean;
+  friendRequestStatus: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED' | null;
+  canMessage: boolean;
+  followersCount: number;
+  followingCount: number;
+};
+
+export type PublicProfile = {
+  userId: string;
+  displayName?: string | null;
+  handle?: string | null;
+  bio?: string | null;
+  avatarUrl?: string | null;
+  coverUrl?: string | null;
+  relationship?: RelationshipState;
+};
+
 export function apiFollow(handle: string) {
   return req('POST', '/api/v1/auth/follows', { handle });
 }
 
 export function apiUnfollow(handle: string) {
   return req('DELETE', '/api/v1/auth/follows', { handle });
+}
+
+export function apiUnfriend(userId: string) {
+  return req('DELETE', `/api/v1/friends/contacts/${encodeURIComponent(userId)}`);
+}
+
+export async function apiGetProfile(userId: string): Promise<PublicProfile | null> {
+  const json = await req('GET', `/api/v1/auth/profiles/${encodeURIComponent(userId)}`);
+  return json?.data && typeof json.data === 'object' ? json.data as PublicProfile : null;
 }
 
 export async function apiListFollowing(): Promise<string[]> {

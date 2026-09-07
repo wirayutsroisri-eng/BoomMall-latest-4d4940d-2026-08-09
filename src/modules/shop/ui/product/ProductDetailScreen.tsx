@@ -50,11 +50,9 @@ import {
   overlayForSlide,
   priceRangeLabel,
   promoShareProduct,
-  promoShareShop,
   ratingOf,
   relatedRank,
   selectedSpecTitle,
-  shopAvatarUri,
   shopHandleOf,
   shopKeyOf,
   slideIndexForVariant,
@@ -62,6 +60,10 @@ import {
   variantImageUri,
   chatProductCardOf,
 } from '@/modules/shop/domain/product-display';
+import { shareShopNative } from '@/modules/shop/domain/shop-share';
+import { shopInitial } from '@/modules/shop/domain/shopInfo';
+import { useShopIdentity } from '@/modules/shop/state/useShopIdentity';
+import { Avatar } from '@/shared/components/Avatar';
 import { colors } from '@/shared/theme/colors';
 
 const SCREEN_W = Dimensions.get('window').width;
@@ -178,16 +180,18 @@ export function ProductDetailScreen() {
   );
 
   /**
-   * สินค้าที่ปักตะกร้าไว้ในโพสต์อาจเป็นของร้านอื่น ซึ่งไม่มีในคลังของเครื่องนี้
-   * จึงดึงจากเซิร์ฟเวอร์มาแสดงแบบอ่านอย่างเดียว ไม่เขียนทับคลังของผู้ใช้
+   * สินค้าที่ปักตะกร้าไว้ในโพสต์อาจเป็นของร้านอื่น (ไม่มีในคลังเครื่องนี้) และแม้แต่
+   * สินค้าของตัวเองก็ต้องใช้ Shop Identity จาก Backend — ดึง bundle จริงทุกครั้ง
+   * เพื่อให้ merchant card ได้ displayName/avatarUrl/slug จากเซิร์ฟเวอร์เสมอ
    */
   const [remoteBundle, setRemoteBundle] = useState<CatalogBundle | null>(null);
   useEffect(() => {
-    if (!productId || localMaster) {
+    if (!productId) {
       setRemoteBundle(null);
       return;
     }
     let cancelled = false;
+    setRemoteBundle(null);
     fetchCatalogBundle(productId)
       .then((res) => {
         if (!cancelled) setRemoteBundle(res.data ?? null);
@@ -198,7 +202,7 @@ export function ProductDetailScreen() {
     return () => {
       cancelled = true;
     };
-  }, [localMaster, productId]);
+  }, [productId]);
 
   const master = localMaster ?? (remoteBundle?.product as MasterSku | undefined) ?? null;
   const itemVariants = useMemo(() => {
@@ -272,7 +276,9 @@ export function ProductDetailScreen() {
     [syncHeroToVariant],
   );
 
+  const serverShop = remoteBundle?.shop ?? null;
   const shopKey = master ? shopKeyOf(master) : '';
+  const shopIdentity = useShopIdentity(serverShop, master?.shopName ?? null);
   const shopProducts = useMemo(() => {
     if (!master) return [];
     return masters.filter((m) => m.id !== master.id && shopKeyOf(m) === shopKey);
@@ -487,11 +493,13 @@ export function ProductDetailScreen() {
 
   const onShareShop = useCallback(() => {
     if (!master) return;
-    void Share.share({
-      title: master.shopName,
-      message: promoShareShop(master.shopName),
+    const merchantKey = master.ownerShopId?.trim() || shopKey;
+    if (!merchantKey) return;
+    void shareShopNative({
+      slug: shopIdentity.slug || merchantKey,
+      displayName: shopIdentity.displayName,
     });
-  }, [master]);
+  }, [master, shopKey, shopIdentity]);
 
   const onViewShop = useCallback(() => {
     if (!master) return;
@@ -678,11 +686,18 @@ export function ProductDetailScreen() {
 
         <View style={styles.sectionCard}>
           <View style={styles.merchantRow}>
-            <Image source={{ uri: shopAvatarUri(shopKey) }} style={styles.merchantAvatar} />
+            <Avatar
+              uri={shopIdentity.avatarUrl}
+              initial={shopInitial(shopIdentity.displayName)}
+              size={44}
+              radius={22}
+              borderWidth={0}
+              backgroundColor={colors.brand.primary}
+            />
             <View style={{ flex: 1, minWidth: 0 }}>
               <View style={styles.merchantNameRow}>
                 <Text style={styles.merchantName} numberOfLines={1}>
-                  {master.shopName}
+                  {shopIdentity.displayName}
                 </Text>
                 {verified ? (
                   <Ionicons name="checkmark-circle" size={16} color={colors.accent.info} />
@@ -822,6 +837,7 @@ export function ProductDetailScreen() {
     onShareShop,
     onToggleFollow,
     following,
+    shopIdentity,
     quote,
     quoteMerchandise,
     specs,
@@ -1111,7 +1127,6 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: 15, fontWeight: '800', color: colors.text.primary },
   merchantRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  merchantAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#DDD' },
   merchantNameRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   merchantName: { flexShrink: 1, fontSize: 15, fontWeight: '800', color: colors.text.primary },
   merchantMeta: { marginTop: 2, fontSize: 12, fontWeight: '600', color: colors.text.secondary },

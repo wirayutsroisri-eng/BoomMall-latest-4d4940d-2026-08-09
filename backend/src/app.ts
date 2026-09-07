@@ -34,6 +34,7 @@ import { ensureLocalMediaUploadDirectories, localMediaUploadDir } from './module
 import { configuredMediaStorageKind } from './modules/media/storage';
 import { storyRouter } from './modules/story/http/routes';
 import { friendRouter } from './modules/friends/http/routes';
+import { shopPublicRouter } from './modules/shop/http/routes';
 
 export function createApp() {
   const env = loadEnv();
@@ -133,6 +134,7 @@ export function createApp() {
 
   app.use('/api/v1/commerce', commerceAppRouter);
   app.use('/api/v1/admin/commerce', commerceAdminRouter);
+  app.use('/api/v1/shops', rateLimits.general, shopPublicRouter);
   app.use('/api/v1/finance/seller', financeSellerRouter);
   app.use('/api/v1/finance/admin', financeAdminRouter);
   app.use('/api/v1/finance/webhooks', financeWebhookRouter);

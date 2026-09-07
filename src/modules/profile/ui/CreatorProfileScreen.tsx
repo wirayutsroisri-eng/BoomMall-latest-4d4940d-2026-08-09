@@ -16,6 +16,7 @@ import { useFeedStore } from '@/modules/feed/state/feed-store';
 import { useChatStore } from '@/modules/chat/state/chat-store';
 import { jumpToChatThread } from '@/shared/navigation/safeNavigate';
 import { useFollowStore } from '@/modules/social/state/follow-store';
+import { apiGetProfile, type PublicProfile } from '@/modules/social/data/socialApi';
 import { normalizeAuthorHandle } from '@/modules/feed/domain/selectFeedByAuthor';
 import { buildCreatorPortfolio } from '@/modules/profile/data/creatorPortfolio';
 import type { FeedItem } from '@/modules/feed/domain/types';
@@ -151,22 +152,52 @@ function CreatorProfileBody({
   const items = useFeedStore((s) => s.items);
   const startConversationWithCreator = useChatStore((s) => s.startConversationWithCreator);
   const followKey = handle.replace(/^@/, '').toLowerCase();
-  const following = useFollowStore((s) => Boolean(s.following[followKey]));
-  const follow = useFollowStore((s) => s.follow);
-  const unfollow = useFollowStore((s) => s.unfollow);
+  const relationshipByUserId = useFollowStore((s) => s.relationshipByUserId);
+  const relationshipByHandle = useFollowStore((s) => s.relationshipByHandle);
+  const setRelationship = useFollowStore((s) => s.setRelationship);
+  const followNow = useFollowStore((s) => s.followNow);
+  const unfollowNow = useFollowStore((s) => s.unfollowNow);
+  const unfriendNow = useFollowStore((s) => s.unfriendNow);
+  const followingFromGraph = useFollowStore((s) => Boolean(s.following[followKey]));
   const blockUser = useModerationStore((s) => s.blockUser);
   const [tab, setTab] = useState<VisitorTab>('store');
   const [reportOpen, setReportOpen] = useState(false);
   const [trust, setTrust] = useState<TrustInfo | null>(null);
+  const [remoteProfile, setRemoteProfile] = useState<PublicProfile | null>(null);
+  const [relationBusy, setRelationBusy] = useState(false);
+  const [messageBusy, setMessageBusy] = useState(false);
 
   useEffect(() => {
     const query = handle.replace(/^@/, '').toLowerCase();
     if (query.length < 3) return;
-    void searchFriendProfiles(query).then((rows) => {
-      const exact = rows.find((r) => (r.handle ?? '').replace(/^@/, '').toLowerCase() === query);
-      setTrust((exact ?? rows[0])?.trust ?? null);
+    let cancelled = false;
+    void searchFriendProfiles(query).then(async (rows) => {
+      const exact = rows.find((r) => (r.handle ?? '').replace(/^@/, '').toLowerCase() === query) ?? rows[0];
+      if (cancelled || !exact) return;
+      setTrust(exact.trust ?? null);
+      setRemoteProfile({
+        userId: exact.userId,
+        displayName: exact.displayName,
+        handle: exact.handle,
+        bio: exact.bio,
+        avatarUrl: exact.avatarUrl,
+        coverUrl: exact.coverUrl,
+      });
+      const profile = await apiGetProfile(exact.userId);
+      if (cancelled || !profile) return;
+      setRemoteProfile(profile);
+      if (profile.relationship) {
+        setRelationship({ userId: profile.userId, handle: profile.handle, relationship: profile.relationship });
+      }
     }).catch(() => undefined);
-  }, [handle]);
+    return () => { cancelled = true; };
+  }, [handle, setRelationship]);
+
+  const relationship = remoteProfile?.userId
+    ? relationshipByHandle[followKey] ?? relationshipByUserId[remoteProfile.userId]
+    : relationshipByHandle[followKey];
+  const following = relationship?.isFollowing ?? followingFromGraph;
+  const isFriend = Boolean(relationship?.isFriend);
 
   const ownerKey = normalizeAuthorHandle(handle ?? '');
   const realCreatorItems = useMemo(
@@ -184,8 +215,8 @@ function CreatorProfileBody({
   }, [realCreatorItems, feedId, items]);
 
   const first = realCreatorItems[0];
-  const displayName = contextItem?.author ?? first?.author ?? handle;
-  const displayHandle = `@${handle}`;
+  const displayName = remoteProfile?.displayName ?? contextItem?.author ?? first?.author ?? handle;
+  const displayHandle = remoteProfile?.handle ? `@${remoteProfile.handle.replace(/^@/, '')}` : `@${handle}`;
   const shopName = contextItem?.product.shopName ?? first?.product.shopName ?? displayName;
   const tier = contextItem?.product.tier ?? first?.product.tier ?? 'B2C';
   const categoryTags = contextItem?.product.tags ?? first?.product.tags ?? [];
@@ -197,8 +228,8 @@ function CreatorProfileBody({
     [handle, displayName, shopName, realCreatorItems],
   );
 
-  const followingCount = 0;
-  const followersCount = following ? 1 : 0;
+  const followingCount = relationship?.followingCount ?? 0;
+  const followersCount = relationship?.followersCount ?? 0;
   const productsCount = useMemo(
     () => creatorItems.filter((i) => (i.product?.basePrice ?? 0) > 0).length,
     [creatorItems],
@@ -206,6 +237,16 @@ function CreatorProfileBody({
   const bioText = contextItem?.caption?.trim() || '';
 
   const messageCreator = () => {
+    if (messageBusy) return;
+    if (!remoteProfile?.userId) {
+      Alert.alert('เปิดข้อความไม่ได้', 'ไม่พบข้อมูลผู้ใช้ปลายทาง กรุณาลองใหม่อีกครั้ง');
+      return;
+    }
+    if (relationship && !relationship.canMessage) {
+      Alert.alert('ส่งข้อความไม่ได้', 'ผู้ใช้นี้ไม่เปิดรับข้อความจากคุณ');
+      return;
+    }
+    setMessageBusy(true);
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     const contentRef = contextItem
@@ -228,6 +269,7 @@ function CreatorProfileBody({
       displayHandle,
       accent,
       contentRef,
+      { peerUserId: remoteProfile.userId, avatarUri: remoteProfile.avatarUrl ?? undefined },
     );
 
     // Collapse the Visitor Profile sheet, then jump straight into the OpenChat Hub DM.
@@ -243,13 +285,7 @@ function CreatorProfileBody({
     });
   };
 
-  /** TikTok: ติดตามทันที / กำลังติดตาม → ยืนยันก่อนเลิกติดตาม */
-  const onFollowPress = () => {
-    if (!following) {
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      follow(handle);
-      return;
-    }
+  const confirmUnfollow = () => {
     Alert.alert(
       `เลิกติดตาม ${displayName}?`,
       'โพสต์ของบัญชีนี้จะไม่โชว์ในแท็บกำลังติดตามอีก',
@@ -259,12 +295,90 @@ function CreatorProfileBody({
           text: 'เลิกติดตาม',
           style: 'destructive',
           onPress: () => {
+            setRelationBusy(true);
             void Haptics.selectionAsync();
-            unfollow(handle);
+            void unfollowNow(handle).catch((error: unknown) => {
+              Alert.alert('เลิกติดตามไม่สำเร็จ', error instanceof Error ? error.message : 'กรุณาลองใหม่');
+            }).finally(() => setRelationBusy(false));
           },
         },
       ],
     );
+  };
+
+  const confirmUnfriend = () => {
+    if (!remoteProfile?.userId) return;
+    Alert.alert(
+      `ต้องการเลิกเป็นเพื่อนกับ ${displayName} หรือไม่?`,
+      undefined,
+      [
+        { text: 'ยกเลิก', style: 'cancel' },
+        {
+          text: 'เลิกเป็นเพื่อน',
+          style: 'destructive',
+          onPress: () => {
+            setRelationBusy(true);
+            void unfriendNow(remoteProfile.userId, displayHandle).then(async () => {
+              const refreshed = await apiGetProfile(remoteProfile.userId);
+              if (refreshed?.relationship) {
+                setRelationship({ userId: refreshed.userId, handle: refreshed.handle, relationship: refreshed.relationship });
+              }
+            }).catch((error: unknown) => {
+              Alert.alert('เลิกเป็นเพื่อนไม่สำเร็จ', error instanceof Error ? error.message : 'กรุณาลองใหม่');
+            }).finally(() => setRelationBusy(false));
+          },
+        },
+      ],
+    );
+  };
+
+  const openRelationshipActions = () => {
+    if (relationBusy) return;
+    Alert.alert(displayName, undefined, [
+      {
+        text: following ? 'เลิกติดตาม' : 'ติดตาม',
+        style: following ? 'destructive' : 'default',
+        onPress: following ? confirmUnfollow : onFollowPress,
+      },
+      ...(isFriend ? [{ text: 'เลิกเป็นเพื่อน', style: 'destructive' as const, onPress: confirmUnfriend }] : []),
+      { text: 'ปิด', style: 'cancel' },
+    ]);
+  };
+
+  /** TikTok: ติดตามทันที / สถานะแล้ว → action sheet with destructive confirmation. */
+  const onFollowPress = () => {
+    if (following || isFriend) {
+      openRelationshipActions();
+      return;
+    }
+    if (!relationBusy) {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setRelationBusy(true);
+      void followNow(handle).catch((error: unknown) => {
+        Alert.alert('ติดตามไม่สำเร็จ', error instanceof Error ? error.message : 'กรุณาลองใหม่');
+      }).finally(() => setRelationBusy(false));
+    }
+  };
+
+  const openMoreActions = () => {
+    Alert.alert(displayName, undefined, [
+      {
+        text: isFriend ? 'เพื่อน · จัดการ' : following ? 'เลิกติดตาม' : 'ติดตาม',
+        style: following ? 'destructive' : 'default',
+        onPress: isFriend || following ? openRelationshipActions : onFollowPress,
+      },
+      { text: 'แชร์โปรไฟล์', onPress: () => Alert.alert('แชร์แล้ว', displayHandle) },
+      { text: 'รายงาน', style: 'destructive', onPress: () => setReportOpen(true) },
+      {
+        text: 'บล็อก',
+        style: 'destructive',
+        onPress: () => {
+          blockUser(followKey);
+          Alert.alert('บล็อกแล้ว', `จะไม่แสดงคอนเทนต์จาก ${displayName}`);
+        },
+      },
+      { text: 'ปิด', style: 'cancel' },
+    ]);
   };
 
   const body = (
@@ -292,6 +406,7 @@ function CreatorProfileBody({
 
       <View style={styles.identityBlock}>
         <Avatar
+          uri={remoteProfile?.avatarUrl ?? undefined}
           initial={displayName.slice(0, 1)}
           backgroundColor={accent}
           size={88}
@@ -327,42 +442,20 @@ function CreatorProfileBody({
       {/* TikTok: Follow (pink) | Message (gray) | ▼ — ความกว้างเท่ากัน + ปุ่มเหลี่ยม */}
       <View style={styles.actionRow}>
         <Pressable
-          style={[styles.followBtn, following && styles.followBtnFollowing]}
+          style={[styles.followBtn, (following || isFriend) && styles.followBtnFollowing]}
           onPress={onFollowPress}
+          disabled={relationBusy}
         >
-          <Text style={[styles.followBtnText, following && styles.followBtnTextFollowing]}>
-            {following ? 'กำลังติดตาม' : 'ติดตาม'}
+          <Text style={[styles.followBtnText, (following || isFriend) && styles.followBtnTextFollowing]}>
+            {isFriend ? 'เพื่อน' : following ? 'กำลังติดตาม' : '+ ติดตาม'}
           </Text>
         </Pressable>
-        <Pressable style={styles.messageBtn} onPress={messageCreator}>
+        <Pressable style={styles.messageBtn} onPress={messageCreator} disabled={messageBusy}>
           <Text style={styles.messageBtnText}>ข้อความ</Text>
         </Pressable>
         <Pressable
           style={styles.moreBtn}
-          onPress={() =>
-            Alert.alert(displayName, undefined, [
-              {
-                text: following ? 'เลิกติดตาม' : 'ติดตาม',
-                style: following ? 'destructive' : 'default',
-                onPress: onFollowPress,
-              },
-              { text: 'แชร์โปรไฟล์', onPress: () => Alert.alert('แชร์แล้ว', displayHandle) },
-              {
-                text: 'รายงาน',
-                style: 'destructive',
-                onPress: () => setReportOpen(true),
-              },
-              {
-                text: 'บล็อก',
-                style: 'destructive',
-                onPress: () => {
-                  blockUser(followKey);
-                  Alert.alert('บล็อกแล้ว', `จะไม่แสดงคอนเทนต์จาก ${displayName}`);
-                },
-              },
-              { text: 'ปิด', style: 'cancel' },
-            ])
-          }
+          onPress={openMoreActions}
         >
           <Ionicons name="chevron-down" size={16} color={colors.text.primary} />
         </Pressable>
