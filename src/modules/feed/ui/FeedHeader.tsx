@@ -7,6 +7,10 @@ import { colors } from '@/shared/theme/colors';
 import type { FeedTab } from '@/modules/feed/domain/types';
 
 type Props = {
+  focusQuery?: string;
+  focusBusy?: boolean;
+  onPressFocus?: () => void;
+  onResetFocus?: () => void;
   tab: FeedTab;
   onChangeTab: (tab: FeedTab) => void;
   onPressLive?: () => void;
@@ -21,7 +25,7 @@ const TABS: Array<{ key: FeedTab; label: string }> = [
   { key: 'foryou', label: 'สำหรับคุณ' },
 ];
 
-export function FeedHeader({ tab, onChangeTab, onPressLive, onPressSearch, onPressMore }: Props) {
+export function FeedHeader({ tab, onChangeTab, onPressLive, onPressSearch, onPressMore, focusQuery, focusBusy, onPressFocus, onResetFocus }: Props) {
   const insets = useSafeAreaInsets();
   const onBoard = tab === 'board';
 
@@ -95,11 +99,24 @@ export function FeedHeader({ tab, onChangeTab, onPressLive, onPressSearch, onPre
           )}
         </View>
       </View>
+      {!onBoard && onPressFocus && <View style={styles.focusRow}>
+        <Pressable disabled={focusBusy} onPress={onPressFocus} style={styles.focusButton} accessibilityLabel={focusQuery ? `เลือกดู: ${focusQuery}` : 'เลือกดู'}>
+          <Ionicons name="options-outline" size={15} color="#fff" />
+          <Text numberOfLines={1} style={styles.focusText}>{focusBusy ? 'กำลังโหลด…' : focusQuery ? `เลือกดู: ${focusQuery}` : 'เลือกดู'}</Text>
+        </Pressable>
+        {focusQuery && <Pressable disabled={focusBusy} onPress={onResetFocus} accessibilityLabel="รีเซ็ตเลือกดู" style={styles.resetButton}>
+          <Ionicons name="close" size={18} color="#fff" />
+        </Pressable>}
+      </View>}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  focusRow: { flexDirection: 'row', alignSelf: 'flex-end', marginRight: 12, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 18, maxWidth: '80%' },
+  focusButton: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, minHeight: 44, flexShrink: 1 },
+  focusText: { color: '#fff', fontSize: 12, flexShrink: 1 },
+  resetButton: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   wrap: {
     position: 'absolute',
     top: 0,

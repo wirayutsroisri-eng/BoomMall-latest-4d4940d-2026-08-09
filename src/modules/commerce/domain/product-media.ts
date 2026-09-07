@@ -9,6 +9,20 @@ export const MAX_VIDEO_MB = 200;
 const VIDEO_EXT = new Set(['mp4', 'mov', 'm4v', 'webm', 'mkv']);
 const IMAGE_EXT = new Set(['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif', 'gif']);
 
+/**
+ * A persistent, device-independent media reference is a public http(s) URL on
+ * object storage / CDN. Anything else (`file://`, `content://`, `ph://`,
+ * cache path) is device-local and must be uploaded before it can be persisted.
+ */
+export function isRemoteMediaUrl(uri?: string | null): boolean {
+  return typeof uri === 'string' && /^https?:\/\//i.test(uri.trim());
+}
+
+/** True when a URI is already canonical (remote) or absent — i.e. needs no upload. */
+export function needsNoMediaUpload(uri?: string | null): boolean {
+  return !uri || isRemoteMediaUrl(uri);
+}
+
 export function mediaExtension(uri: string, filename?: string) {
   const source = filename || uri;
   const match = /\.(\w{2,5})(?:\?|#|$)/.exec(source);

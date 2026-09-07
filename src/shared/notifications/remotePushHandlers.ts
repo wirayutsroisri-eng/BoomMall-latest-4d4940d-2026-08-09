@@ -1,3 +1,5 @@
+import { useAuthStore } from '@/modules/auth/state/auth-store';
+import { useFriendRequestStore } from '@/modules/search/state/friend-request-store';
 import { router } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import { openConversationFromNotification } from '@/modules/chat/data/chatReminder';
@@ -5,6 +7,7 @@ import { useMatchingNotifyStore } from '@/modules/matching/state/matching-notify
 import { useSellerNotifyStore } from '@/modules/store/state/seller-notify-store';
 
 type PushData = Record<string, unknown>;
+let pendingFriendTap: PushData | null = null;
 
 function readString(data: PushData, key: string): string | undefined {
   const value = data[key];
@@ -19,6 +22,26 @@ function handlePushData(
   if (!data || typeof data !== 'object') return;
   const row = data as PushData;
   const type = readString(row, 'type');
+
+  if (type === 'friend-request' || type === 'friend-accepted') {
+    const auth = useAuthStore.getState();
+    if (!auth.hydrated || !auth.user || !auth.sessionToken) {
+      if (opts?.showBanner === false) pendingFriendTap = row;
+      return;
+    }
+    if (readString(row, 'recipientId') !== auth.user.id) return;
+    void useFriendRequestStore.getState().refresh();
+    if (opts?.showBanner === false) {
+      pendingFriendTap = null;
+      const conversationId = readString(row, 'conversationId');
+      if (type === 'friend-accepted' && conversationId) {
+        router.push({ pathname: '/(tabs)/chat/[conversationId]', params: { conversationId } });
+      } else router.push('/friend-requests');
+      void Notifications.clearLastNotificationResponseAsync();
+    }
+    return;
+  }
+
 
   if (type === 'chat' || type === 'chat-reminder' || type === 'order-chat') {
     openConversationFromNotification(row);
@@ -65,6 +88,9 @@ function handleNotificationResponse(response: Notifications.NotificationResponse
 
 /** Wire remote push taps + foreground banners once at app start. */
 export function subscribeRemotePushHandlers() {
+  const authUnsub = useAuthStore.subscribe(() => {
+    if (pendingFriendTap) handlePushData(pendingFriendTap, undefined, { showBanner: false });
+  });
   const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
     handleNotificationResponse(response);
   });
@@ -79,6 +105,8 @@ export function subscribeRemotePushHandlers() {
   });
 
   return () => {
+    authUnsub();
+    pendingFriendTap = null;
     responseSub.remove();
     receivedSub.remove();
   };

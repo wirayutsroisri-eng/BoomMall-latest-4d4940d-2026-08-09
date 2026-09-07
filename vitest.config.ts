@@ -9,6 +9,7 @@ export default defineConfig({
       'backend/src/config/**/*.test.ts',
       'backend/src/modules/ecommerce/**/*.test.ts',
       'backend/src/modules/auth/**/*.test.ts',
+      'backend/src/modules/friends/**/*.test.ts',
       'backend/src/modules/feed/**/*.test.ts',
       'backend/src/modules/finance/**/*.test.ts',
       'backend/src/modules/media/**/*.test.ts',

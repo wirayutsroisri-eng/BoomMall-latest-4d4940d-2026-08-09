@@ -16,7 +16,7 @@ import {
 import { BottomSheetModal } from '@gorhom/bottom-sheet';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
-import { router, useIsFocused } from 'expo-router';
+import { router, useIsFocused, type Href } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import Animated, {
   type SharedValue,
@@ -107,6 +107,11 @@ export function HomeFeedScreen({
   const feedFocused = routeFocused && channelActive;
   const tab = useFeedStore((s) => s.tab);
   const allItems = useFeedStore((s) => s.items);
+  const feedFocus = useFeedStore((s) => s.feedFocus);
+  const focusOrder = useFeedStore((s) => s.focusOrder);
+  const focusBusy = useFeedStore((s) => s.focusBusy);
+  const focusGeneration = useFeedStore((s) => s.focusGeneration);
+  const displayedFocusGeneration = useRef(focusGeneration);
   const followingMap = useFollowStore((s) => s.following);
   const myHandle = useLoyaltyStore((s) => s.profile.handle);
   const setTab = useFeedStore((s) => s.setTab);
@@ -177,13 +182,16 @@ export function HomeFeedScreen({
     const suppressed = new Set([...hiddenContentIds, ...removedContentIds]);
     const map = {} as Record<FeedTab, FeedItem[]>;
     for (const t of laneOrder) {
-      const lane = selectFeedByTab(allItems, t, followingMap, CHANTHABURI, 10, myHandle).filter((item) => {
+      const focusItems = t === 'foryou' && focusOrder ? focusOrder.flatMap((id) => {
+        const item = allItems.find((row) => row.id === id); return item ? [item] : [];
+      }) : allItems;
+      const lane = selectFeedByTab(focusItems, t, followingMap, CHANTHABURI, 10, myHandle).filter((item) => {
         if (suppressed.has(item.id)) return false;
         if (videoOnly && !item.videoUri) return false;
         const handle = item.authorHandle.replace(/^@/, '').toLowerCase();
         return !blocked.has(handle) && !blocked.has(item.authorHandle.toLowerCase());
       });
-      const ordered = t === 'foryou' ? pinPromotedFeedItems(lane, promotedIds) : lane;
+      const ordered = t === 'foryou' && !focusOrder ? pinPromotedFeedItems(lane, promotedIds) : lane;
       if (videoOnly && initialFeedId) {
         const selectedIndex = ordered.findIndex((item) => item.id === initialFeedId);
         map[t] = selectedIndex > 0
@@ -194,7 +202,7 @@ export function HomeFeedScreen({
       }
     }
     return map;
-  }, [allItems, followingMap, myHandle, blockedUserIds, hiddenContentIds, removedContentIds, promotedIds, laneOrder, videoOnly, initialFeedId]);
+  }, [allItems, focusOrder, followingMap, myHandle, blockedUserIds, hiddenContentIds, removedContentIds, promotedIds, laneOrder, videoOnly, initialFeedId]);
 
   const items = feedsByTab[reelTab] ?? [];
   const boardItems = feedsByTab.board ?? [];
@@ -254,6 +262,19 @@ export function HomeFeedScreen({
     setActiveItemId(candidate);
     activeIndexRef.current = candidate ? items.findIndex((i) => i.id === candidate) : 0;
   }, [effectiveTab, initialFeedId, items]);
+
+  useEffect(() => {
+    if (focusBusy || displayedFocusGeneration.current === focusGeneration) return;
+    displayedFocusGeneration.current = focusGeneration;
+    const first = feedsByTab.foryou?.[0]?.id ?? null;
+    activeItemByTabRef.current.foryou = first;
+    listRefs.current.foryou?.scrollToOffset({ offset: 0, animated: false });
+    if (effectiveTab === 'foryou') {
+      activeItemIdRef.current = first;
+      activeIndexRef.current = 0;
+      setActiveItemId(first);
+    }
+  }, [focusBusy, focusGeneration, feedsByTab, effectiveTab]);
 
   // Save the active item whenever it changes, so we can restore it on tab switch.
   useEffect(() => {
@@ -399,6 +420,7 @@ export function HomeFeedScreen({
         item={item}
         height={viewportHeight}
         isActive={laneTab === playbackTab && item.id === playbackActiveItemId}
+        isLaneActive={laneTab === playbackTab}
         onComment={() => openCommentsSheet(item.id)}
         onShare={() => setShareItem(item)}
         onLike={() => likeClip(item)}
@@ -528,7 +550,7 @@ export function HomeFeedScreen({
                         tintColor={channelEmbedded ? '#FFFFFF' : colors.brand.primaryDark}
                         onRefresh={() => {
                           setRefreshing(true);
-                          void withMinimumDuration(refreshFeed()).finally(() => setRefreshing(false));
+                          void withMinimumDuration(refreshFeed()).catch((error) => Alert.alert('Feed', error instanceof Error ? error.message : 'กรุณาลองอีกครั้ง')).finally(() => setRefreshing(false));
                         }}
                       />
                     )}
@@ -550,6 +572,10 @@ export function HomeFeedScreen({
         {!channelEmbedded && (!chromeHidden || onBoard) ? (
           <FeedHeader
             tab={tab}
+            focusQuery={feedFocus?.query}
+            focusBusy={focusBusy}
+            onPressFocus={() => router.push('/feed-focus' as Href)}
+            onResetFocus={() => { void useFeedStore.getState().changeFeedFocus(null).catch((error) => Alert.alert('เลือกดู', error.message)); }}
             onChangeTab={(next) => {
               const i = laneOrder.indexOf(next);
               if (i < 0 || next === tab) return;

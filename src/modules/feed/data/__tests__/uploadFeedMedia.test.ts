@@ -38,6 +38,18 @@ describe('uploadFeedMedia', () => {
     expect(result.imageUris).toEqual(['https://storage.example/already.jpg']);
   });
 
+  it('waits for each photo before opening the next upload and preserves photo order', async () => {
+    let release!: (asset: ReturnType<typeof remoteAsset>) => void;
+    uploadMediaAsset
+      .mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }))
+      .mockResolvedValueOnce(remoteAsset('a2', 'https://storage.example/a2.jpg'));
+    const result = uploadFeedMedia({ imageUris: ['file:///one.jpg', 'file:///two.jpg'] });
+    expect(uploadMediaAsset).toHaveBeenCalledTimes(1);
+    release(remoteAsset('a1', 'https://storage.example/a1.jpg'));
+    expect((await result).imageUris).toEqual(['https://storage.example/a1.jpg', 'https://storage.example/a2.jpg']);
+    expect(uploadMediaAsset).toHaveBeenCalledTimes(2);
+  });
+
   it('rejects instead of remaining pending when an upload fails', async () => {
     uploadMediaAsset.mockRejectedValueOnce(new Error('MEDIA_OBJECT_UPLOAD_FAILED_503'));
 

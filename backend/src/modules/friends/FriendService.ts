@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { prisma } from '../../lib/prisma';
+import { sendPushToUsers } from '../notify/PushService';
 import { AppError } from '../../lib/errors';
 import { ensureDirectConversation } from '../chat/services/ChatService';
 import { computeTrust, computeTrusts, DEFAULT_TRUST, type TrustInfo } from '../profile/TrustService';
@@ -58,11 +59,14 @@ export async function searchPeople(viewerId: string, rawQuery: string) {
     throw new AppError('VALIDATION', 'กรุณากรอกอย่างน้อย 3 ตัวอักษร', 400);
   }
   const normalizedCode = query.toUpperCase();
+  const numericId = /^[0-9]{1,19}$/.test(query) && BigInt(query) <= 9223372036854775807n ? BigInt(query) : null;
   const rows = await prisma.userProfile.findMany({
     where: {
       userId: { not: viewerId },
       OR: [
         { friendCode: normalizedCode },
+        { userId: query },
+        ...(numericId !== null ? [{ snowflakeId: numericId }] : []),
         { handle: { startsWith: query.toLowerCase(), mode: 'insensitive' } },
         { displayName: { contains: query, mode: 'insensitive' } },
       ],
@@ -80,10 +84,8 @@ export async function createFriendInvite(userId: string, ttlHours = 24) {
   await getMyFriendIdentity(userId);
   const token = randomBytes(32).toString('base64url');
   const expiresAt = new Date(Date.now() + Math.min(Math.max(ttlHours, 1), 168) * 3_600_000);
-  await prisma.$transaction([
-    prisma.friendInvite.updateMany({ where: { ownerUserId: userId, revokedAt: null }, data: { revokedAt: new Date() } }),
-    prisma.friendInvite.create({ data: { ownerUserId: userId, tokenHash: hashToken(token), expiresAt } }),
-  ]);
+  // Opening another QR card must not invalidate a code still displayed on another device.
+  await prisma.friendInvite.create({ data: { ownerUserId: userId, tokenHash: hashToken(token), expiresAt } });
   return { token, deepLink: `boommall://add-friend?token=${encodeURIComponent(token)}`, expiresAt: expiresAt.toISOString() };
 }
 
@@ -105,13 +107,34 @@ export async function sendFriendRequest(senderId: string, receiverId: string, me
   if (!receiverId || senderId === receiverId) throw new AppError('VALIDATION', 'ผู้รับไม่ถูกต้อง', 400);
   await prisma.userProfile.findUniqueOrThrow({ where: { userId: receiverId }, select: { userId: true } });
   const key = pairKey(senderId, receiverId);
-  const existing = await prisma.friendRequest.findUnique({ where: { pairKey: key } });
-  if (existing?.status === 'ACCEPTED') return serializeRequest(existing);
-  const row = await prisma.friendRequest.upsert({
+  const previous = await prisma.friendRequest.findUnique({ where: { pairKey: key } });
+  let shouldNotify = !previous;
+  // The upsert never changes a pending/accepted pair, even for simultaneous opposite requests.
+  let row = await prisma.friendRequest.upsert({
     where: { pairKey: key },
     create: { pairKey: key, senderId, receiverId, message: message?.trim().slice(0, 200) || null },
-    update: { senderId, receiverId, status: 'PENDING', message: message?.trim().slice(0, 200) || null, respondedAt: null },
+    update: {},
   });
+  if (row.status === 'REJECTED' || row.status === 'CANCELLED') {
+    const reopened = await prisma.friendRequest.updateMany({
+      where: { id: row.id, status: { in: ['REJECTED', 'CANCELLED'] } },
+      data: { senderId, receiverId, status: 'PENDING', message: message?.trim().slice(0, 200) || null, respondedAt: null, createdAt: new Date() },
+    });
+    shouldNotify = reopened.count === 1;
+    row = await prisma.friendRequest.findUniqueOrThrow({ where: { id: row.id } });
+  }
+  if (row.status === 'ACCEPTED') await ensureDirectConversation({ userId: senderId, peerUserId: receiverId });
+  if (row.status === 'PENDING' && row.receiverId === senderId) {
+    throw new AppError('CONFLICT', 'ผู้ใช้นี้ส่งคำขอถึงคุณแล้ว กรุณายอมรับในรายการคำขอเป็นเพื่อน', 409);
+  }
+  if (row.status === 'PENDING' && shouldNotify) {
+    // Delivery is best effort; a push outage must not undo a persisted request.
+    void sendPushToUsers({
+      userIds: [receiverId], title: 'มีคำขอเป็นเพื่อนใหม่',
+      body: 'แตะเพื่อดูผู้ส่งและกดยอมรับเป็นเพื่อน', channelId: 'app-alerts',
+      data: { type: 'friend-request', requestId: row.id.toString(), recipientId: receiverId },
+    }).catch((e) => console.warn('[friends] request push failed', e));
+  }
   return serializeRequest(row);
 }
 
@@ -121,9 +144,9 @@ function serializeRequest(row: { id: bigint; senderId: string; receiverId: strin
 
 export async function listFriendRequests(userId: string) {
   const rows = await prisma.friendRequest.findMany({
-    where: { OR: [{ senderId: userId }, { receiverId: userId }] },
+    where: { status: { in: ['PENDING', 'ACCEPTED'] }, OR: [{ senderId: userId }, { receiverId: userId }] },
     include: { sender: { select: profileSelect }, receiver: { select: profileSelect } },
-    orderBy: { createdAt: 'desc' },
+    orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
     take: 100,
   });
   const peerIds = rows.map((row) => (row.receiverId === userId ? row.senderId : row.receiverId));
@@ -141,6 +164,11 @@ export async function listFriendRequests(userId: string) {
 export async function respondFriendRequest(userId: string, id: bigint, accept: boolean) {
   const request = await prisma.friendRequest.findUnique({ where: { id } });
   if (!request || request.receiverId !== userId) throw new AppError('NOT_FOUND', 'ไม่พบคำขอเป็นเพื่อน', 404);
+  // Recover if contacts committed but chat creation/the response failed previously.
+  if (accept && request.status === 'ACCEPTED') {
+    const conversation = await ensureDirectConversation({ userId: request.senderId, peerUserId: request.receiverId });
+    return { ...serializeRequest(request), conversationId: conversation.id };
+  }
   if (request.status !== 'PENDING') throw new AppError('CONFLICT', 'คำขอนี้ถูกตอบแล้ว', 409);
   const status = accept ? 'ACCEPTED' as const : 'REJECTED' as const;
   const updated = await prisma.$transaction(async (tx) => {
@@ -160,8 +188,14 @@ export async function respondFriendRequest(userId: string, id: bigint, accept: b
     }
     return tx.friendRequest.findUniqueOrThrow({ where: { id } });
   });
-  if (accept) await ensureDirectConversation({ userId: request.senderId, peerUserId: request.receiverId });
-  return serializeRequest(updated);
+  if (!accept) return { ...serializeRequest(updated), conversationId: undefined };
+  const conversation = await ensureDirectConversation({ userId: request.senderId, peerUserId: request.receiverId });
+  void sendPushToUsers({
+    userIds: [request.senderId], title: 'คำขอเป็นเพื่อนได้รับการยอมรับแล้ว',
+    body: 'เป็นเพื่อนกันแล้ว แตะเพื่อเริ่มแชต', channelId: 'app-alerts',
+    data: { type: 'friend-accepted', requestId: request.id.toString(), recipientId: request.senderId, conversationId: conversation.id },
+  }).catch((e) => console.warn('[friends] acceptance push failed', e));
+  return { ...serializeRequest(updated), conversationId: conversation.id };
 }
 
 export async function listContacts(userId: string) {

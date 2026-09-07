@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { Alert, StyleSheet } from 'react-native';
+import { FriendRequestHost } from '@/modules/chat/ui/FriendRequestHost';
 import { useVaultStore } from '@/modules/vault/state/vault-store';
 import { useKnowledgeStore } from '@/modules/knowledge/state/knowledge-store';
 import { useMusicLibraryStore } from '@/modules/music/state/music-library-store';
@@ -55,9 +56,9 @@ export function AppProviders({ children }: Props) {
   }, []);
 
   useEffect(() => {
-    if (sessionToken) void ensurePushRegistered();
+    if (sessionToken && userId) void ensurePushRegistered().catch((error) => console.warn('[push] registration unavailable', error));
     else clearPushRegistrationCache();
-  }, [sessionToken]);
+  }, [sessionToken, userId]);
 
   useEffect(() => {
     if (!authHydrated || !useFeedStore.persist.hasHydrated()) return;
@@ -81,9 +82,13 @@ export function AppProviders({ children }: Props) {
   }, [authHydrated, sessionToken, userId]);
 
   useEffect(() => {
-    setCommerceSyncErrorHandler(({ operation, message }) => {
+    setCommerceSyncErrorHandler(({ operation, message, kind }) => {
       const label = operation === 'pull' ? 'โหลดคลังสินค้า' : 'ซิงก์ข้อมูลร้านค้า';
-      Alert.alert(`${label}ไม่สำเร็จ`, `${message}\n\nข้อมูลในเครื่องยังคงอยู่ แต่ยังไม่ถูกบันทึกบนเซิร์ฟเวอร์`);
+      const note =
+        kind === 'UNAUTHORIZED'
+          ? 'เซสชันหมดอายุหรือยังไม่ได้รับอนุญาต กรุณาเข้าสู่ระบบใหม่อีกครั้ง\n\n'
+          : '';
+      Alert.alert(`${label}ไม่สำเร็จ`, `${note}${message}\n\nข้อมูลในเครื่องยังคงอยู่ แต่ยังไม่ถูกบันทึกบนเซิร์ฟเวอร์`);
     });
     setCommerceHooks({
       onUpsert: pushCommerceProduct,
@@ -174,6 +179,7 @@ export function AppProviders({ children }: Props) {
         <AppPromptHost />
         <PhotoLibraryHost />
         <AvatarPhotoHost />
+        <FriendRequestHost />
       </BottomSheetModalProvider>
     </GestureHandlerRootView>
   );

@@ -67,7 +67,7 @@ export function MyQrSheet({ visible, displayName, handle, onClose }: Props) {
                   : inviteError
                     ? <Ionicons name="alert-circle-outline" size={44} color={colors.text.muted} />
                     : deepLink
-                      ? <QRCode value={deepLink} size={150} color={colors.brand.ink} backgroundColor="#FFFFFF" />
+                      ? <QRCode value={deepLink} size={150} color={colors.brand.ink} backgroundColor="#FFFFFF" quietZone={12} />
                       : null}
               </View>
               <Text style={styles.name} numberOfLines={1}>

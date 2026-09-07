@@ -10,6 +10,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { FriendRequestsPanel } from '@/modules/chat/ui/FriendRequestsPanel';
 import { Avatar } from '@/shared/components/Avatar';
 import { useChatStore } from '@/modules/chat/state/chat-store';
 import type { Conversation } from '@/modules/chat/domain/types';
@@ -101,6 +102,8 @@ export function NearbyFriendsScreen({ active, onVerticalScroll }: Props) {
           <View style={styles.header}>
             <Text style={styles.title}>เพื่อน</Text>
             <Text style={styles.subtitle}>รายชื่อเพื่อนทั้งหมดของคุณ</Text>
+            <Pressable onPress={() => router.push('/(tabs)/chat/add-friend')}><Text style={styles.subtitle}>＋ เพิ่มเพื่อน / สแกน QR</Text></Pressable>
+            <FriendRequestsPanel active={active} />
           </View>
         )}
         ListEmptyComponent={(

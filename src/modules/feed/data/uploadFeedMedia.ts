@@ -20,14 +20,20 @@ export async function uploadFeedMedia(input: {
   const descriptors = input.editorMedia ?? [];
   const mediaAssets: MediaAsset[] = [];
   const bindings: { sourceUri: string; asset: MediaAsset }[] = [];
-  const imageResults = await Promise.all((input.imageUris ?? []).map(async (uri, index) => {
+  const imageResults: { uri: string; sourceUri?: string; asset?: MediaAsset }[] = [];
+  const images = input.imageUris ?? [];
+  const imageDescriptors = descriptors.filter((item) => item.type === 'image');
+  // Keep memory and network pressure bounded on Android when selecting many photos.
+  for (let index = 0; index < images.length; index += 1) {
+    const uri = images[index];
     if (isRemoteMediaUrl(uri)) {
-      return { uri };
+      imageResults.push({ uri });
+      continue;
     }
-    const descriptor = descriptors.filter((item) => item.type === 'image')[index];
+    const descriptor = imageDescriptors[index];
     const asset = await uploadMediaAsset({ uri, type: 'image', width: descriptor?.width, height: descriptor?.height });
-    return { uri: mediaAssetSource(asset), sourceUri: uri, asset };
-  }));
+    imageResults.push({ uri: mediaAssetSource(asset), sourceUri: uri, asset });
+  }
   const imageUris = imageResults.map((result) => result.uri);
   for (const result of imageResults) {
     if (!result.asset || !result.sourceUri) continue;

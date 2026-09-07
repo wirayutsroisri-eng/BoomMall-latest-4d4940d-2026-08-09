@@ -5,10 +5,8 @@ import {
   PRESENCE_ONLINE_TTL_MS,
   PRESENCE_PEER_TICK_MS,
   applyPresenceToNotes,
-  collectPeerUserIds,
   isPresenceOnline,
   mergePresenceMaps,
-  simulatePeerPresence,
   touchPresence,
   type PresenceRecord,
   type PresenceSurface,
@@ -111,11 +109,8 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
     if (nextCount > 1 && peerTimer) return;
 
     const tick = () => {
-      const notes = useChatStore.getState().notes;
-      const peerIds = collectPeerUserIds(notes, currentChatUserId());
-      const peerMap = simulatePeerPresence(peerIds);
       const { localSurface, presenceByUserId } = get();
-      const merged = rebuildWithLocal(mergePresenceMaps(presenceByUserId, peerMap), localSurface);
+      const merged = rebuildWithLocal(presenceByUserId, localSurface);
       set({ presenceByUserId: merged });
       pushNotesFromPresence(merged);
     };

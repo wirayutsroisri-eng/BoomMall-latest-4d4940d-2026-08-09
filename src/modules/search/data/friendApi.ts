@@ -20,10 +20,17 @@ function headers() {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const base = getApiBase();
   if (!base) throw new Error('ยังไม่ได้ตั้งค่าเซิร์ฟเวอร์');
-  const response = await fetch(`${base}${path}`, { ...init, headers: { ...headers(), ...init?.headers } });
-  const json = await response.json().catch(() => ({}));
-  if (!response.ok || json?.ok === false) throw new Error(json?.error?.message ?? 'เชื่อมต่อระบบเพื่อนไม่สำเร็จ');
-  return json.data as T;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch(`${base}${path}`, { ...init, signal: controller.signal, headers: { ...headers(), ...init?.headers } });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok || json?.ok !== true) throw new Error(json?.error?.message ?? 'เชื่อมต่อระบบเพื่อนไม่สำเร็จ');
+    return json.data as T;
+  } catch (e) {
+    if (controller.signal.aborted) throw new Error('เซิร์ฟเวอร์ไม่ตอบสนอง กรุณาลองใหม่');
+    throw e;
+  } finally { clearTimeout(timeout); }
 }
 
 export function searchFriendProfiles(query: string) {
@@ -35,7 +42,7 @@ export function getMyFriendIdentity() {
 }
 
 export function sendFriendRequest(receiverId: string) {
-  return request('/api/v1/friends/requests', {
+  return request<{ id: string; status: FriendRequestRow['status'] }>('/api/v1/friends/requests', {
     method: 'POST',
     body: JSON.stringify({ receiverId }),
   });
@@ -63,7 +70,7 @@ export function listFriendRequests() {
 }
 
 export function respondFriendRequest(id: string, action: 'accept' | 'reject') {
-  return request(`/api/v1/friends/requests/${encodeURIComponent(id)}/respond`, {
+  return request<{ id: string; status: FriendRequestRow['status']; conversationId?: string }>(`/api/v1/friends/requests/${encodeURIComponent(id)}/respond`, {
     method: 'POST', body: JSON.stringify({ action }),
   });
 }

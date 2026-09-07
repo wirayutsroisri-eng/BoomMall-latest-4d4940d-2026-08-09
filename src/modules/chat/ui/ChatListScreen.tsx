@@ -26,6 +26,7 @@ import { ChatPlusMenu } from './ChatPlusMenu';
 import { ContactPickerSheet } from './ContactPickerSheet';
 import { CreateGroupSheet } from './CreateGroupSheet';
 import { ChatItemActionSheet } from './ChatItemActionSheet';
+import { FriendRequestsPanel } from './FriendRequestsPanel';
 import { MyQrSheet } from './MyQrSheet';
 import { sortPinnedByRecent } from '@/modules/chat/data/chatActions';
 import { ActiveNotesBar } from './ActiveNotesBar';
@@ -171,6 +172,8 @@ export function ChatListScreen() {
   const listHeader = useCallback(
     () => (
       <View style={styles.listHeader}>
+        <Pressable onPress={() => router.push('/friend-requests')} style={{ paddingVertical: 10 }}><Text style={{ color: palette.searchPlaceholder }}>คำขอเป็นเพื่อน →</Text></Pressable>
+        <FriendRequestsPanel />
         <View style={styles.topBar}>
           <View
             style={[
@@ -259,7 +262,7 @@ export function ChatListScreen() {
       <FlatList<Conversation | OpenChatGroup>
         data={listData}
         keyExtractor={(item) => item.id}
-        ListHeaderComponent={listHeader}
+        ListHeaderComponent={listHeader()}
         stickyHeaderIndices={[]}
         contentContainerStyle={styles.list}
         ItemSeparatorComponent={() => (

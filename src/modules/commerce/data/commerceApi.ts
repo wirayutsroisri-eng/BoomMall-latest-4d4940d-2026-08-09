@@ -1,4 +1,11 @@
 import { authHeaders, getApiBase } from '@/modules/auth/state/auth-store';
+import { Platform } from 'react-native';
+import { mapNetworkError } from '@/shared/api/apiBase';
+import {
+  CommerceRequestError,
+  httpErrorKind,
+  type CommerceRequestKind,
+} from '@/modules/commerce/domain/commerceRequest';
 import type { MasterSku, SkuVariant, WarehouseStock } from '@/modules/commerce/domain/types';
 
 export type CatalogBundle = {
@@ -74,16 +81,90 @@ export type ShippingLabelPreview = {
   }>;
 };
 
+const REQUEST_TIMEOUT_MS = 20_000;
+
+/** Development-only diagnostics — never logs tokens, bodies, or query secrets. */
+function inventoryDiag(payload: {
+  endpoint: string;
+  status?: number;
+  errorType?: CommerceRequestKind;
+  parseError?: boolean;
+  requestId: string;
+}) {
+  if (typeof __DEV__ === 'undefined' || !__DEV__) return;
+  console.info('[Inventory]', {
+    platform: Platform.OS,
+    endpoint: payload.endpoint,
+    httpStatus: payload.status,
+    errorType: payload.errorType,
+    parseError: payload.parseError ?? false,
+    requestId: payload.requestId,
+  });
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const base = getApiBase();
   if (!base) throw new Error('ยังไม่ได้ตั้งค่าเซิร์ฟเวอร์ (EXPO_PUBLIC_API_URL)');
-  const res = await fetch(`${base}${path}`, {
-    ...init,
-    headers: { ...authHeaders(), ...(init?.headers as Record<string, string> | undefined) },
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok || json.ok === false) {
-    throw new Error(json?.error?.message ?? `HTTP ${res.status}`);
+  const requestId = Math.random().toString(36).slice(2, 10);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`${base}${path}`, {
+      ...init,
+      headers: { ...authHeaders(), ...(init?.headers as Record<string, string> | undefined) },
+      signal: init?.signal ?? controller.signal,
+    });
+  } catch (error) {
+    const timedOut = controller.signal.aborted;
+    const kind: CommerceRequestKind = timedOut ? 'TIMEOUT' : 'NETWORK_ERROR';
+    const message = timedOut
+      ? `เชื่อมต่อเซิร์ฟเวอร์ช้าเกินไป (${path}) — ลองอีกครั้ง`
+      : mapNetworkError(error).message;
+    inventoryDiag({ endpoint: path, errorType: kind, requestId });
+    throw new CommerceRequestError(message, kind, undefined, requestId);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  let json: Record<string, unknown> | null = null;
+  let parseFailed = false;
+  try {
+    json = (await res.json()) as Record<string, unknown> | null;
+  } catch {
+    parseFailed = true;
+  }
+  const bodyError =
+    json && typeof json === 'object'
+      ? (json.error as { message?: string; code?: string } | undefined)
+      : undefined;
+  const errorMessage =
+    typeof bodyError?.message === 'string' && bodyError.message.trim()
+      ? bodyError.message
+      : undefined;
+
+  if (!res.ok || (json && json.ok === false)) {
+    const kind = httpErrorKind(res.status, parseFailed);
+    const message =
+      errorMessage ??
+      (parseFailed ? `เซิร์ฟเวอร์ตอบกลับไม่ถูกต้อง (HTTP ${res.status})` : `HTTP ${res.status}`);
+    inventoryDiag({ endpoint: path, status: res.status, errorType: kind, parseError: parseFailed, requestId });
+    throw new CommerceRequestError(message, kind, res.status, requestId);
+  }
+  if (parseFailed || json == null) {
+    inventoryDiag({
+      endpoint: path,
+      status: res.status,
+      errorType: 'PARSE_ERROR',
+      parseError: true,
+      requestId,
+    });
+    throw new CommerceRequestError(
+      `เซิร์ฟเวอร์ตอบกลับในรูปแบบที่ไม่รู้จัก (${path})`,
+      'PARSE_ERROR',
+      res.status,
+      requestId,
+    );
   }
   return json as T;
 }

@@ -15,13 +15,15 @@ type Props = {
   height: number;
   imageLayout: { width: number; height: number };
   isActive?: boolean;
+  /** false = อยู่แท็บฟีดที่ไม่ได้โฟกัส — แสดง poster เฉยๆ อย่าสร้าง video decoder (default true) */
+  isLaneActive?: boolean;
   isManuallyPaused: boolean;
   onPlayerReady: (player: VideoPlayer) => void;
   onOpenImage: (index: number) => void;
 };
 
 export const FeedMediaRenderer = memo(function FeedMediaRenderer({
-  item, gallery, width, height, imageLayout, isActive, isManuallyPaused, onPlayerReady, onOpenImage,
+  item, gallery, width, height, imageLayout, isActive, isLaneActive = true, isManuallyPaused, onPlayerReady, onOpenImage,
 }: Props) {
   const [firstFrameRendered, setFirstFrameRendered] = useState(false);
   const renderedRemoteUri = item.videoUri ?? gallery[0];
@@ -40,9 +42,11 @@ export const FeedMediaRenderer = memo(function FeedMediaRenderer({
   if (item.videoUri) {
     return (
       <View style={styles.stage}>
-        <FeedVideoLayer uri={item.videoUri} isActive={isActive} isManuallyPaused={isManuallyPaused}
-          contentFit="contain" onPlayerReady={onPlayerReady} onFirstFrameRender={() => setFirstFrameRendered(true)} style={StyleSheet.absoluteFill} />
-        {videoPoster && !firstFrameRendered ? (
+        {isLaneActive ? (
+          <FeedVideoLayer uri={item.videoUri} isActive={isActive} isManuallyPaused={isManuallyPaused}
+            contentFit="contain" onPlayerReady={onPlayerReady} onFirstFrameRender={() => setFirstFrameRendered(true)} style={StyleSheet.absoluteFill} />
+        ) : null}
+        {videoPoster && (!isLaneActive || !firstFrameRendered) ? (
           <View style={StyleSheet.absoluteFill} pointerEvents="none">
             <Image source={{ uri: videoPoster }} style={StyleSheet.absoluteFill} resizeMode="cover" />
           </View>

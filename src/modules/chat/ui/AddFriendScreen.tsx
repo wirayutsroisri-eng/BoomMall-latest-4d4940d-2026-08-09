@@ -1,62 +1,78 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import QRCode from 'react-native-qrcode-svg';
 import { colors } from '@/shared/theme/colors';
-import { createFriendInvite, getMyFriendIdentity, listFriendRequests, respondFriendRequest, searchFriendProfiles, sendFriendRequest, type FriendRequestRow } from '@/modules/search/data/friendApi';
+import { createFriendInvite, getMyFriendIdentity, resolveFriendInvite, searchFriendProfiles, sendFriendRequest, type FriendProfile } from '@/modules/search/data/friendApi';
+import { FriendRequestsPanel } from './FriendRequestsPanel';
+import { Avatar } from '@/shared/components/Avatar';
 import { DragDownDismiss } from '@/shared/components/DragDownDismiss';
 
-/** เพิ่มเพื่อน / สแกน QR Code — LINE-style Add Friend flow with a QR placeholder + manual handle entry. */
+/** Search for a real profile, confirm the recipient, and track friend requests. */
 export function AddFriendScreen() {
   const insets = useSafeAreaInsets();
   const [handle, setHandle] = useState('');
   const [deepLink, setDeepLink] = useState<string | null>(null);
   const [friendCode, setFriendCode] = useState<string>('');
   const [busy, setBusy] = useState(false);
-  const [incoming, setIncoming] = useState<FriendRequestRow[]>([]);
+  const [results, setResults] = useState<FriendProfile[]>([]);
+  const [searched, setSearched] = useState(false);
+  const [qrError, setQrError] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
+  const lock = useRef(false);
+  const { token } = useLocalSearchParams<{ token?: string }>();
 
   useEffect(() => {
-    void Promise.all([getMyFriendIdentity(), createFriendInvite(), listFriendRequests()]).then(([me, invite, requests]) => {
-      setFriendCode(me.friendCode);
-      setDeepLink(invite.deepLink);
-      setIncoming(requests.filter((row) => row.direction === 'incoming' && row.status === 'PENDING'));
-    }).catch(() => undefined);
-  }, []);
+    let active = true;
+    setQrError(null);
+    void getMyFriendIdentity().then((me) => { if (active) setFriendCode(me.friendCode); })
+      .catch((e) => { if (active) setQrError(e instanceof Error ? e.message : 'โหลดรหัสเพื่อนไม่สำเร็จ'); });
+    void createFriendInvite().then((invite) => { if (active) setDeepLink(invite.deepLink); })
+      .catch((e) => { if (active) setQrError(e instanceof Error ? e.message : 'สร้าง QR ไม่สำเร็จ'); });
+    return () => { active = false; };
+  }, [reload]);
 
-  const respond = async (id: string, action: 'accept' | 'reject') => {
-    try {
-      await respondFriendRequest(id, action);
-      setIncoming((rows) => rows.filter((row) => row.id !== id));
-      Alert.alert(action === 'accept' ? 'เป็นเพื่อนกันแล้ว' : 'ปฏิเสธคำขอแล้ว', action === 'accept' ? 'Direct Chat พร้อมใช้งานในหน้าแชต' : undefined);
-    } catch (error) {
-      Alert.alert('ดำเนินการไม่สำเร็จ', error instanceof Error ? error.message : 'กรุณาลองใหม่');
-    }
-  };
+  useEffect(() => {
+    if (!token) return;
+    let active = true;
+    void resolveFriendInvite(token).then((profile) => {
+      if (active) { setResults([profile]); setSearched(true); }
+    }).catch((e) => { if (active) Alert.alert('QR ใช้งานไม่ได้', e instanceof Error ? e.message : 'กรุณาลองใหม่'); });
+    return () => { active = false; };
+  }, [token]);
 
   const submit = async () => {
-    const trimmed = handle.trim();
-    if (!trimmed) {
-      Alert.alert('กรอกชื่อผู้ใช้หรือรหัสเพื่อน', 'พิมพ์ @handle ของเพื่อนที่ต้องการเพิ่ม');
+    if (lock.current) return;
+    if (handle.trim().replace(/^@/, '').length < 3) {
+      Alert.alert('กรอกชื่อผู้ใช้หรือรหัสเพื่อน', 'กรุณากรอกอย่างน้อย 3 ตัวอักษร');
       return;
     }
+    lock.current = true;
+    setBusy(true);
+    setResults([]);
+    setSearched(false);
+    try {
+      setResults(await searchFriendProfiles(handle.trim()));
+      setSearched(true);
+    } catch (e) { Alert.alert('ค้นหาไม่สำเร็จ', e instanceof Error ? e.message : 'กรุณาลองใหม่'); }
+    finally { lock.current = false; setBusy(false); }
+  };
+
+  const send = async (profile: FriendProfile) => {
+    if (lock.current) return;
+    lock.current = true;
     setBusy(true);
     try {
-      const rows = await searchFriendProfiles(trimmed);
-      const normalized = trimmed.replace(/^@/, '').toUpperCase();
-      const target = rows.find((row) => row.friendCode === normalized || row.handle?.toLowerCase() === normalized.toLowerCase()) ?? rows[0];
-      if (!target) throw new Error('ไม่พบผู้ใช้นี้');
-      await sendFriendRequest(target.userId);
+      const result = await sendFriendRequest(profile.userId);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('ส่งคำขอแล้ว', 'เมื่ออีกฝ่ายตอบรับ ระบบจะเปิด Direct Chat ให้โดยอัตโนมัติ');
-      setHandle('');
-    } catch (error) {
-      Alert.alert('เพิ่มเพื่อนไม่สำเร็จ', error instanceof Error ? error.message : 'กรุณาลองใหม่');
-    } finally {
-      setBusy(false);
-    }
+      Alert.alert(result.status === 'ACCEPTED' ? 'เป็นเพื่อนกันแล้ว' : 'ส่งคำขอแล้ว', result.status === 'ACCEPTED' ? 'เปิดแชตได้จากรายการแชต' : 'ให้อีกฝ่ายกดยอมรับในหน้าเพื่อน แชต หรือเพิ่มเพื่อน');
+      setResults((rows) => rows.filter((row) => row.userId !== profile.userId));
+      setSearched(false);
+    } catch (e) { Alert.alert('เพิ่มเพื่อนไม่สำเร็จ', e instanceof Error ? e.message : 'กรุณาลองใหม่'); }
+    finally { lock.current = false; setBusy(false); }
   };
 
   return (
@@ -72,12 +88,15 @@ export function AddFriendScreen() {
 
       <View style={styles.qrCard}>
         <View style={styles.qrFrame}>
-          {deepLink ? <QRCode value={deepLink} size={150} color={colors.brand.ink} backgroundColor="#FFFFFF" /> : <Ionicons name="hourglass" size={36} color={colors.text.muted} />}
+          {deepLink ? <QRCode value={deepLink} size={150} color={colors.brand.ink} backgroundColor="#FFFFFF" quietZone={12} /> : <Ionicons name={qrError ? "alert-circle-outline" : "hourglass"} size={36} color={colors.text.muted} />}
         </View>
         <Text style={styles.qrLabel}>QR Code ของฉัน</Text>
-        <Text style={styles.qrHint}>{friendCode || 'กำลังสร้างรหัส…'} · QR หมดอายุใน 24 ชั่วโมง</Text>
+        <Text style={styles.qrHint}>{friendCode || (qrError ? 'โหลดรหัสไม่สำเร็จ' : 'กำลังสร้างรหัส…')} · QR หมดอายุใน 24 ชั่วโมง</Text>
       </View>
 
+      {qrError ? <Pressable onPress={() => setReload((n) => n + 1)}><Text style={styles.qrHint}>{qrError} · แตะเพื่อลองใหม่</Text></Pressable> : null}
+
+      <FriendRequestsPanel showOutgoing />
       <Pressable
         style={styles.scanBtn}
         onPress={() => router.push('/qr-scan')}
@@ -92,31 +111,32 @@ export function AddFriendScreen() {
         <View style={styles.dividerLine} />
       </View>
 
-      <Text style={styles.inputLabel}>เพิ่มเพื่อนด้วยชื่อผู้ใช้</Text>
+      <Text style={styles.inputLabel}>ค้นหาด้วยชื่อผู้ใช้ รหัสเพื่อน หรือ ID</Text>
       <View style={styles.inputRow}>
         <Ionicons name="at" size={18} color={colors.text.muted} />
         <TextInput
           style={styles.input}
-          placeholder="handle เช่น boomev_partner"
+          placeholder="@username, รหัสเพื่อน หรือ ID"
           placeholderTextColor={colors.text.muted}
           value={handle}
-          onChangeText={setHandle}
+          editable={!busy}
+          onChangeText={(value) => { setHandle(value); setResults([]); setSearched(false); }}
+          onSubmitEditing={() => void submit()}
+          returnKeyType="search"
           autoCapitalize="none"
           autoCorrect={false}
         />
       </View>
 
       <Pressable style={styles.addBtn} onPress={() => void submit()} disabled={busy}>
-        <Text style={styles.addBtnText}>{busy ? 'กำลังส่ง…' : 'ส่งคำขอเป็นเพื่อน'}</Text>
+        <Text style={styles.addBtnText}>{busy ? 'กำลังดำเนินการ…' : 'ค้นหาเพื่อน'}</Text>
       </Pressable>
-      {incoming.length ? <View style={styles.requests}>
-        <Text style={styles.inputLabel}>คำขอเป็นเพื่อน</Text>
-        {incoming.map((row) => <View key={row.id} style={styles.requestRow}>
-          <View style={{ flex: 1 }}><Text style={styles.requestName}>{row.peer.displayName}</Text><Text style={styles.qrHint}>@{row.peer.handle ?? row.peer.friendCode}</Text></View>
-          <Pressable style={styles.rejectBtn} onPress={() => void respond(row.id, 'reject')}><Text>ปฏิเสธ</Text></Pressable>
-          <Pressable style={styles.acceptBtn} onPress={() => void respond(row.id, 'accept')}><Text style={styles.acceptText}>ยอมรับ</Text></Pressable>
-        </View>)}
-      </View> : null}
+      {searched && !results.length ? <Text style={styles.qrHint}>ไม่พบผู้ใช้ที่ตรงกับคำค้นหา</Text> : null}
+      {results.map((profile) => <View key={profile.userId} style={styles.requestRow}>
+        <Avatar uri={profile.avatarUrl ?? undefined} initial={profile.displayName.slice(0, 1)} size={44} />
+        <View style={{ flex: 1 }}><Text style={styles.requestName}>{profile.displayName}</Text><Text style={styles.qrHint}>{profile.handle ? `@${profile.handle}` : profile.friendCode}</Text></View>
+        <Pressable disabled={busy} style={styles.acceptBtn} onPress={() => void send(profile)}><Text style={styles.acceptText}>เพิ่มเพื่อน</Text></Pressable>
+      </View>)}
       </ScrollView>
     </DragDownDismiss>
   );

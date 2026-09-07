@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as Crypto from 'expo-crypto';
 import { useFeedStore } from '@/modules/feed/state/feed-store';
+import { mediaUploadMessage } from '@/modules/media/domain/mediaUploadMessage';
 import { persistCreateMedia } from '@/modules/create/data/persistCreateMedia';
 import { pickDevicePhotos } from '@/shared/media/photoLibraryStore';
 import { useCreateDraftStore } from '@/modules/create/state/create-draft-store';
@@ -384,7 +385,7 @@ export function ContentPublishScreen() {
         });
         Alert.alert(
           'โพสต์ยังไม่สำเร็จ',
-          'การอัปโหลดด้านหลังล้มเหลว โพสต์ถูกแสดงสถานะไว้ในฟีด กรุณาตรวจสอบอินเทอร์เน็ตแล้วโพสต์ใหม่',
+          mediaUploadMessage(error),
         );
       });
     } catch (error) {
@@ -396,7 +397,7 @@ export function ContentPublishScreen() {
       });
       Alert.alert(
         'อัปโหลดรูปไม่สำเร็จ',
-        `โพสต์นี้ถูกเก็บไว้ในฉบับร่างแล้ว\n${error instanceof Error ? error.message : ''}`.trim(),
+        `โพสต์นี้ถูกเก็บไว้ในฉบับร่างแล้ว\n${mediaUploadMessage(error)}`.trim(),
         [
           { text: 'เก็บไว้ในร่าง', style: 'cancel' },
           { text: 'ลองใหม่', onPress: () => void publish(false) },

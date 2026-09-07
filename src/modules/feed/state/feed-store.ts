@@ -1,3 +1,5 @@
+import { restoreNormalFeed } from '../domain/restoreNormalFeed';
+import { newFocusSessionId, setTemporaryFeedFocus, loadTemporaryFeed, type FeedFocus } from '../data/feedFocusApi';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -120,6 +122,14 @@ function bindCompositionToMediaAssets(
 }
 
 type FeedState = {
+  feedFocus: FeedFocus | null;
+  focusOrder: string[] | null;
+  focusBaselineIds: string[] | null;
+  focusSessionId: string;
+  focusBusy: boolean;
+  focusGeneration: number;
+  changeFeedFocus: (query: string | null) => Promise<void>;
+  reloadFeedFocus: () => Promise<void>;
   /** Owner of account-scoped persisted state. Null also forces one-time cleanup of legacy caches. */
   accountOwnerId: string | null;
   tab: FeedTab;
@@ -167,6 +177,56 @@ let commentSeq = 1000;
 export const useFeedStore = create<FeedState>()(
   persist(
     (set, get) => ({
+  feedFocus: null,
+  focusOrder: null,
+  focusBaselineIds: null,
+  focusSessionId: newFocusSessionId(),
+  focusBusy: false,
+  focusGeneration: 0,
+  changeFeedFocus: async (query) => {
+    if (get().focusBusy) return;
+    const sessionId = get().focusSessionId;
+    const generation = get().focusGeneration + 1;
+    set({ focusBusy: true, focusGeneration: generation });
+    try {
+      const focus = await setTemporaryFeedFocus(sessionId, query);
+      if (get().focusGeneration !== generation) return;
+      // A reset immediately restores the normal view, even if the reload fails.
+      set((state) => ({
+        feedFocus: focus, focusOrder: focus ? [] : null,
+        focusBaselineIds: focus ? state.focusBaselineIds ?? state.items.map((row) => row.id) : null,
+        focusSessionId: focus ? sessionId : newFocusSessionId(),
+        items: !focus ? restoreNormalFeed(state.items, state.focusBaselineIds) : state.items,
+      }));
+      const response = await loadTemporaryFeed(sessionId);
+      if (get().focusGeneration !== generation) return;
+      const auth = useAuthStore.getState().user;
+      const remote = response.data.map((row) => socialPostToFeedItem(row, { myUserId: auth?.id, myHandle: auth?.handle }));
+      set((state) => ({
+        feedFocus: response.focus,
+        focusBaselineIds: response.focus ? get().focusBaselineIds : null,
+        focusOrder: response.focus ? remote.map((row) => row.id) : null,
+        items: response.focus
+          ? [...remote, ...state.items.filter((row) => !remote.some((item) => item.id === row.id))]
+          : mergeFeedItems(remote, state.items),
+      }));
+    } finally {
+      if (get().focusGeneration === generation) set({ focusBusy: false });
+    }
+  },
+  reloadFeedFocus: async () => {
+    const generation = get().focusGeneration;
+    const response = await loadTemporaryFeed(get().focusSessionId);
+    if (get().focusGeneration !== generation || get().focusBusy) return;
+    const auth = useAuthStore.getState().user;
+    const remote = response.data.map((row) => socialPostToFeedItem(row, { myUserId: auth?.id, myHandle: auth?.handle }));
+    set((state) => ({
+      feedFocus: response.focus,
+      focusBaselineIds: response.focus ? get().focusBaselineIds : null,
+      focusOrder: response.focus ? remote.map((row) => row.id) : null,
+      items: response.focus ? [...remote, ...state.items.filter((row) => !remote.some((item) => item.id === row.id))] : mergeFeedItems(remote, state.items),
+    }));
+  },
   tab: 'foryou',
   accountOwnerId: null,
   items: [],
@@ -840,12 +900,16 @@ export const useFeedStore = create<FeedState>()(
     })),
   closeCreatorProfile: () => set({ activeCreatorHandle: null, activeCreatorFeedId: null }),
   hydrateFromServer: async () => {
+    if (get().focusBusy) return;
+    if (get().feedFocus) { await get().reloadFeedFocus(); return; }
+    const generation = get().focusGeneration;
     if (!useFeedStore.persist.hasHydrated()) return;
     const auth = useAuthStore.getState().user;
     const [feedRows, ownRows] = await Promise.all([
       fetchFeedPosts(),
       auth?.id ? fetchFeedPosts(undefined, undefined, { mine: true }) : Promise.resolve([]),
     ]);
+    if (get().focusGeneration !== generation) return;
     const rows = [...new Map([...feedRows, ...ownRows].map((row) => [row.id, row])).values()];
     const profileName = useLoyaltyStore.getState().profile.displayName.trim();
     const remote = rows
@@ -863,6 +927,9 @@ export const useFeedStore = create<FeedState>()(
     set({ items: mergeFeedItems(remote, local) });
   },
   refreshFromServer: async () => {
+    if (get().focusBusy) return;
+    if (get().feedFocus) { await get().reloadFeedFocus(); return; }
+    const generation = get().focusGeneration;
     if (!useFeedStore.persist.hasHydrated()) return;
     const current = keepPersistedFeedItems(get().items);
     const auth = useAuthStore.getState().user;
@@ -874,6 +941,7 @@ export const useFeedStore = create<FeedState>()(
       fetchFeedPosts(undefined, undefined, { refresh: true, excludeIds }),
       auth?.id ? fetchFeedPosts(undefined, undefined, { mine: true, refresh: true }) : Promise.resolve([]),
     ]);
+    if (get().focusGeneration !== generation) return;
     const rows = [...new Map([...feedRows, ...ownRows].map((row) => [row.id, row])).values()];
     if (!rows.length) return;
     const profileName = useLoyaltyStore.getState().profile.displayName.trim();
@@ -894,6 +962,12 @@ export const useFeedStore = create<FeedState>()(
     const nextOwnerId = userId?.trim() || null;
     if (get().accountOwnerId === nextOwnerId) return false;
     set({
+      feedFocus: null,
+      focusOrder: null,
+      focusBaselineIds: null,
+      focusSessionId: newFocusSessionId(),
+      focusBusy: false,
+      focusGeneration: get().focusGeneration + 1,
       accountOwnerId: nextOwnerId,
       items: [],
       commentsByFeedId: {},
@@ -911,7 +985,7 @@ export const useFeedStore = create<FeedState>()(
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (s) => ({
         accountOwnerId: s.accountOwnerId,
-        items: keepPersistedFeedItems(s.items).slice(0, 80),
+        items: keepPersistedFeedItems(restoreNormalFeed(s.items, s.focusBaselineIds)).slice(0, 80),
         commentsByFeedId: Object.fromEntries(
           Object.entries(s.commentsByFeedId)
             .slice(0, 40)

@@ -1,5 +1,6 @@
 import { fetch as expoFetch } from 'expo/fetch';
-import { File } from 'expo-file-system';
+import { File, UploadType } from 'expo-file-system';
+import { Platform } from 'react-native';
 import { authHeaders, getApiBase } from '@/modules/auth/state/auth-store';
 import type { MediaAsset, MediaAssetType } from '../domain/mediaAsset';
 
@@ -97,7 +98,8 @@ export async function uploadMediaAsset(input: {
   console.info('[POST_MEDIA] local file selected', { type: input.type, scheme: input.uri.split(':')[0] });
   const file = new File(input.uri);
   if (!file.exists) throw new Error('MEDIA_LOCAL_FILE_MISSING');
-  const mimeType = input.mimeType || file.type || inferMime(input.uri, input.type);
+  const detectedMime = file.type?.trim().toLowerCase();
+  const mimeType = input.mimeType || (detectedMime?.startsWith(`${input.type}/`) ? detectedMime : inferMime(input.uri, input.type));
   const session = await apiJson<UploadSession>('/api/v1/media-assets/upload-session', {
     method: 'POST',
     headers: authHeaders(),
@@ -122,14 +124,24 @@ export async function uploadMediaAsset(input: {
   });
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), OBJECT_UPLOAD_TIMEOUT_MS);
-  let uploaded: Response;
+  let uploaded: { status: number; ok: boolean };
   try {
-    uploaded = await expoFetch(session.upload.uploadUrl, {
-      method: 'PUT',
-      headers: session.upload.headers ?? { 'Content-Type': session.upload.mimeType },
-      body: file,
-      signal: controller.signal,
-    });
+    const headers = session.upload.headers ?? { 'Content-Type': session.upload.mimeType };
+    if (Platform.OS === 'android') {
+      // Stream from the native file instead of materializing a Blob/byte array in JS.
+      // Binary upload preserves the Content-Type/Length signed by the server.
+      const result = await file.upload(session.upload.uploadUrl, {
+        httpMethod: 'PUT',
+        uploadType: UploadType.BINARY_CONTENT,
+        headers,
+        signal: controller.signal,
+      });
+      uploaded = { status: result.status, ok: result.status >= 200 && result.status < 300 };
+    } else {
+      uploaded = await expoFetch(session.upload.uploadUrl, {
+        method: 'PUT', headers, body: file, signal: controller.signal,
+      });
+    }
   } catch (error) {
     throw new MediaUploadError(
       controller.signal.aborted

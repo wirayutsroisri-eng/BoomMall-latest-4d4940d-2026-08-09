@@ -10,10 +10,9 @@
     "locales": {
       "th": "./locales/th.json"
     },
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.boommall.superapp",
+      "bundleIdentifier": "com.boommall.social",
       "buildNumber": "1",
       "usesAppleSignIn": true,
       "infoPlist": {

@@ -52,7 +52,7 @@ Not Kids. UGC: chat, comments, posts, board. Report + block are in-app.
    Production host: **`https://api.boommall.app`** (already set in `eas.json` for `preview`/`play-internal`/`production`).
 2. Confirm `https://<API>/legal/privacy` and `/legal/terms` open in a desktop browser.
 3. App Privacy nutrition labels: account, user content, identifiers — no tracking / ATT in this build.
-4. Enable Sign in with Apple on the App ID `com.boommall.superapp`.
+4. Enable Sign in with Apple on the App ID `com.boommall.social`.
 5. Replace `REPLACE_TEAM_ID` in `eas.json` with your Apple Team ID.
 6. Paste the demo account into App Review Information.
 

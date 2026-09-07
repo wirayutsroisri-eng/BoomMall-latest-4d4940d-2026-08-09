@@ -5,6 +5,7 @@ import { registerPushToken } from '@/modules/chat/data/chatRealtimeApi';
 import { useAuthStore } from '@/modules/auth/state/auth-store';
 
 let lastRegisteredToken: string | null = null;
+let lastRegisteredUserId: string | null = null;
 
 function resolveProjectId(): string | undefined {
   const extra = Constants.expoConfig?.extra as { eas?: { projectId?: string } } | undefined;
@@ -26,9 +27,11 @@ async function ensureAndroidChannel() {
 }
 
 /** Register this device for Expo push after login (no-op on web / without permission). */
-export async function ensurePushRegistered(): Promise<void> {
+async function registerCurrentDevice(): Promise<void> {
   if (Platform.OS === 'web') return;
   if (!useAuthStore.getState().isAuthenticated()) return;
+  const userId = useAuthStore.getState().user?.id;
+  if (!userId) return;
 
   await ensureAndroidChannel();
 
@@ -48,9 +51,11 @@ export async function ensurePushRegistered(): Promise<void> {
 
   try {
     const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
-    if (!token || token === lastRegisteredToken) return;
+    if (!token || (token === lastRegisteredToken && userId === lastRegisteredUserId)) return;
+    if (useAuthStore.getState().user?.id !== userId) return;
     await registerPushToken(token, Platform.OS);
     lastRegisteredToken = token;
+    lastRegisteredUserId = userId;
   } catch (e) {
     console.warn('[push] register failed', e);
   }
@@ -58,4 +63,10 @@ export async function ensurePushRegistered(): Promise<void> {
 
 export function clearPushRegistrationCache() {
   lastRegisteredToken = null;
+  lastRegisteredUserId = null;
+}
+
+export async function ensurePushRegistered(): Promise<void> {
+  try { await registerCurrentDevice(); }
+  catch (error) { console.warn('[push] notification registration unavailable', error); }
 }

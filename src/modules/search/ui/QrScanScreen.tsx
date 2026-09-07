@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { parseFriendQr } from '@/modules/search/domain/friendQr';
+import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
@@ -27,6 +28,14 @@ export function QrScanScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [flash, setFlash] = useState(false);
   const [resolving, setResolving] = useState(false);
+  const scanLocked = useRef(false);
+  const [focused, setFocused] = useState(false);
+  useFocusEffect(useCallback(() => {
+    setFocused(true);
+    return () => setFocused(false);
+  }, []));
+  const unlock = () => { scanLocked.current = false; setResolving(false); };
+  const scanError = (title: string, message: string) => Alert.alert(title, message, [{ text: 'สแกนใหม่', onPress: unlock }], { cancelable: false });
 
   const scanY = useSharedValue(0);
 
@@ -50,42 +59,39 @@ export function QrScanScreen() {
   }));
 
   const handleScanned = (result: BarcodeScanningResult) => {
-    if (resolving) return;
-    const match = result.data.match(/[?&]token=([^&]+)/);
-    const token = match?.[1] ? decodeURIComponent(match[1]) : '';
+    if (scanLocked.current) return;
+    scanLocked.current = true;
+    setResolving(true);
+    const token = parseFriendQr(result.data);
     if (!token) {
-      Alert.alert('QR ไม่ถูกต้อง', 'QR นี้ไม่ใช่ลิงก์เพิ่มเพื่อนของ BoomMall');
+      scanError('QR ไม่ถูกต้อง', 'QR นี้ไม่ใช่ลิงก์เพิ่มเพื่อนของ BoomMall');
       return;
     }
-    setResolving(true);
     void resolveFriendInvite(token).then((profile) => {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert(
         `เพิ่ม ${profile.displayName} เป็นเพื่อน?`,
         `@${profile.handle ?? profile.friendCode} · ${profile.friendCode}`,
         [
-          { text: 'ยกเลิก', style: 'cancel', onPress: () => setResolving(false) },
+          { text: 'ยกเลิก', style: 'cancel', onPress: unlock },
           {
             text: 'ส่งคำขอ',
-            onPress: () => void sendFriendRequest(profile.userId).then(() => {
-              Alert.alert('ส่งคำขอแล้ว', 'รออีกฝ่ายตอบรับก่อนเริ่มแชต');
-              router.back();
+            onPress: () => void sendFriendRequest(profile.userId).then((request) => {
+              Alert.alert(request.status === 'ACCEPTED' ? 'เป็นเพื่อนกันแล้ว' : 'ส่งคำขอแล้ว', request.status === 'ACCEPTED' ? 'เปิดแชตได้จากรายการแชต' : 'ให้อีกฝ่ายกดยอมรับในหน้าเพื่อน แชต หรือเพิ่มเพื่อน', [{ text: 'ตกลง', onPress: () => router.back() }], { cancelable: false });
             }).catch((error: unknown) => {
-              setResolving(false);
-              Alert.alert('ส่งคำขอไม่สำเร็จ', error instanceof Error ? error.message : 'กรุณาลองใหม่');
+              scanError('ส่งคำขอไม่สำเร็จ', error instanceof Error ? error.message : 'กรุณาลองใหม่');
             }),
           },
         ],
+        { cancelable: false },
       );
     }).catch((error: unknown) => {
-      setResolving(false);
-      Alert.alert('QR ใช้งานไม่ได้', error instanceof Error ? error.message : 'QR อาจหมดอายุแล้ว');
+      scanError('QR ใช้งานไม่ได้', error instanceof Error ? error.message : 'QR อาจหมดอายุแล้ว');
     });
   };
 
   const goAddFriend = () => {
-    if (router.canDismiss()) router.dismiss();
-    router.push('/(tabs)/chat/add-friend');
+    router.replace('/(tabs)/chat/add-friend');
   };
 
   return (
@@ -104,10 +110,11 @@ export function QrScanScreen() {
 
       <View style={styles.center}>
         <View style={styles.frame}>
-          {permission?.granted ? (
+          {permission?.granted && focused ? (
             <CameraView
               style={StyleSheet.absoluteFill}
               facing="back"
+              onMountError={({ message }) => scanError('เปิดกล้องไม่สำเร็จ', message)}
               enableTorch={flash}
               barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
               onBarcodeScanned={resolving ? undefined : handleScanned}
@@ -119,7 +126,7 @@ export function QrScanScreen() {
           <View style={[styles.corner, styles.cornerBR]} />
           <Animated.View style={[styles.scanLine, scanLineStyle]} />
         </View>
-        <Text style={styles.hint}>จ่อกล้องไปที่ QR Code ของเพื่อนหรือร้านค้า</Text>
+        <Text style={styles.hint}>{resolving ? 'กำลังตรวจสอบ QR / รอการยืนยัน' : 'จ่อกล้องไปที่ QR Code เพิ่มเพื่อนของ BoomMall'}</Text>
         <Text style={styles.hintSub}>
           ระบบจะแสดงโปรไฟล์ให้ยืนยันก่อนส่งคำขอทุกครั้ง
         </Text>
@@ -127,9 +134,11 @@ export function QrScanScreen() {
 
       <View style={[styles.bottomPanel, { paddingBottom: Math.max(insets.bottom, 24) }]}>
         {!permission?.granted ? (
-          <Pressable style={styles.simulateBtn} onPress={goAddFriend}>
+          <Pressable style={styles.simulateBtn} onPress={() => {
+            void (permission?.canAskAgain ? requestPermission() : Linking.openSettings()).catch(() => Alert.alert('เปิดกล้องไม่สำเร็จ', 'กรุณาอนุญาตกล้องในการตั้งค่า'));
+          }}>
             <Ionicons name="person-add" size={18} color={colors.brand.ink} />
-            <Text style={styles.simulateBtnText}>อนุญาตกล้อง หรือเพิ่มด้วยรหัสแทน</Text>
+            <Text style={styles.simulateBtnText}>{permission?.canAskAgain ? 'อนุญาตให้ใช้กล้อง' : 'เปิดการตั้งค่าเพื่ออนุญาตกล้อง'}</Text>
           </Pressable>
         ) : null}
 

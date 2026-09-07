@@ -8,9 +8,19 @@ import {
   upsertCommerceProduct,
   type CatalogBundle,
 } from './commerceApi';
+import { prepareBundleForServer } from './uploadProductMedia';
+import {
+  isCommerceRequestError,
+  isRetryableCommerceError,
+  type CommerceRequestKind,
+} from '@/modules/commerce/domain/commerceRequest';
 
 type SyncOperation = 'pull' | 'upsert' | 'delete' | 'event';
-type SyncErrorHandler = (input: { operation: SyncOperation; message: string }) => void;
+type SyncErrorHandler = (input: {
+  operation: SyncOperation;
+  message: string;
+  kind?: CommerceRequestKind;
+}) => void;
 
 let syncErrorHandler: SyncErrorHandler | null = null;
 let lastErrorKey = '';
@@ -22,6 +32,7 @@ export function setCommerceSyncErrorHandler(handler: SyncErrorHandler | null) {
 
 function reportSyncError(operation: SyncOperation, error: unknown) {
   const message = error instanceof Error ? error.message : 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้';
+  const kind = isCommerceRequestError(error) ? error.kind : undefined;
   const key = `${operation}:${message}`;
   const now = Date.now();
   if (key === lastErrorKey && now - lastErrorAt < 30_000) return;
@@ -30,7 +41,7 @@ function reportSyncError(operation: SyncOperation, error: unknown) {
   // A temporary network/server restart must not trigger React Native LogBox.
   // The user-facing handler still reports a failure after retries are exhausted.
   console.warn(`[COMMERCE_SYNC:${operation}]`, error);
-  syncErrorHandler?.({ operation, message });
+  syncErrorHandler?.({ operation, message, kind });
 }
 
 const wait = (milliseconds: number) =>
@@ -54,7 +65,53 @@ function applyBundles(bundles: CatalogBundle[]) {
   });
 }
 
-export async function pullCommerceCatalog() {
+/**
+ * After a successful upsert the server is authoritative and returns canonical
+ * object-storage URLs. Mirror them into the local store so:
+ *  - the next edit does not re-upload the same images, and
+ *  - the running UI keeps working from the same source of truth as the DB.
+ */
+function adoptServerMedia(bundle: CatalogBundle) {
+  const product = bundle.product as MasterSku;
+  const variants = bundle.variants as SkuVariant[];
+  useInventoryStore.setState((s) => {
+    const byVariantId = new Map(variants.map((v) => [v.id, v] as const));
+    return {
+      masters: s.masters.map((m) =>
+        m.id === product.id
+          ? {
+              ...m,
+              media: product.media ?? m.media,
+              specImages: product.specImages ?? m.specImages,
+              usageImages: product.usageImages ?? m.usageImages,
+              imageUri: product.imageUri ?? m.imageUri,
+              imageUris: product.imageUris ?? m.imageUris,
+            }
+          : m,
+      ),
+      variants: s.variants.map((v) =>
+        byVariantId.has(v.id)
+          ? { ...v, imageUri: byVariantId.get(v.id)!.imageUri ?? v.imageUri }
+          : v,
+      ),
+    };
+  });
+}
+
+const PULL_RETRY_MAX = 3;
+let pullInFlight: Promise<void> | null = null;
+
+/** Pull never clears cached inventory just because one refresh request failed. */
+export function pullCommerceCatalog(): Promise<void> {
+  // Prevent duplicate in-flight requests (8s interval + manual refresh + focus).
+  if (pullInFlight) return pullInFlight;
+  pullInFlight = runPullCommerceCatalog().finally(() => {
+    pullInFlight = null;
+  });
+  return pullInFlight;
+}
+
+async function runPullCommerceCatalog() {
   const auth = useAuthStore.getState();
   const shopId = auth.user?.shopId?.trim();
   if (!auth.sessionToken || !shopId) {
@@ -62,7 +119,7 @@ export async function pullCommerceCatalog() {
     return;
   }
   let lastError: unknown;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < PULL_RETRY_MAX; attempt += 1) {
     try {
       const remote = await fetchCommerceCatalog(shopId);
       // Pull is one-way server → device. Products are uploaded only from an
@@ -71,20 +128,50 @@ export async function pullCommerceCatalog() {
       return;
     } catch (error) {
       lastError = error;
-      if (attempt < 2) await wait(350 * (attempt + 1));
+      // Retry only network/timeout/server (5xx). Never loop on 4xx or parse errors.
+      if (!isRetryableCommerceError(error)) break;
+      if (attempt < PULL_RETRY_MAX - 1) await wait(350 * (attempt + 1));
     }
   }
   reportSyncError('pull', lastError);
 }
 
-export function pushCommerceProduct(masterId: string) {
+const pushing = new Set<string>();
+const queuedPush = new Set<string>();
+
+/**
+ * Upload local media → object storage, then PUT the product. Only one network
+ * request per master at a time; edits made while a push is in-flight are queued
+ * and re-pushed with the latest store state (no lost updates, no duplicates).
+ */
+export async function pushCommerceProduct(masterId: string) {
+  if (pushing.has(masterId)) {
+    queuedPush.add(masterId);
+    return;
+  }
   const bundle = bundleOf(masterId);
   if (!bundle) return;
-  void upsertCommerceProduct(bundle).catch((error: unknown) => reportSyncError('upsert', error));
+  pushing.add(masterId);
+  try {
+    const remoteBundle = await prepareBundleForServer(bundle);
+    const saved = await upsertCommerceProduct(remoteBundle);
+    if (saved?.data) adoptServerMedia(saved.data);
+  } catch (error) {
+    reportSyncError('upsert', error);
+  } finally {
+    pushing.delete(masterId);
+    if (queuedPush.delete(masterId)) void pushCommerceProduct(masterId);
+  }
 }
 
+const deleting = new Set<string>();
+
 export function pushCommerceDelete(masterId: string) {
-  void deleteCommerceProduct(masterId).catch((error: unknown) => reportSyncError('delete', error));
+  if (deleting.has(masterId)) return;
+  deleting.add(masterId);
+  void deleteCommerceProduct(masterId)
+    .catch((error: unknown) => reportSyncError('delete', error))
+    .finally(() => deleting.delete(masterId));
 }
 
 export function trackCommerceEvent(name: string, entityType?: string, entityId?: string) {

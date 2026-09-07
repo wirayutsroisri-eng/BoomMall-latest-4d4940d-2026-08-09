@@ -31,10 +31,19 @@ import { detachProductFromPost, listPostProducts } from '../PostProductService';
 import { listFollowing } from '../../auth/FollowService';
 import { sendPushToUsers } from '../../notify/PushService';
 import { listActiveInventory } from '../../ecommerce/AdInventoryService';
+import { readFeedFocus, writeFeedFocus, mixFeedFocus, matchesFocusText } from '../TemporaryFeedFocus';
 import { AppError } from '../../../lib/errors';
 
 export const feedAppRouter = Router();
 export const feedDomainRouter = Router();
+
+feedAppRouter.put('/focus', requireUserOrDevHeader, async (req: UserAuthedRequest, res, next) => {
+  try {
+    const focus = await writeFeedFocus(req.user!.sub, String(req.body?.sessionId ?? ''), req.body?.query);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ ok: true, data: focus });
+  } catch (error) { next(error); }
+});
 
 feedAppRouter.get('/posts', async (req: UserAuthedRequest, res, next) => {
   try {
@@ -85,7 +94,10 @@ feedAppRouter.get('/posts', async (req: UserAuthedRequest, res, next) => {
       viewerId: req.user?.sub,
       includeHidden: mine,
     };
-    let data = await listSocialPosts(40, {
+    const sessionId = String(req.query.focusSessionId ?? '');
+    const focus = sessionId && req.user?.sub && !mine && (!tab || tab === 'foryou')
+      ? await readFeedFocus(req.user.sub, sessionId) : null;
+    let data = await listSocialPosts(focus ? 100 : 40, {
       ...listOptions,
       excludeIds: refresh && !mine ? excludeIds : undefined,
     });
@@ -95,9 +107,27 @@ feedAppRouter.get('/posts', async (req: UserAuthedRequest, res, next) => {
     if (refresh && !mine && excludeIds.length && !data.length) {
       data = await listSocialPosts(40, listOptions);
     }
+    if (focus) {
+      const following = focus.query === 'กำลังติดตาม' ? await listFollowing(req.user!.sub) : [];
+      const followedIds = new Set(following.map((row) => row.followingId));
+      const followedHandles = new Set(following.map((row) => row.followingHandle.replace(/^@/, '').toLowerCase()));
+      // Retrieve matching candidates beyond the newest general pool, through
+      // the same visibility, blocking and personalization pipeline.
+      const focusedRows = await listSocialPosts(100, {
+        ...listOptions,
+        ...(focus.query === 'กำลังติดตาม'
+          ? { authorIds: following.map((row) => row.followingId).concat(following.map((row) => `handle:${row.followingHandle}`)).concat('__none__') }
+          : { focusQuery: focus.query }),
+      });
+      const pool = [...new Map([...focusedRows, ...data].map((row) => [row.id, row])).values()];
+      data = mixFeedFocus(pool.filter((row) => !row.lane || row.lane === 'foryou'), (row) => focus.query === 'กำลังติดตาม'
+        ? followedIds.has(row.authorId) || followedHandles.has((row.authorHandle ?? '').replace(/^@/, '').toLowerCase())
+        : matchesFocusText(focus.query, row.body, row.tags ?? []), 40);
+    }
     res.setHeader('Cache-Control', 'no-store');
     res.json({
       ok: true,
+      focus,
       data,
     });
   } catch (e) {

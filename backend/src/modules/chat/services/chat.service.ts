@@ -291,7 +291,12 @@ export class ChatService {
 
 function computeWrapped(
   message: ChatMessageDto,
-  participants: Array<{ userId: string; lastReadAt?: Date | null; lastDeliveredAt?: Date | null }>,
+  participants: Array<{
+    userId: string;
+    lastReadAt?: Date | null;
+    lastDeliveredAt?: Date | null;
+    lastReadSequence?: bigint | null;
+  }>,
   deleted: boolean,
 ): ChatMessageDto {
   return {
@@ -299,6 +304,7 @@ function computeWrapped(
     status: computeDeliveryStatus({
       senderId: message.senderId,
       createdAt: message.createdAt,
+      serverSequence: message.serverSequence,
       deleted,
       participants,
     }),

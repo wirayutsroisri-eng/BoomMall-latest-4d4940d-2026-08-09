@@ -47,7 +47,12 @@ friendRouter.post('/requests', async (req: UserAuthedRequest, res, next) => {
   try { limit(req); res.status(201).json({ ok: true, data: await sendFriendRequest(req.user!.sub, String(req.body?.receiverId ?? ''), req.body?.message ? String(req.body.message) : undefined) }); } catch (e) { next(e); }
 });
 friendRouter.post('/requests/:id/respond', async (req: UserAuthedRequest, res, next) => {
-  try { res.json({ ok: true, data: await respondFriendRequest(req.user!.sub, BigInt(String(req.params.id)), req.body?.action === 'accept') }); } catch (e) { next(e); }
+  try {
+    const action = req.body?.action;
+    if (action !== 'accept' && action !== 'reject') throw new AppError('VALIDATION', 'กรุณาเลือกยอมรับหรือปฏิเสธ', 400);
+    if (!/^[0-9]{1,19}$/.test(String(req.params.id))) throw new AppError('VALIDATION', 'รหัสคำขอไม่ถูกต้อง', 400);
+    res.json({ ok: true, data: await respondFriendRequest(req.user!.sub, BigInt(String(req.params.id)), action === 'accept') });
+  } catch (e) { next(e); }
 });
 friendRouter.get('/contacts', async (req: UserAuthedRequest, res, next) => {
   try { res.json({ ok: true, data: await listContacts(req.user!.sub) }); } catch (e) { next(e); }

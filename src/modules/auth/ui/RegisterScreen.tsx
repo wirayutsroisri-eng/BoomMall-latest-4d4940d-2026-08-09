@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,17 +22,22 @@ export function RegisterScreen() {
           <Ionicons name="close" size={26} color={colors.text.primary} />
         </Pressable>
       </View>
-      <ScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
-        keyboardShouldPersistTaps="handled"
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoider}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <AuthForm
-          mode="register"
-          onAuthenticated={close}
-          onClose={close}
-          onSwitchMode={close}
-        />
-      </ScrollView>
+        <ScrollView
+          contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
+          keyboardShouldPersistTaps="handled"
+        >
+          <AuthForm
+            mode="register"
+            onAuthenticated={close}
+            onClose={close}
+            onSwitchMode={close}
+          />
+        </ScrollView>
+      </KeyboardAvoidingView>
     </DragDownDismiss>
   );
 }
@@ -51,6 +56,9 @@ const styles = StyleSheet.create({
     height: 40,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  keyboardAvoider: {
+    flex: 1,
   },
   content: {
     paddingHorizontal: 20,

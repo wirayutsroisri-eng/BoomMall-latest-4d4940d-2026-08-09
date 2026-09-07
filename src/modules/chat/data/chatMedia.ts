@@ -3,7 +3,8 @@
  * Chat API only receives the resulting URL.
  */
 
-import { File } from 'expo-file-system';
+import { File, UploadType } from 'expo-file-system';
+import { Platform } from 'react-native';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { getApiBase, useAuthStore } from '@/modules/auth/state/auth-store';
 import { type ChatSendAttachment } from './chatRealtimeApi';
@@ -150,6 +151,7 @@ export async function uploadChatMediaBytes(
   mimeType: string,
   filename: string,
 ): Promise<ChatSendAttachment> {
+  if (Platform.OS === 'android') return uploadAndroidFile(uri, mimeType, filename);
   const bytes = await readBytes(uri);
   const viaPresign = await uploadViaPresign(bytes, mimeType, filename);
   if (viaPresign) return viaPresign;
@@ -236,4 +238,39 @@ export async function prepareChatMediaList(uris: string[]) {
     out.push(await prepareChatMedia(uri));
   }
   return out;
+}
+
+/** Native streaming avoids copying the entire attachment into Android's JS heap. */
+async function uploadAndroidFile(uri: string, mimeType: string, filename: string): Promise<ChatSendAttachment> {
+  const base = getApiBase();
+  if (!base) throw new Error('CHAT_MEDIA_API_UNAVAILABLE');
+  const file = new File(uri);
+  if (!file.exists) throw new Error('MEDIA_LOCAL_FILE_MISSING');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120_000);
+  try {
+    const response = await fetch(`${base}/api/v1/chat-domain/media/presign-url`, {
+      method: 'POST', headers: jsonAuthHeaders(),
+      body: JSON.stringify({ filename, mimeType }), signal: controller.signal,
+    });
+    if (response.status === 501) {
+      const result = await file.upload(`${base}/api/v1/chat-domain/media`, {
+        httpMethod: 'POST', uploadType: UploadType.BINARY_CONTENT,
+        headers: authUploadHeaders(mimeType, filename), signal: controller.signal,
+      });
+      if (result.status < 200 || result.status >= 300) throw new Error(`CHAT_MEDIA_UPLOAD_FAILED_${result.status}`);
+      const data = JSON.parse(result.body)?.data as ChatSendAttachment | undefined;
+      if (!data?.url || !isRemoteMediaUrl(data.url)) throw new Error('CHAT_MEDIA_REMOTE_URL_INVALID');
+      return { ...data, mimeType: data.mimeType || mimeType, size: data.size ?? file.size, originalFilename: data.originalFilename || filename };
+    }
+    if (!response.ok) throw new Error(`CHAT_MEDIA_PRESIGN_FAILED_${response.status}`);
+    const data = (await response.json())?.data as PresignPayload | undefined;
+    if (!data?.uploadUrl || !data.publicUrl || !isRemoteMediaUrl(data.publicUrl)) throw new Error('CHAT_MEDIA_PRESIGN_INVALID');
+    const result = await file.upload(data.uploadUrl, {
+      httpMethod: 'PUT', uploadType: UploadType.BINARY_CONTENT,
+      headers: data.headers ?? { 'Content-Type': mimeType }, signal: controller.signal,
+    });
+    if (result.status < 200 || result.status >= 300) throw new Error(`CHAT_MEDIA_UPLOAD_FAILED_${result.status}`);
+    return { url: data.publicUrl, mimeType: data.mimeType || mimeType, size: file.size, originalFilename: data.originalFilename || filename };
+  } finally { clearTimeout(timer); }
 }

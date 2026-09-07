@@ -20,6 +20,7 @@ import {
 import { holdEscrowOnPayment } from '../finance/services/EscrowService';
 import { parseShippingJson, snapshotMergeKey, type ShippingSnapshot } from './shipping/addressMerge';
 import { commitPackedOrder, reservePaidOrder } from './inventory/StockService';
+import { rebaseCatalogMedia } from './catalogPayloadMedia';
 
 export type StockRow = {
   variantId: string;
@@ -102,8 +103,8 @@ function toBundle(row: {
     stock: Array<{ skuId: string; warehouseId: string; onHand: number; reserved: number; revision: number }>;
   }>;
 }): CatalogBundle {
-  const product = { ...asRecord(row.payloadJson), id: row.id, ownerShopId: row.merchantId };
-  const variants = row.variants.map((v) => ({ ...asRecord(v.payloadJson), id: v.id }));
+  const product = { ...rebaseCatalogMedia(row.payloadJson), id: row.id, ownerShopId: row.merchantId };
+  const variants = row.variants.map((v) => ({ ...rebaseCatalogMedia(v.payloadJson), id: v.id }));
   const stock: StockRow[] = row.variants.flatMap((v) =>
     v.stock.map((s) => ({
       variantId: v.id,

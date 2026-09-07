@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -16,6 +16,7 @@ import Animated, {
 import * as Haptics from 'expo-haptics';
 import type { VideoPlayer } from 'expo-video';
 
+import { mediaUploadMessage } from '@/modules/media/domain/mediaUploadMessage';
 import { colors } from '@/shared/theme/colors';
 import type { FeedItem } from '@/modules/feed/domain/types';
 import { DEFAULT_OVERLAY_TRANSFORM } from '@/modules/create/domain/overlay';
@@ -51,6 +52,8 @@ type Props = {
   item: FeedItem;
   height: number;
   isActive?: boolean;
+  /** false = card ไม่ได้อยู่แท็บที่โฟกัสอยู่ตอนนี้ — อย่าสร้าง video decoder ให้มัน (default true) */
+  isLaneActive?: boolean;
   onTip?: () => void;
   onComment: () => void;
   onShare?: () => void;
@@ -85,6 +88,7 @@ export function FeedReelCard({
   item,
   height,
   isActive,
+  isLaneActive = true,
   onTip,
   onComment,
   onShare,
@@ -549,6 +553,7 @@ export function FeedReelCard({
             height={Math.min(height, Math.round(screenWidth * 1.18))}
             imageLayout={mediaLayout}
             isActive={isActive}
+            isLaneActive={isLaneActive}
             isManuallyPaused={isManuallyPaused}
             onPlayerReady={(nextPlayer) => {
               if (initialPlaybackTime > 0 && nextPlayer.currentTime < 0.5) {
@@ -568,8 +573,10 @@ export function FeedReelCard({
         </FeedPinchZoomLayer>
 
         {item.publishStatus ? (
-          <View
-            pointerEvents="none"
+          <Pressable
+            disabled={item.publishStatus !== 'failed'}
+            onPress={() => Alert.alert('อัปโหลดไม่สำเร็จ', mediaUploadMessage(item.publishError))}
+            accessibilityLabel="ดูสาเหตุที่อัปโหลดไม่สำเร็จ"
             style={[styles.publishBadge, item.publishStatus === 'failed' && styles.publishBadgeFailed]}
           >
             {item.publishStatus === 'uploading' ? (
@@ -578,9 +585,9 @@ export function FeedReelCard({
               <Ionicons name="alert-circle" size={16} color="#fff" />
             )}
             <Text style={styles.publishBadgeText}>
-              {item.publishStatus === 'uploading' ? 'กำลังอัปโหลดด้านหลัง…' : 'อัปโหลดไม่สำเร็จ'}
+              {item.publishStatus === 'uploading' ? 'กำลังอัปโหลดด้านหลัง…' : 'อัปโหลดไม่สำเร็จ · ดูสาเหตุ'}
             </Text>
-          </View>
+          </Pressable>
         ) : null}
 
         {!chromeHidden ? (

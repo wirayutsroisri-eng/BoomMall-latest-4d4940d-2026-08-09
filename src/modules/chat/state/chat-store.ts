@@ -1,3 +1,5 @@
+import { realAvatar, realConversation, realMessages } from '../domain/realChatIdentity';
+import { searchFriendProfiles, type FriendProfile } from '@/modules/search/data/friendApi';
 import { create } from 'zustand';
 import {
   archiveChat as archiveChatAction,
@@ -196,9 +198,6 @@ function colorForSeed(seed: string) {
   for (let i = 0; i < seed.length; i += 1) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
   return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
 }
-function avatarUriForSeed(seed: string) {
-  return `https://i.pravatar.cc/150?u=boommall-${normalizeHandle(seed)}`;
-}
 
 function bumpConversation(
   list: Conversation[],
@@ -220,6 +219,7 @@ function mapRemoteConversation(
   row: RemoteChatConversation,
   me: string,
   myShopId: string,
+  profiles: Map<string, FriendProfile>,
 ): Conversation {
   const buyer = row.participants.find((p) => p.role === 'BUYER');
   const iAmBuyer = buyer?.userId === me;
@@ -227,10 +227,12 @@ function mapRemoteConversation(
     row.type === 'SHOP' && Boolean(row.shopId) && row.shopId === myShopId && !iAmBuyer;
   const kind: Conversation['kind'] =
     row.type === 'GROUP' ? 'group' : row.type === 'SHOP' ? 'official' : 'friend';
-  const peerName = incomingToMyShop
-    ? shortCustomerLabel(buyer?.userId)
+  const peerId = incomingToMyShop ? buyer?.userId : row.participants.find(p => p.userId !== me)?.userId;
+  const profile = peerId ? profiles.get(peerId) : undefined;
+  const peerName = row.type === 'DIRECT' ? (profile?.displayName || peerId || 'แชท') : incomingToMyShop
+    ? (profile?.displayName || shortCustomerLabel(buyer?.userId))
     : row.shopName || row.title || 'แชท';
-  const peerHandle = incomingToMyShop
+  const peerHandle = row.type === 'DIRECT' ? `@${profile?.handle || peerId || row.id}` : incomingToMyShop
     ? `@${buyer?.userId ?? 'customer'}`
     : `@${row.shopId || row.title || row.id}`;
   return {
@@ -240,12 +242,12 @@ function mapRemoteConversation(
     inboxRole: incomingToMyShop ? 'seller' : row.type === 'SHOP' ? 'buyer' : undefined,
     peerName,
     peerHandle,
+    avatarUri: row.type === 'DIRECT' || incomingToMyShop ? realAvatar(profile?.avatarUrl) : undefined,
     lastMessage: row.lastMessage?.trim() || (incomingToMyShop ? 'ลูกค้าทักแชทร้าน' : 'ทักแชทได้เลย'),
     unread: incomingToMyShop ? 1 : 0,
     isHidden: false,
     updatedAt: row.lastMessageAt ? formatRemoteStamp(row.lastMessageAt) : formatRemoteStamp(row.updatedAt),
     avatarColor: colorForSeed(peerHandle),
-    avatarUri: avatarUriForSeed(peerHandle),
     kind,
     memberCount: row.type === 'GROUP' ? row.participants.length : undefined,
   };
@@ -597,7 +599,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     const id = `c-creator-${target}`;
-    const greeting = `สวัสดีครับ/ค่า ผม/ดิฉัน ${peerName} ยินดีให้บริการครับ/ค่ะ ทักมาสอบถามสินค้า/บริการได้เลยนะครับ`;
+    const greeting = '';
     const seedMessages: ChatMessage[] = [];
     let lastMessage = greeting;
 
@@ -615,15 +617,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       lastMessage = `📎 สอบถามจาก: ${contentRef.title}`;
     }
 
-    seedMessages.push({
-      id: `m-${id}-1`,
-      conversationId: id,
-      senderId: 'peer',
-      kind: 'text',
-      text: greeting,
-      createdAt: 'ตอนนี้',
-      readAt: null,
-    });
 
     const conversation: Conversation = {
       id,
@@ -634,7 +627,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isHidden: false,
       updatedAt: 'ตอนนี้',
       avatarColor,
-      avatarUri: avatarUriForSeed(peerHandle || peerName),
       kind: 'official',
     };
     set((state) => ({
@@ -647,7 +639,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         set((state) => ({ conversations: state.conversations.map((row) => row.id === id ? { ...row, remoteId } : row) }));
       });
     } else {
-      void ensureDirectChat(remotePeerId, peerName);
+      void ensureDirectChat(remotePeerId, peerName).then(response => {
+        const remote = response?.data ?? response;
+        if (remote?.id) set(state => ({ conversations: state.conversations.map(c => c.id === id ? { ...c, remoteId: remote.id } : c) }));
+      });
     }
     return id;
   },
@@ -678,7 +673,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     const id = `c-shop-${idKey}`;
-    const greeting = `สวัสดีค่ะ ยินดีต้อนรับสู่ ${shopName} ทักสอบถามสินค้าได้เลยนะคะ`;
+    const greeting = '';
     const conversation: Conversation = {
       id,
       peerName: shopName,
@@ -688,23 +683,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isHidden: false,
       updatedAt: 'ตอนนี้',
       avatarColor: avatarColor ?? colorForSeed(shopId || shopName),
-      avatarUri: avatarUriForSeed(shopId || shopName),
       kind: 'official',
       shopId,
       inboxRole: 'buyer',
     };
-    const seed: ChatMessage = {
-      id: `m-${id}-1`,
-      conversationId: id,
-      senderId: 'peer',
-      kind: 'text',
-      text: greeting,
-      createdAt: 'ตอนนี้',
-      readAt: null,
-    };
     set((state) => ({
       conversations: [conversation, ...state.conversations],
-      messagesById: { ...state.messagesById, [id]: [seed] },
+      messagesById: { ...state.messagesById, [id]: [] },
     }));
     void ensureShopChat({
       shopId,
@@ -745,7 +730,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         isHidden: false,
         updatedAt: 'ตอนนี้',
         avatarColor: buyerAvatarColor ?? colorForSeed(buyerId),
-        avatarUri: avatarUriForSeed(buyerId),
         kind: 'official',
         shopId: snapshot.shopId,
         inboxRole: 'seller',
@@ -784,11 +768,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         peerName: shopName,
         peerHandle: snapshot.shopId.startsWith('@') ? snapshot.shopId : `@${snapshot.shopId}`,
         lastMessage: `ร้านค้าส่งข้อความเกี่ยวกับออเดอร์ #${snapshot.orderId}`,
-        unread: 1,
+        unread: 0,
         isHidden: false,
         updatedAt: 'ตอนนี้',
         avatarColor: colorForSeed(snapshot.shopId),
-        avatarUri: avatarUriForSeed(snapshot.shopId),
         kind: 'official',
         shopId: snapshot.shopId,
         inboxRole: 'buyer',
@@ -869,13 +852,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (cachedInbox.length || Object.keys(cachedThreads).length) {
       set((state) => {
         const next = [...state.conversations];
-        for (const row of cachedInbox) {
+        for (const row of cachedInbox.map(realConversation)) {
           if (!row.remoteId) continue;
           if (!next.some((c) => c.id === row.id || c.remoteId === row.remoteId)) next.push(row);
         }
         const messagesById = { ...state.messagesById };
         for (const [id, msgs] of Object.entries(cachedThreads)) {
-          messagesById[id] = mergeChatMessages(messagesById[id] ?? [], msgs);
+          messagesById[id] = mergeChatMessages(realMessages(messagesById[id] ?? []), realMessages(msgs));
         }
         return { conversations: next, messagesById };
       });
@@ -895,11 +878,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
       rows.push(row);
     }
 
+    const profiles = new Map<string, FriendProfile>();
+    const peerIds = [...new Set(rows.filter(r => r.type === 'DIRECT' || r.shopId === shopId)
+      .flatMap(r => r.participants.filter(p => p.userId !== me && p.userId !== shopId).map(p => p.userId)))];
+    // Bound requests so a large inbox does not flood the profile service.
+    for (let i = 0; i < peerIds.length; i += 4) {
+      await Promise.all(peerIds.slice(i, i + 4).map(async id => {
+        try {
+          const profile = (await searchFriendProfiles(id)).find(p => p.userId === id);
+          if (profile) profiles.set(id, profile);
+        } catch { /* Unknown profile uses a neutral avatar and the actual user ID. */ }
+      }));
+    }
+    if (useAuthStore.getState().sessionToken !== auth.sessionToken) return;
+
     set((state) => {
       const incoming: Conversation[] = [];
       const pingIds: string[] = [];
       for (const row of rows) {
-        const mapped = mapRemoteConversation(row, me, shopId);
+        const mapped = mapRemoteConversation(row, me, shopId, profiles);
         const match = findLocalMatch(state.conversations, row, me);
         if (match) {
           const preview = row.lastMessage?.trim();
@@ -910,7 +907,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ...mapped,
             id: match.id,
             remoteId: row.id,
-            lastMessage: preview || match.lastMessage,
+            lastMessage: preview || realConversation(match).lastMessage,
             unread: sellerPing ? Math.max(match.unread, 1) : match.unread,
             isPinned: match.isPinned,
             isMuted: match.isMuted,
@@ -953,7 +950,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!opts?.after) {
       const cached = await loadCachedThread(localId);
       if (cached.length) {
-        set((state) => patchThread(state, localId, cached));
+        set((state) => patchThread(state, localId, realMessages(cached)));
       }
     }
     if (!conversation?.remoteId) return;
@@ -1194,7 +1191,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isHidden: false,
       updatedAt: 'ตอนนี้',
       avatarColor: colorForSeed(name),
-      avatarUri: `https://picsum.photos/seed/boom-group-${id}/240/240`,
       kind: 'group',
       memberCount,
     };
@@ -1222,33 +1218,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (existing) return existing.id;
 
     const id = `c-friend-${Date.now()}`;
-    const greeting = `${name} ตอบรับคำขอเป็นเพื่อนแล้ว 🎉 ทักทายกันได้เลย!`;
-    const message: ChatMessage = {
-      id: `m-${id}-1`,
-      conversationId: id,
-      senderId: 'peer',
-      kind: 'text',
-      text: greeting,
-      createdAt: 'ตอนนี้',
-      readAt: null,
-    };
+    const greeting = '';
     const conversation: Conversation = {
       id,
       peerName: name,
       peerHandle: handle.startsWith('@') ? handle : `@${handle}`,
       lastMessage: greeting,
-      unread: 1,
+      unread: 0,
       isHidden: false,
       updatedAt: 'ตอนนี้',
       avatarColor: colorForSeed(name),
-      avatarUri: avatarUriForSeed(handle || name),
       kind: 'friend',
     };
     set((state) => ({
       conversations: [conversation, ...state.conversations],
-      messagesById: { ...state.messagesById, [id]: [message] },
+      messagesById: { ...state.messagesById, [id]: [] },
     }));
-    void ensureDirectChat(target, name);
+    void ensureDirectChat(target, name).then(response => {
+      const remote = response?.data ?? response;
+      if (remote?.id) set(state => ({ conversations: state.conversations.map(c => c.id === id ? { ...c, remoteId: remote.id } : c) }));
+    });
     return id;
   },
 
@@ -1264,14 +1253,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       conversations: state.conversations.map((c) =>
         c.id === conversationId || c.remoteId === conversationId ? { ...c, unread: 0 } : c,
       ),
-      messagesById: {
-        ...state.messagesById,
-        [conversationId]: (state.messagesById[conversationId] ?? []).map((m) =>
-          !isCurrentChatUser(m.senderId) && !m.readAt
-            ? { ...m, readAt: 'อ่านแล้ว' }
-            : m,
-        ),
-      },
     }));
     const remoteId = apiConversationId(conversationId, get().conversations);
     const actor = shopActorId(conversationId, get().conversations);
@@ -1280,7 +1261,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
       remoteId,
       actor,
       latestServerSequence(get().messagesById[conversationId] ?? []),
-    );
+    ).then((result) => {
+      if (!result) return;
+      set((state) => ({
+        messagesById: {
+          ...state.messagesById,
+          [conversationId]: (state.messagesById[conversationId] ?? []).map((m) =>
+            !isCurrentChatUser(m.senderId) && !m.readAt
+              ? { ...m, readAt: 'อ่านแล้ว' }
+              : m,
+          ),
+        },
+      }));
+    });
   },
 
   markAllConversationsRead: () => {

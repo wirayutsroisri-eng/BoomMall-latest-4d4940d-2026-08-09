@@ -2,7 +2,8 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
 
 /** Locked for every EAS / prebuild — do not read these from env. */
 const DISPLAY_NAME = 'BoomMall';
-const BUNDLE_IDENTIFIER = 'com.boommall.superapp';
+const BUNDLE_IDENTIFIER = 'com.boommall.social';
+const ANDROID_PACKAGE = 'com.boommall.superapp';
 
 function googleReversedClientId(clientId?: string) {
   const id = clientId?.trim();
@@ -46,6 +47,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...(googleScheme ? [{ CFBundleURLSchemes: [googleScheme] }] : []),
   ];
 
+  const androidConfig: typeof config.android = {
+    ...config.android,
+    package: ANDROID_PACKAGE,
+  };
+
   return {
     ...config,
     name: DISPLAY_NAME,
@@ -86,16 +92,23 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         ...(googleIosClientId ? { GIDClientID: googleIosClientId } : {}),
       },
     },
-    android: {
-      ...config.android,
-      package: BUNDLE_IDENTIFIER,
-    },
+    android: androidConfig,
+    plugins: [
+      ...(config.plugins ?? []),
+      'expo-font',
+      'expo-asset',
+      './plugins/withAndroidLintFix',
+      './plugins/withAndroidLargeHeap',
+      './plugins/withAndroidCleartext',
+    ],
     extra: {
       ...(typeof config.extra === 'object' && config.extra ? config.extra : {}),
       facebookAppId: facebookAppId || undefined,
       googleIosClientId: googleIosClientId || undefined,
       apiUrl: apiUrl || undefined,
       devApiHost: process.env.EXPO_PUBLIC_DEV_API_HOST?.trim() || undefined,
+      // Read by plugins/withAndroidCleartext.js to mirror the iOS ATS decision.
+      androidCleartextTraffic: !apiUrlIsHttps,
     },
   };
 };

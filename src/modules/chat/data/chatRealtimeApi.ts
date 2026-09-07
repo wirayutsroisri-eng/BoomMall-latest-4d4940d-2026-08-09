@@ -184,6 +184,15 @@ export async function sendChatMessageDurable(
     }
     await new Promise((r) => setTimeout(r, 400 * 2 ** i));
   }
+  // The POST may have succeeded even when its response was lost. Confirm the
+  // idempotency key before showing a retry action to the user.
+  try {
+    const recent = await listRemoteMessages(conversationId, { limit: 100 });
+    const persisted = recent.messages.find((message) => message.clientMsgId === clientMsgId);
+    if (persisted) return { ok: true, data: persisted };
+  } catch {
+    // Keep the original send error when recovery is unavailable.
+  }
   return { ok: false, error: lastError };
 }
 

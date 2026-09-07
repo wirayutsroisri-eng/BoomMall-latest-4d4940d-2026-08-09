@@ -12,7 +12,7 @@ web-build/
 expo-env.d.ts
 
 # ===== Native iOS =====
-ios/
+/ios/
 *.orig.*
 *.jks
 *.p8

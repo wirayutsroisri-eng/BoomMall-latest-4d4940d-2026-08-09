@@ -1,3 +1,4 @@
+import { realAvatar } from '../domain/realChatIdentity';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionSheetIOS,
@@ -137,7 +138,7 @@ export function ConversationScreen({ conversationId, backContext, noteId, orderI
   const conversation = useChatStore((s) => s.getConversation(conversationId));
   const myProfile = useLoyaltyStore((s) => s.profile);
   const myAvatarUri =
-    myProfile.avatarUri || `https://i.pravatar.cc/150?u=boommall-${myProfile.handle || 'me'}`;
+    realAvatar(myProfile.avatarUri);
   const myDisplayName = myProfile.displayName || 'ฉัน';
   const messages = useChatStore((s) => s.messagesById[conversationId] ?? EMPTY_MESSAGES);
   const pinnedOrder = useMemo(() => {

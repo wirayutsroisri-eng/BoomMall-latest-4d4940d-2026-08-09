@@ -99,6 +99,7 @@ export async function sendPushToUsers(input: {
   title: string;
   body: string;
   data?: Record<string, string>;
+  channelId?: string;
 }) {
   const tokens = await tokensForUsers(input.userIds);
   if (!tokens.length) return { sent: 0, skipped: true as const };
@@ -109,6 +110,7 @@ export async function sendPushToUsers(input: {
     body: input.body,
     data: input.data ?? {},
     sound: 'default',
+    ...(input.channelId ? { channelId: input.channelId } : {}),
   }));
 
   try {

@@ -343,6 +343,7 @@ export async function listSocialPosts(
     lane?: string;
     viewerId?: string;
     excludeIds?: string[];
+    focusQuery?: string;
   },
 ): Promise<SocialPostDto[]> {
   const take = Math.min(limit, 100);
@@ -444,6 +445,10 @@ export async function listSocialPosts(
         ...(opts?.authorIds?.length ? { authorId: { in: opts.authorIds } } : {}),
         ...(opts?.lane ? { lane: opts.lane } : {}),
         ...(opts?.excludeIds?.length ? { id: { notIn: opts.excludeIds } } : {}),
+        ...(opts?.focusQuery ? { OR: [
+          { body: { contains: opts.focusQuery, mode: 'insensitive' as const } },
+          { tagsJson: { array_contains: [opts.focusQuery] } },
+        ] } : {}),
       },
       orderBy: { createdAt: 'desc' },
       take: opts?.nearby ? Math.min(take * 4, 200) : take,
@@ -504,6 +509,7 @@ export async function listSocialPosts(
     .posts.filter((p) => (opts?.includeHidden ? true : p.status === 'ACTIVE'))
     .filter((p) => (opts?.authorIds?.length ? opts.authorIds.includes(p.authorId) : true))
     .filter((p) => (opts?.lane ? p.lane === opts.lane : true))
+    .filter((p) => !opts?.focusQuery || [p.body, ...p.tags].some((text) => text.toLowerCase().includes(opts.focusQuery!.toLowerCase())))
     .filter((p) => (opts?.excludeIds?.length ? !opts.excludeIds.includes(p.id) : true))
     .filter((p) => {
       if (!opts?.nearby || p.lat == null || p.lng == null) return !opts?.nearby;

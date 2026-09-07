@@ -21,6 +21,7 @@ type JsonParticipant = {
   role: string;
   lastReadAt?: string | null;
   lastDeliveredAt?: string | null;
+  lastReadSequence?: string | null;
 };
 
 type JsonConversation = {
@@ -94,6 +95,7 @@ function withReceipts(
     status: computeDeliveryStatus({
       senderId: msg.senderId,
       createdAt: msg.createdAt,
+      serverSequence: msg.serverSequence,
       deleted,
       participants,
     }),
@@ -210,6 +212,7 @@ async function loadParticipants(conversationId: string): Promise<JsonParticipant
       role: p.role,
       lastReadAt: p.lastReadAt?.toISOString() ?? null,
       lastDeliveredAt: p.lastDeliveredAt?.toISOString() ?? null,
+      lastReadSequence: p.lastReadSequence.toString(),
     }));
   }
   return readJson().conversations.find((c) => c.id === conversationId)?.participants ?? [];

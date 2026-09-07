@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import { DragDownDismiss } from '@/shared/components/DragDownDismiss';
 import { Avatar } from '@/shared/components/Avatar';
 import { colors } from '@/shared/theme/colors';
 import { TrustBadge } from '@/shared/components/TrustBadge';
@@ -11,28 +12,26 @@ import { useRecordSearch } from '@/modules/account/ui/useRecordSearch';
 import type { SearchResult } from '@/modules/search/domain/types';
 import { searchFriendProfiles, sendFriendRequest } from '@/modules/search/data/friendApi';
 
-function normalizeHandle(h: string) {
-  return h.trim().toLowerCase().replace(/^@/, '');
-}
-
-/**
- * Friend Onboarding & Chat Initiation — Search Bar.
- * Matches [ชื่อผู้ใช้ / ID], [ลิงก์ IG (@username)] and [เบอร์โทรศัพท์], with a QR-scan
- * shortcut and Facebook-style "send request → reveal 💬 ส่งข้อความ" add-friend flow.
- */
 export function SearchScreen() {
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
   useRecordSearch(query, 'ผู้ใช้');
   const [sendingId, setSendingId] = useState<string | null>(null);
-  const [sentIds, setSentIds] = useState<Record<string, true>>({});
+  const [sentIds, setSentIds] = useState<Record<string, 'PENDING' | 'ACCEPTED'>>({});
   const [results, setResults] = useState<SearchResult[]>([]);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const value = query.trim();
+    let active = true;
+    const value = query.trim().replace(/^@/, '');
+    setSearchError(null);
+    setResults([]);
+    setLoading(false);
     if (value.length < 3) { setResults([]); return; }
+    setLoading(true);
     const timer = setTimeout(() => {
-      void searchFriendProfiles(value).then((rows) => setResults(rows.map((row) => ({
+      void searchFriendProfiles(value).then((rows) => { if (active) setResults(rows.map((row) => ({
         id: row.userId,
         userId: row.userId,
         friendCode: row.friendCode,
@@ -43,19 +42,21 @@ export function SearchScreen() {
         avatarUrl: row.avatarUrl,
         kind: 'friend',
         trust: row.trust ?? null,
-      })))).catch(() => setResults([]));
+      }))); }).catch((e) => { if (active) setSearchError(e instanceof Error ? e.message : 'ค้นหาไม่สำเร็จ'); })
+        .finally(() => { if (active) setLoading(false); });
     }, 300);
-    return () => clearTimeout(timer);
+    return () => { active = false; clearTimeout(timer); };
   }, [query]);
 
   const submitFriendRequest = (result: SearchResult) => {
+    if (sendingId) return;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setSendingId(result.id);
-    void sendFriendRequest(result.userId ?? result.id).then(() => {
+    void sendFriendRequest(result.userId ?? result.id).then((request) => {
       setSendingId(null);
-      setSentIds((prev) => ({ ...prev, [result.id]: true }));
+      setSentIds((prev) => ({ ...prev, [result.id]: request.status === 'ACCEPTED' ? 'ACCEPTED' : 'PENDING' }));
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    }).catch(() => setSendingId(null));
+    }).catch((e) => { setSendingId(null); Alert.alert('ส่งคำขอไม่สำเร็จ', e instanceof Error ? e.message : 'กรุณาลองใหม่'); });
   };
 
   const renderItem = ({ item }: { item: SearchResult }) => {
@@ -64,6 +65,7 @@ export function SearchScreen() {
     return (
       <View style={styles.row}>
         <Avatar
+          uri={item.avatarUrl ?? undefined}
           initial={item.displayName.slice(0, 1)}
           backgroundColor={item.avatarColor}
           size={48}
@@ -77,7 +79,7 @@ export function SearchScreen() {
         </View>
 
         {sentIds[item.id] ? (
-          <View style={styles.sendingBtn}><Text style={styles.sendingBtnText}>ส่งคำขอแล้ว</Text></View>
+          <View style={styles.sendingBtn}><Text style={styles.sendingBtnText}>{sentIds[item.id] === 'ACCEPTED' ? 'เป็นเพื่อนกันแล้ว' : 'ส่งคำขอแล้ว'}</Text></View>
         ) : isSending ? (
           <View style={styles.sendingBtn}>
             <Text style={styles.sendingBtnText}>กำลังส่งคำขอ...</Text>
@@ -93,7 +95,7 @@ export function SearchScreen() {
   };
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top + 8 }]}>
+    <DragDownDismiss onDismiss={() => router.back()} style={[styles.root, { paddingTop: insets.top + 8 }]}>
       <View style={styles.searchRow}>
         <Pressable onPress={() => router.back()} hitSlop={10} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={24} color={colors.text.primary} />
@@ -103,7 +105,7 @@ export function SearchScreen() {
           <Ionicons name="search" size={17} color={colors.text.muted} />
           <TextInput
             style={styles.input}
-            placeholder="ชื่อผู้ใช้ / ID, @IG, เบอร์โทรศัพท์"
+            placeholder="ชื่อผู้ใช้ / รหัสเพื่อน / ID"
             placeholderTextColor={colors.text.muted}
             value={query}
             onChangeText={setQuery}
@@ -148,11 +150,11 @@ export function SearchScreen() {
         ListEmptyComponent={
           <View style={styles.empty}>
             <Ionicons name="search-outline" size={36} color={colors.text.muted} />
-            <Text style={styles.emptyText}>ไม่พบผู้ใช้ / ร้านค้าที่ตรงกับ “{query}”</Text>
+            <Text style={styles.emptyText}>{searchError ?? (loading ? 'กำลังค้นหา…' : query.trim().replace(/^@/, '').length < 3 ? 'พิมพ์อย่างน้อย 3 ตัวอักษรเพื่อค้นหาเพื่อน' : `ไม่พบผู้ใช้ที่ตรงกับ “${query}”`)}</Text>
           </View>
         }
       />
-    </View>
+    </DragDownDismiss>
   );
 }
 
