@@ -21,6 +21,8 @@ import { holdEscrowOnPayment } from '../finance/services/EscrowService';
 import { parseShippingJson, snapshotMergeKey, type ShippingSnapshot } from './shipping/addressMerge';
 import { commitPackedOrder, reservePaidOrder } from './inventory/StockService';
 import { rebaseCatalogMedia } from './catalogPayloadMedia';
+import { getShopsByMerchantIds } from '../shop/ShopIdentityService';
+import { cursorOrderBy, cursorWhere, paginate, type CursorDirection } from '../../lib/cursorPagination';
 
 export type StockRow = {
   variantId: string;
@@ -98,6 +100,7 @@ function availableOf(row: { onHand: number; reserved: number }) {
 function toBundle(row: {
   id: string;
   merchantId: string;
+  slug?: string | null;
   payloadJson: unknown;
   variants: Array<{
     id: string;
@@ -105,7 +108,12 @@ function toBundle(row: {
     stock: Array<{ skuId: string; warehouseId: string; onHand: number; reserved: number; revision: number }>;
   }>;
 }): CatalogBundle {
-  const product = { ...rebaseCatalogMedia(row.payloadJson), id: row.id, ownerShopId: row.merchantId };
+  const product = {
+    ...rebaseCatalogMedia(row.payloadJson),
+    id: row.id,
+    ownerShopId: row.merchantId,
+    slug: row.slug ?? null,
+  };
   const variants = row.variants.map((v) => ({ ...rebaseCatalogMedia(v.payloadJson), id: v.id }));
   const stock: StockRow[] = row.variants.flatMap((v) =>
     v.stock.map((s) => ({
@@ -117,6 +125,22 @@ function toBundle(row: {
     })),
   );
   return { product, variants, stock };
+}
+
+/**
+ * SEO slug generated once at product creation — never reassigned on update,
+ * so a previously indexed/shared URL keeps working even if the seller edits
+ * the title later. Suffixing with the (unique) id's tail makes collisions
+ * effectively impossible without needing a retry loop. Mirrors the backfill
+ * done for legacy rows in prisma/migrations/20260908120000_product_public_slug.
+ */
+function slugForNewProduct(title: string, id: string): string {
+  const base = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  const suffix = id.slice(-6);
+  return base ? `${base}-${suffix}` : `product-${suffix}`;
 }
 
 export async function upsertCatalogBundle(
@@ -159,6 +183,7 @@ export async function upsertCatalogBundle(
         merchantId,
         shopName,
         title,
+        slug: slugForNewProduct(title, id),
         masterSku: String(product.masterSku ?? id),
         channel: String(product.channel ?? 'B2C'),
         basePrice: Number(product.basePrice ?? 0) || 0,
@@ -301,6 +326,113 @@ export async function getCatalogBundle(id: string) {
     include: { variants: { include: { stock: true } } },
   });
   return row ? toBundle(row) : null;
+}
+
+export type PublicCatalogSort = 'newest' | 'price_asc' | 'price_desc';
+
+const PUBLIC_SORT_FIELD: Record<PublicCatalogSort, 'updatedAt' | 'basePrice'> = {
+  newest: 'updatedAt',
+  price_asc: 'basePrice',
+  price_desc: 'basePrice',
+};
+const PUBLIC_SORT_DIR: Record<PublicCatalogSort, CursorDirection> = {
+  newest: 'desc',
+  price_asc: 'asc',
+  price_desc: 'desc',
+};
+
+/**
+ * Cross-shop public catalog browse — powers the web storefront's listing/SEO
+ * pages. Unlike `listCatalogBundles` (used by the seller's own dashboard and
+ * the post-composer product picker), this never accepts `includeHidden` and
+ * always excludes shops whose owner has `privacyJson.privateAccount = true`
+ * (discovery surfaces must not leak private accounts; a direct link to a
+ * specific product/shop the requester already knows is a separate concern —
+ * see getPublicCatalogProduct and requirePublicShop, which intentionally
+ * keep their existing, unchanged behavior).
+ */
+export async function listPublicCatalogProducts(opts: {
+  q?: string;
+  merchantId?: string;
+  channel?: string;
+  minPrice?: number;
+  maxPrice?: number;
+  sort?: PublicCatalogSort;
+  cursor?: string;
+  limit?: number;
+}): Promise<{ items: CatalogBundle[]; nextCursor: string | null }> {
+  const limit = Math.min(Math.max(opts.limit ?? 24, 1), 60);
+  const sort = opts.sort ?? 'newest';
+  const sortField = PUBLIC_SORT_FIELD[sort];
+  const sortDir = PUBLIC_SORT_DIR[sort];
+  const q = opts.q?.trim();
+
+  let cursorClause: Record<string, unknown> | undefined;
+  if (opts.cursor) {
+    const cursorRow = await prisma.commerceProduct.findUnique({
+      where: { id: opts.cursor },
+      select: { updatedAt: true, basePrice: true },
+    });
+    if (cursorRow) {
+      const value = sortField === 'updatedAt' ? cursorRow.updatedAt : cursorRow.basePrice;
+      cursorClause = cursorWhere(sortField, { value, id: opts.cursor }, sortDir);
+    }
+  }
+
+  const where: Prisma.CommerceProductWhereInput = {
+    status: 'ACTIVE',
+    ...(opts.merchantId ? { merchantId: opts.merchantId } : {}),
+    ...(opts.channel ? { channel: opts.channel } : {}),
+    ...(opts.minPrice != null || opts.maxPrice != null
+      ? { basePrice: { gte: opts.minPrice ?? undefined, lte: opts.maxPrice ?? undefined } }
+      : {}),
+    ...(q
+      ? {
+          OR: [
+            { title: { contains: q, mode: 'insensitive' as const } },
+            { masterSku: { contains: q, mode: 'insensitive' as const } },
+            { shopName: { contains: q, mode: 'insensitive' as const } },
+          ],
+        }
+      : {}),
+    owner: { NOT: { privacyJson: { path: ['privateAccount'], equals: true } } },
+    ...(cursorClause ?? {}),
+  };
+
+  const rows = await prisma.commerceProduct.findMany({
+    where,
+    include: { variants: { include: { stock: true } } },
+    orderBy: cursorOrderBy(sortField, sortDir) as Prisma.CommerceProductOrderByWithRelationInput[],
+    take: limit + 1,
+  });
+
+  const { items, nextCursor } = paginate(rows, limit);
+  const bundles = items.map(toBundle);
+  const shopById = await getShopsByMerchantIds(bundles.map((b) => b.product.ownerShopId as string));
+  return {
+    items: bundles.map((b) => ({ ...b, shop: shopById.get(b.product.ownerShopId as string) ?? null })),
+    nextCursor,
+  };
+}
+
+/**
+ * Public single-product read by slug OR id, for the web storefront. Deliberately
+ * separate from `GET /api/v1/commerce/catalog/:id` (used by the app for both
+ * public viewing and a seller editing their own draft/hidden product) — this
+ * one always enforces `status = 'ACTIVE'` so a hidden/removed product can
+ * never be reached from a public web URL.
+ */
+export async function getPublicCatalogProduct(key: string): Promise<CatalogBundle | null> {
+  const trimmed = key?.trim();
+  if (!trimmed) return null;
+  const row = await prisma.commerceProduct.findFirst({
+    where: { status: 'ACTIVE', OR: [{ slug: trimmed }, { id: trimmed }] },
+    include: { variants: { include: { stock: true } } },
+  });
+  if (!row) return null;
+  const bundle = toBundle(row);
+  const shopById = await getShopsByMerchantIds([row.merchantId]);
+  return { ...bundle, shop: shopById.get(row.merchantId) ?? null };
 }
 
 export async function deleteCatalogProduct(id: string, ownerUserId: string) {

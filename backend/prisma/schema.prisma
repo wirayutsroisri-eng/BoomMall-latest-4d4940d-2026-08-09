@@ -245,6 +245,7 @@ model UserProfile {
   commerceProducts CommerceProduct[] @relation("CommerceProductOwner")
 
   @@index([shopId])
+  @@index([shopId, createdAt])
   @@index([handle])
   @@index([email])
 }
@@ -961,6 +962,9 @@ model CommerceProduct {
   currency    String   @default("THB")
   status      String   @default("ACTIVE")
   isPromoted  Boolean  @default(false)
+  /// SEO-friendly public identifier — set once at creation, never reassigned.
+  /// Nullable for legacy rows pre-dating this field; public reads fall back to `id`.
+  slug        String?  @unique
   payloadJson Json     @default("{}")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -973,6 +977,8 @@ model CommerceProduct {
   @@index([shopName])
   @@index([updatedAt])
   @@index([isPromoted])
+  @@index([status, basePrice])
+  @@index([status, updatedAt])
 }
 
 model CommerceSku {

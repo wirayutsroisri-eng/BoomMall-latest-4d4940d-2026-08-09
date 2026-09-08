@@ -22,6 +22,7 @@ import {
 } from './modules/ecommerce/http/promotionRoutes';
 import { feedAppRouter, feedDomainRouter } from './modules/feed/http/routes';
 import { commerceAppRouter, commerceAdminRouter } from './modules/ecommerce/http/commerceRoutes';
+import { catalogPublicRouter } from './modules/ecommerce/http/catalogPublicRoutes';
 import { financeSellerRouter, financeAdminRouter, financeWebhookRouter, sellerReportsRouter } from './modules/finance';
 import { boardAppRouter, boardAdminRouter } from './modules/board/http/routes';
 import { notifyAppRouter } from './modules/notify/http/routes';
@@ -135,6 +136,7 @@ export function createApp() {
   app.use('/api/v1/commerce', commerceAppRouter);
   app.use('/api/v1/admin/commerce', commerceAdminRouter);
   app.use('/api/v1/shops', rateLimits.general, shopPublicRouter);
+  app.use('/api/v1/catalog', rateLimits.general, catalogPublicRouter);
   app.use('/api/v1/finance/seller', financeSellerRouter);
   app.use('/api/v1/finance/admin', financeAdminRouter);
   app.use('/api/v1/finance/webhooks', financeWebhookRouter);

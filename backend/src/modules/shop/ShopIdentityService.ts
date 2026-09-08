@@ -10,6 +10,7 @@
 import { prisma } from '../../lib/prisma';
 import { currentMediaUrl } from '../media/publicMediaUrl';
 import { AppError } from '../../lib/errors';
+import { paginate } from '../../lib/cursorPagination';
 
 export type PublicShopDto = {
   /** merchantId / UserProfile.shopId */
@@ -85,6 +86,61 @@ export async function getShopsByMerchantIds(
     if (dto) shops.set(dto.id, dto);
   }
   return shops;
+}
+
+/**
+ * Public shop directory — powers the web storefront's browse/SEO pages.
+ * Excludes accounts with `privacyJson.privateAccount = true`: a directory is
+ * a discovery surface, unlike a direct lookup by a handle the requester
+ * already knows (getShopByKey / requirePublicShop, left unchanged).
+ */
+export async function listPublicShops(opts: {
+  q?: string;
+  cursor?: string;
+  limit?: number;
+}): Promise<{ items: PublicShopDto[]; nextCursor: string | null }> {
+  const limit = Math.min(Math.max(opts.limit ?? 24, 1), 60);
+  const q = opts.q?.trim();
+
+  let cursorClause: Record<string, unknown> | undefined;
+  if (opts.cursor) {
+    const cursorRow = await prisma.userProfile.findFirst({
+      where: { shopId: opts.cursor },
+      select: { userId: true, createdAt: true },
+    });
+    if (cursorRow) {
+      // Same (createdAt, id) keyset shape as cursorWhere() in lib/cursorPagination —
+      // written inline because UserProfile's primary key column is `userId`, not `id`.
+      cursorClause = {
+        OR: [
+          { createdAt: { lt: cursorRow.createdAt } },
+          { createdAt: cursorRow.createdAt, userId: { lt: cursorRow.userId } },
+        ],
+      };
+    }
+  }
+
+  const rows = await prisma.userProfile.findMany({
+    where: {
+      shopId: { not: null },
+      privacyJson: { path: ['privateAccount'], not: true },
+      ...(q
+        ? {
+            OR: [
+              { handle: { contains: q, mode: 'insensitive' as const } },
+              { displayName: { contains: q, mode: 'insensitive' as const } },
+            ],
+          }
+        : {}),
+      ...(cursorClause ?? {}),
+    },
+    select: { ...SHOP_PROFILE_SELECT, createdAt: true },
+    orderBy: [{ createdAt: 'desc' }, { userId: 'desc' }],
+    take: limit + 1,
+  });
+
+  const { items, nextCursor } = paginate(rows, limit, (row) => row.shopId ?? row.userId);
+  return { items: items.map(toPublicShop).filter((s): s is PublicShopDto => s !== null), nextCursor };
 }
 
 /**

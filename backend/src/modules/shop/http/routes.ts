@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import { AppError } from '../../../lib/errors';
-import { requirePublicShop } from '../ShopIdentityService';
+import { requirePublicShop, listPublicShops } from '../ShopIdentityService';
 import { listCatalogBundles } from '../../ecommerce/CommerceService';
 import { getShopsByMerchantIds } from '../ShopIdentityService';
 import type { CatalogBundle } from '../../ecommerce/CommerceService';
@@ -12,6 +12,26 @@ function param(req: Request, name: string) {
   const value = req.params[name];
   return Array.isArray(value) ? String(value[0] ?? '') : String(value ?? '');
 }
+
+function queryString(req: Request, name: string) {
+  const value = req.query[name];
+  return typeof value === 'string' ? value : undefined;
+}
+
+/** GET /api/v1/shops — public shop directory (cursor-paginated, excludes private accounts). */
+shopPublicRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const limitRaw = req.query.limit != null ? Number(req.query.limit) : undefined;
+    const result = await listPublicShops({
+      q: queryString(req, 'q'),
+      cursor: queryString(req, 'cursor'),
+      limit: Number.isFinite(limitRaw) ? limitRaw : undefined,
+    });
+    res.json({ ok: true, data: result });
+  } catch (e) {
+    next(e);
+  }
+});
 
 /** GET /api/v1/shops/:shopKey — public shop identity (id | slug/handle). */
 shopPublicRouter.get('/:shopKey', async (req: Request, res: Response, next: NextFunction) => {
