@@ -21,7 +21,7 @@ import { holdEscrowOnPayment } from '../finance/services/EscrowService';
 import { parseShippingJson, snapshotMergeKey, type ShippingSnapshot } from './shipping/addressMerge';
 import { commitPackedOrder, reservePaidOrder } from './inventory/StockService';
 import { rebaseCatalogMedia } from './catalogPayloadMedia';
-import { getShopsByMerchantIds } from '../shop/ShopIdentityService';
+import { getShopsByMerchantIds, getPrivateAccountUserIds } from '../shop/ShopIdentityService';
 import { cursorOrderBy, cursorWhere, paginate, type CursorDirection } from '../../lib/cursorPagination';
 
 export type StockRow = {
@@ -131,13 +131,16 @@ function toBundle(row: {
  * SEO slug generated once at product creation — never reassigned on update,
  * so a previously indexed/shared URL keeps working even if the seller edits
  * the title later. Suffixing with the (unique) id's tail makes collisions
- * effectively impossible without needing a retry loop. Mirrors the backfill
+ * effectively impossible without needing a retry loop. Thai script
+ * (U+0E00-U+0E7F) is kept as-is, not stripped to ASCII: BoomMall's catalog
+ * is predominantly Thai-titled, so ASCII-only slugs would reduce almost
+ * every product to a meaningless "product-xxxxxx". Mirrors the backfill
  * done for legacy rows in prisma/migrations/20260908120000_product_public_slug.
  */
 function slugForNewProduct(title: string, id: string): string {
   const base = title
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/[^฀-๿a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
   const suffix = id.slice(-6);
   return base ? `${base}-${suffix}` : `product-${suffix}`;
@@ -379,8 +382,11 @@ export async function listPublicCatalogProducts(opts: {
     }
   }
 
+  const privateUserIds = await getPrivateAccountUserIds();
+
   const where: Prisma.CommerceProductWhereInput = {
     status: 'ACTIVE',
+    ownerUserId: { notIn: privateUserIds },
     ...(opts.merchantId ? { merchantId: opts.merchantId } : {}),
     ...(opts.channel ? { channel: opts.channel } : {}),
     ...(opts.minPrice != null || opts.maxPrice != null
@@ -395,7 +401,6 @@ export async function listPublicCatalogProducts(opts: {
           ],
         }
       : {}),
-    owner: { NOT: { privacyJson: { path: ['privateAccount'], equals: true } } },
     ...(cursorClause ?? {}),
   };
 

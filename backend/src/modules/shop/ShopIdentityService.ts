@@ -89,6 +89,28 @@ export async function getShopsByMerchantIds(
 }
 
 /**
+ * userIds with `privacyJson.privateAccount = true`, for excluding them from
+ * discovery surfaces (public browse/sitemap — never from a direct lookup by
+ * a handle/id the requester already knows).
+ *
+ * Deliberately raw SQL, not `prisma...findMany({ where: { privacyJson: {
+ * path: ['privateAccount'], not: true } } })`: verified against a real
+ * Postgres that Prisma's JSON-path negation (`not`, and `NOT: { equals }`)
+ * excludes rows where the key is simply *absent* — Postgres's `->>'key'`
+ * extraction is NULL for a missing key, and `NULL != 'true'` is NULL, not
+ * true, in SQL's three-valued logic. Since most accounts never set
+ * `privateAccount` at all, that bug hid every non-private shop and product
+ * from browse/sitemap entirely — the opposite, and worse, than the leak it
+ * was meant to prevent.
+ */
+export async function getPrivateAccountUserIds(): Promise<string[]> {
+  const rows = await prisma.$queryRaw<{ userId: string }[]>`
+    SELECT "userId" FROM "UserProfile" WHERE "privacyJson"->>'privateAccount' = 'true'
+  `;
+  return rows.map((r) => r.userId);
+}
+
+/**
  * Public shop directory — powers the web storefront's browse/SEO pages.
  * Excludes accounts with `privacyJson.privateAccount = true`: a directory is
  * a discovery surface, unlike a direct lookup by a handle the requester
@@ -120,10 +142,12 @@ export async function listPublicShops(opts: {
     }
   }
 
+  const privateUserIds = await getPrivateAccountUserIds();
+
   const rows = await prisma.userProfile.findMany({
     where: {
       shopId: { not: null },
-      privacyJson: { path: ['privateAccount'], not: true },
+      userId: { notIn: privateUserIds },
       ...(q
         ? {
             OR: [
