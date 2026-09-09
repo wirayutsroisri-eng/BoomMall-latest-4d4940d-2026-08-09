@@ -75,7 +75,7 @@ export default function Navbar() {
             </div>
             <div className="hidden sm:flex flex-col leading-none">
               <span className="font-bold text-lg text-primary tracking-tight" style={{ fontFamily: "'Noto Serif Thai', serif" }}>
-                BoomMall
+                บูมมเก่า
               </span>
               <span className="text-[10px] text-muted-foreground font-normal tracking-wide uppercase">ตลาดสินค้ามือสอง</span>
             </div>
