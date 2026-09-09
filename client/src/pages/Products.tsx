@@ -157,7 +157,7 @@ export default function ProductsPage() {
     <div className="min-h-screen bg-background">
       <div className="container py-6">
 
-        {/* ── ตลาด BoomMall — ฟิลเตอร์จาก Alpha v39 + B2B/C2C ── */}
+        {/* ── ตลาด บูมมเก่า — ฟิลเตอร์จาก Alpha v39 + B2B/C2C ── */}
         <div className="mb-4 flex flex-wrap gap-2 items-center">
           <span className="text-xs font-bold text-muted-foreground mr-1">ตลาด:</span>
           {[

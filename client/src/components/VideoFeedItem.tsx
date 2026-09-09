@@ -156,7 +156,7 @@ export default function VideoFeedItem({
           <div className="w-8 h-8 bg-gradient-to-br from-orange-600 to-orange-500 rounded-lg flex items-center justify-center text-white font-bold text-sm">
             B
           </div>
-          <span className="font-bold text-white text-sm drop-shadow-md">BoomMall</span>
+          <span className="font-bold text-white text-sm drop-shadow-md">บูมมเก่า</span>
         </div>
         {isActive && !swipe.isOpen && Math.abs(swipe.offset) < 20 && (
           <div className="flex items-center gap-1 text-[10px] text-white/50 font-medium animate-pulse">
